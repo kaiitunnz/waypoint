@@ -13,7 +13,6 @@ interface TerminalKeyBarProps {
   onPaste: () => void;
 }
 
-// Keys that are awkward to type on a phone but routine for a TUI.
 export function TerminalKeyBar({ onSend, onPaste }: TerminalKeyBarProps) {
   return (
     <div className={styles.bar} role="toolbar" aria-label="Send keys to the pane">

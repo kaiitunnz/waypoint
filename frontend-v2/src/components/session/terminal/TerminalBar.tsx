@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useHoldRepeat } from "@waypoint/web-core/hooks/useHoldRepeat";
 import type { ScrollDirection, TerminalDims } from "@waypoint/web-core/session/terminal";
 
+import type { ReconnectAction } from "@/components/session/screenMenus";
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -13,20 +14,17 @@ import { cx } from "@/lib/cx";
 import styles from "./TerminalBar.module.css";
 
 interface TerminalBarProps {
-  // Shown for a pane that is locked until the person unlocks it.
+  // Null hides the control.
   lock: { unlocked: boolean; onToggle: () => void } | null;
-  // Shown for a pane that takes injected keys.
   onScroll: ((direction: ScrollDirection) => void) | null;
-  // An interactive pane scrolled back into its scrollback.
   onJumpToLive: (() => void) | null;
   dims: TerminalDims | null;
-  reconnect: { busy: boolean; run: () => void } | null;
+  reconnect: ReconnectAction | null;
   // Session state shown at the start of the bar, such as Focus.
   lead?: ReactNode;
   menu: ReactNode;
 }
 
-// One quiet row above the grid.
 export function TerminalBar({ lock, onScroll, onJumpToLive, dims, reconnect, lead, menu }: TerminalBarProps) {
   const hold = useHoldRepeat((direction: ScrollDirection) => onScroll?.(direction));
   return (

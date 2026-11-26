@@ -10,9 +10,6 @@ import type { TerminalAppearance } from "../session/terminal";
 import type { TerminalSink } from "../session/terminalConnection";
 
 export interface XTerminalHandle extends TerminalSink {
-  fit(): void;
-  cols(): number;
-  rows(): number;
   focus(): void;
   blur(): void;
   // Synchronous, so a focus() in the same tap lands on a writable textarea
@@ -23,15 +20,14 @@ export interface XTerminalHandle extends TerminalSink {
 
 export interface XTerminalOptions {
   readOnly?: boolean;
-  // Off for a pane whose grid the server owns (claude_tty is pinned to a
-  // fixed size and announces it): fitting would misalign the cell-positioned
-  // stream, so the host scrolls instead. Read once, at mount.
+  // Off for a pane whose grid the server owns: fitting would misalign the
+  // cell-positioned stream, so the host scrolls instead. Read once, at mount.
   autoFit?: boolean;
   fontSize?: number;
   // A CSS font-family list. Read once, at mount.
   fontFamily?: string;
+  // The connection picks the appearance through the handle.
   themeFor: (appearance: TerminalAppearance) => ITheme;
-  appearance?: TerminalAppearance;
   onData?: (data: string) => void;
   onResize?: (size: { cols: number; rows: number }) => void;
   // Fires when the view enters or leaves the scrollback.
@@ -92,7 +88,7 @@ function copyOsc52(data: string): boolean {
 // An xterm.js pane in the element `host` points at. The app owns the element
 // and its styling; the returned handle is stable.
 export function useXTerminal(host: RefObject<HTMLElement | null>, options: XTerminalOptions): XTerminalHandle {
-  const { readOnly = false, appearance = "dark", fontSize = 13 } = options;
+  const { readOnly = false, fontSize = 13 } = options;
   const term = useRef<Terminal | null>(null);
   const fitAddon = useRef<FitAddon | null>(null);
   const latest = useRef(options);
@@ -113,7 +109,7 @@ export function useXTerminal(host: RefObject<HTMLElement | null>, options: XTerm
       // reads as part of the TUI rather than the browser.
       cursorBlink: false,
       cursorStyle: "underline",
-      theme: themeFor(latest.current.appearance ?? "dark"),
+      theme: themeFor("dark"),
       scrollback: 20000,
       allowProposedApi: true,
       disableStdin: latest.current.readOnly ?? false,
@@ -183,49 +179,33 @@ export function useXTerminal(host: RefObject<HTMLElement | null>, options: XTerm
     }
   }, [fontSize]);
 
-  // xterm's DOM renderer bakes colours into painted cells, so a theme swap
-  // repaints the visible rows.
-  useEffect(() => {
-    const terminal = term.current;
-    if (!terminal) return;
-    terminal.options.theme = latest.current.themeFor(appearance);
-    terminal.refresh(0, terminal.rows - 1);
-  }, [appearance]);
-
   const [handle] = useState<XTerminalHandle>(() => ({
-      write: (data) => term.current?.write(data),
-      reset: () => term.current?.reset(),
-      fit: () => {
-        try {
-          fitAddon.current?.fit();
-        } catch {
-          // See above.
-        }
-      },
-      // A fixed grid takes the server's size. It can exceed the viewport, so
-      // the host lands on the bottom, where the live row is.
-      resize: (cols, rows) => {
-        const terminal = term.current;
-        if (!terminal || cols <= 0 || rows <= 0) return;
-        terminal.resize(cols, rows);
-        const element = host.current;
-        if (element) requestAnimationFrame(() => (element.scrollTop = element.scrollHeight));
-      },
-      cols: () => term.current?.cols ?? 80,
-      rows: () => term.current?.rows ?? 24,
-      dims: () => (term.current ? { cols: term.current.cols, rows: term.current.rows } : null),
-      focus: () => term.current?.focus(),
-      blur: () => term.current?.blur(),
-      setInputEnabled: (enabled) => {
-        if (term.current) term.current.options.disableStdin = !enabled;
-      },
-      scrollToBottom: () => term.current?.scrollToBottom(),
-      setAppearance: (next) => {
-        const terminal = term.current;
-        if (!terminal) return;
-        terminal.options.theme = latest.current.themeFor(next);
-        terminal.refresh(0, terminal.rows - 1);
-      },
+    write: (data) => term.current?.write(data),
+    reset: () => term.current?.reset(),
+    // A fixed grid takes the server's size. It can exceed the viewport, so
+    // the host lands on the bottom, where the live row is.
+    resize: (cols, rows) => {
+      const terminal = term.current;
+      if (!terminal || cols <= 0 || rows <= 0) return;
+      terminal.resize(cols, rows);
+      const element = host.current;
+      if (element) requestAnimationFrame(() => (element.scrollTop = element.scrollHeight));
+    },
+    dims: () => (term.current ? { cols: term.current.cols, rows: term.current.rows } : null),
+    focus: () => term.current?.focus(),
+    blur: () => term.current?.blur(),
+    setInputEnabled: (enabled) => {
+      if (term.current) term.current.options.disableStdin = !enabled;
+    },
+    scrollToBottom: () => term.current?.scrollToBottom(),
+    // xterm's DOM renderer bakes colours into painted cells, so a theme swap
+    // repaints the visible rows.
+    setAppearance: (next) => {
+      const terminal = term.current;
+      if (!terminal) return;
+      terminal.options.theme = latest.current.themeFor(next);
+      terminal.refresh(0, terminal.rows - 1);
+    },
   }));
   return handle;
 }

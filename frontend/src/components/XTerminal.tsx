@@ -5,7 +5,6 @@ import { forwardRef, useImperativeHandle, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
 
 import { useXTerminal, type XTerminalHandle } from "@waypoint/web-core/hooks/useXTerminal";
-import type { TerminalAppearance } from "@waypoint/web-core/session/terminal";
 
 import { terminalThemeFor } from "@/lib/terminalTheme";
 
@@ -13,20 +12,15 @@ export type { XTerminalHandle };
 
 interface XTerminalProps {
   readOnly?: boolean;
-  // When false the server owns the grid (claude_tty) and the parent applies it
-  // through ``resize()``; the host scrolls. Fixed at mount.
   autoFit?: boolean;
   onData?: (data: string) => void;
   onResize?: (size: { cols: number; rows: number }) => void;
-  // Surfaces the "jump to live" pill once the view slips into scrollback.
   onScrollChange?: (isAtBottom: boolean) => void;
-  // Dark until the connection resolves the agent's theme.
-  appearance?: TerminalAppearance;
   className?: string;
 }
 
 export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XTerminal(
-  { readOnly = false, autoFit = true, onData, onResize, onScrollChange, appearance = "dark", className },
+  { readOnly = false, autoFit = true, onData, onResize, onScrollChange, className },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -34,7 +28,6 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
     readOnly,
     autoFit,
     themeFor: terminalThemeFor,
-    appearance,
     onData,
     onResize,
     onScrollChange,

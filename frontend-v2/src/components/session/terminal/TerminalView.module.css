@@ -5,13 +5,11 @@
   flex-direction: column;
   min-height: 0;
   padding-top: calc(var(--safe-top) + var(--bar-height));
-  background: var(--ground);
 }
 
 .foot {
   flex: none;
   border-top: 1px solid var(--line);
-  background: var(--ground);
 }
 
 .col {

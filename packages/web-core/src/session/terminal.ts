@@ -1,7 +1,4 @@
-// The light/dark surface a terminal pane adopts, resolved from the running
-// agent's own TUI theme and delivered over the terminal websocket. It is
-// independent of the app theme: the pane hosts an opaque TUI, so it follows the
-// TUI's ground, not the web chrome's.
+// The pane's ground, from the running agent's TUI theme, independent of the app theme.
 export type TerminalAppearance = "light" | "dark";
 
 export interface TerminalDims {
@@ -11,7 +8,6 @@ export interface TerminalDims {
 
 export type TerminalKeyGroup = "edit" | "arrows" | "clipboard";
 
-// A key-bar entry sends literal bytes to the pane, or asks the host to paste.
 export type TerminalKey = {
   label: string;
   title: string;
@@ -21,13 +17,10 @@ export type TerminalKey = {
   backends?: readonly string[];
 } & ({ data: string } | { action: "paste" });
 
-// Control bytes that are awkward to type on touch keyboards but routine for
-// TUI agents. Ctrl combinations are encoded directly so the bar works when
-// the OS keyboard has no Ctrl modifier.
+// Ctrl combinations are raw bytes, so the bar works without a Ctrl key.
 export const TERMINAL_KEYS: readonly TerminalKey[] = [
   { label: "Esc", data: "\x1b", title: "Escape", group: "edit" },
   { label: "Tab", data: "\t", title: "Tab", group: "edit" },
-  // Claude Code and the Codex TUI cycle modes on Shift-Tab.
   { label: "⇧Tab", data: "\x1b[Z", title: "Shift-Tab (cycle modes)", group: "edit", backends: ["claude_code", "codex"] },
   { label: "Enter", data: "\r", title: "Enter (submit / select)", group: "edit" },
   // Ctrl-J: the agents' soft newline, where Enter submits.

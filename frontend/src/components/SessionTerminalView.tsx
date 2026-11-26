@@ -59,17 +59,7 @@ interface SessionTerminalViewProps {
   // session's height; the is-locked rule reserves the composer when present.
   locked: boolean;
   onTerminalInput: (data: string) => void;
-  // Resolves a ``TerminalSubmitResult`` so the composer can keep the draft
-  // and surface a retry hint when the WS is closed, stay silent when a
-  // control command reported its own error, or clear it on success. Async
-  // because Waypoint control commands (e.g. ``/new``) are handled here.
-  onTerminalSubmit: (text: string) => Promise<TerminalSubmitResult>;
-  // Attachment-bearing submits route through the HTTP input endpoint (which
-  // appends the host file path for tmux) rather than the terminal WS.
-  onTerminalSubmitWithAttachments: (
-    text: string,
-    attachmentIds: string[],
-  ) => Promise<TerminalSubmitResult>;
+  onTerminalSubmit: (text: string, attachmentIds: string[]) => Promise<TerminalSubmitResult>;
   attachmentsEnabled: boolean;
   workspacePreviewEnabled: boolean;
   onRequestPaste: () => void;
@@ -119,7 +109,6 @@ export function SessionTerminalView({
   locked,
   onTerminalInput,
   onTerminalSubmit,
-  onTerminalSubmitWithAttachments,
   attachmentsEnabled,
   workspacePreviewEnabled,
   onRequestPaste,
@@ -440,7 +429,6 @@ export function SessionTerminalView({
             ref={terminalRef}
             readOnly={!paneTypable}
             autoFit={!fixedGrid}
-            appearance={terminalAppearance}
             onData={paneTypable ? onTerminalInput : undefined}
             onResize={onTerminalResize}
             onScrollChange={interactive ? onTerminalScrollChange : undefined}
@@ -479,7 +467,6 @@ export function SessionTerminalView({
           token={token}
           sessionId={sessionId}
           onSubmit={onTerminalSubmit}
-          onSubmitWithAttachments={onTerminalSubmitWithAttachments}
           attachmentsEnabled={attachmentsEnabled}
           onError={onError}
           expanded={composeOpen}
@@ -513,7 +500,6 @@ export function TerminalKeyBar({
   onRequestPaste: () => void;
   backend: string | null | undefined;
 }) {
-  // A key that names its agents shows only on their sessions.
   const keys = TERMINAL_KEYS.filter(
     (key) => !key.backends || (backend ? key.backends.includes(backend) : false),
   );

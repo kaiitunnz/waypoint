@@ -15,8 +15,7 @@ import styles from "./TerminalStage.module.css";
 
 interface TerminalStageProps {
   termRef: RefObject<XTerminalHandle | null>;
-  // Off for a grid the server owns: it keeps its native size and the stage
-  // scrolls it. Fixed for the stage's life.
+  // Read at mount; the caller remounts the stage when it changes.
   fit: boolean;
   typable: boolean;
   appearance: TerminalAppearance;
@@ -43,8 +42,7 @@ export function TerminalStage({ termRef, fit, typable, appearance, onData, onRes
     fontSize,
     fontFamily: terminalFontFamily(),
     themeFor: terminalThemeFor,
-    appearance,
-    onData: typable ? onData : undefined,
+    onData,
     onResize,
     onScrollChange,
   });

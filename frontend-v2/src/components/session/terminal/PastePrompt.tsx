@@ -12,7 +12,6 @@ interface PastePromptProps {
   onDismiss: () => void;
 }
 
-// A browser that asks before each clipboard read holds the text for a second tap.
 export function PastePrompt({ length, onSend, onDismiss }: PastePromptProps) {
   return (
     <div className={styles.prompt} role="status">

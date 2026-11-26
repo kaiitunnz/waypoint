@@ -12,6 +12,28 @@ export interface ScreenAction extends MenuButtonItem {
   run: () => void;
 }
 
+interface ActionMenuProps {
+  label: string;
+  title: string;
+  subtitle: string;
+  items: ScreenAction[];
+  header?: ReactNode;
+}
+
+export function ActionMenu({ label, title, subtitle, items, header }: ActionMenuProps) {
+  return (
+    <MenuButton
+      label={label}
+      title={title}
+      subtitle={subtitle}
+      items={items}
+      size="sm"
+      header={header}
+      onSelect={(id) => items.find((item) => item.id === id)?.run()}
+    />
+  );
+}
+
 interface SessionMenuProps {
   session: SessionRecord;
   // The agent and model, under the title in the touch sheet.
@@ -20,34 +42,27 @@ interface SessionMenuProps {
   header?: ReactNode;
   // The screen's own actions, listed before the destructive one.
   extra?: ScreenAction[];
-  // A menu for one part of the screen lists only its own actions, under its name.
-  scope?: { label: string; title: string };
 }
 
-export function SessionMenu({ session, subtitle, onAction, header, extra = [], scope }: SessionMenuProps) {
-  const items: MenuButtonItem[] = scope
-    ? extra
-    : [
-        { id: session.pinned_at ? "unpin" : "pin", label: session.pinned_at ? "Unpin" : "Pin" },
-        { id: "rename", label: "Rename" },
-        ...extra,
-        session.status === "exited"
-          ? { id: "delete", label: "Delete", tone: "danger" }
-          : { id: "terminate", label: "Terminate", tone: "danger" },
-      ];
+export function SessionMenu({ session, subtitle, onAction, header, extra = [] }: SessionMenuProps) {
+  const act = (action: SessionAction): ScreenAction["run"] => () => onAction(action, session);
+  const pin: SessionAction = session.pinned_at ? "unpin" : "pin";
+  const end: ScreenAction =
+    session.status === "exited"
+      ? { id: "delete", label: "Delete", tone: "danger", run: act("delete") }
+      : { id: "terminate", label: "Terminate", tone: "danger", run: act("terminate") };
   return (
-    <MenuButton
-      label={scope?.label ?? `Actions for ${session.title}`}
-      title={scope?.title ?? session.title}
+    <ActionMenu
+      label={`Actions for ${session.title}`}
+      title={session.title}
       subtitle={subtitle}
-      items={items}
-      size="sm"
       header={header}
-      onSelect={(id) => {
-        const own = extra.find((item) => item.id === id);
-        if (own) own.run();
-        else onAction(id as SessionAction, session);
-      }}
+      items={[
+        { id: pin, label: session.pinned_at ? "Unpin" : "Pin", run: act(pin) },
+        { id: "rename", label: "Rename", run: act("rename") },
+        ...extra,
+        end,
+      ]}
     />
   );
 }

@@ -2,42 +2,37 @@
 
 import { useCallback, useState, type ReactNode, type Ref } from "react";
 
+import type { TerminalPane } from "@waypoint/web-core/hooks/useTerminalPane";
 import { useTerminalPaste } from "@waypoint/web-core/hooks/useTerminalPaste";
 import { wheelSequence, type ScrollDirection, type TerminalDims } from "@waypoint/web-core/session/terminal";
 
 import { useToast } from "@/components/ui/Toast";
+import type { ReconnectAction } from "@/components/session/screenMenus";
 
 import { PastePrompt } from "./PastePrompt";
 import { TerminalBar } from "./TerminalBar";
 import { TerminalKeyBar } from "./TerminalKeyBar";
 import { TerminalStage } from "./TerminalStage";
-import type { TerminalPane } from "./useTerminalPane";
 import styles from "./TerminalView.module.css";
 
 interface TerminalViewProps {
   pane: TerminalPane;
   exited: boolean;
-  // The session stopped and can be brought back.
-  reconnect: { busy: boolean; run: () => void } | null;
+  reconnect: ReconnectAction | null;
   lead?: ReactNode;
   menu: ReactNode;
   // Takes the focus back from a control that goes away.
   ref?: Ref<HTMLElement>;
 }
 
-// The Terminal view of the main pane: the term bar, the grid and the key bar.
-// The footer below it holds the docks and the composer.
 export function TerminalView({ pane, exited, reconnect, lead, menu, ref }: TerminalViewProps) {
   const { toast } = useToast();
-  const { term, connection, interactive, keyInjection, resizable, lockable, unlocked, typable, toggleLock } = pane;
+  const { term, input, resize, appearance, interactive, keyInjection, resizable, lockable, unlocked, typable, toggleLock } = pane;
   const [dims, setDims] = useState<TerminalDims | null>(null);
   const [atBottom, setAtBottom] = useState(true);
 
-  const send = connection.input;
-  const input = useCallback((data: string) => void send(data), [send]);
   const reportError = useCallback((message: string) => toast({ message, tone: "error" }), [toast]);
   const paste = useTerminalPaste(input, reportError);
-  const resize = connection.resize;
   const onResize = useCallback(
     (size: TerminalDims) => {
       setDims(size);
@@ -63,7 +58,7 @@ export function TerminalView({ pane, exited, reconnect, lead, menu, ref }: Termi
         termRef={term}
         fit={resizable}
         typable={typable}
-        appearance={connection.appearance}
+        appearance={appearance}
         onData={input}
         onResize={onResize}
         onScrollChange={setAtBottom}

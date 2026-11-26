@@ -16,8 +16,7 @@ export interface TerminalPaste {
   dismiss: () => void;
 }
 
-// The key bar's Paste. WebKit shows a system "Paste" banner for each read, so
-// there the text waits behind a second tap that shows its length.
+// The key bar's Paste.
 export function useTerminalPaste(send: (data: string) => void, onError: (message: string) => void): TerminalPaste {
   const [pending, setPending] = useState<string | null>(null);
   const [seq, setSeq] = useState(0);

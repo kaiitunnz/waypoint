@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { postAction } from "@waypoint/web-core/api";
+import { useTerminalPane } from "@waypoint/web-core/hooks/useTerminalPane";
 import { liveTerminal, hasTerminalPane, fidelityFor, supportsAttachments, useBackendCatalog } from "@waypoint/web-core/backends";
 import { useOptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
@@ -17,7 +18,7 @@ import { Composer } from "@/components/composer/Composer";
 import { FocusPill } from "@/components/composer/FocusPill";
 import { TerminalCompose } from "@/components/composer/TerminalCompose";
 import { useSessionFocus } from "@/components/composer/useSessionFocus";
-import { SessionMenu } from "@/components/sessions/SessionMenu";
+import { ActionMenu, SessionMenu } from "@/components/sessions/SessionMenu";
 import { useSessionMenuActions } from "@/components/sessions/useSessionMenuActions";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -41,7 +42,6 @@ import styles from "./SessionScreen.module.css";
 import { SideDrawer } from "./SideDrawer";
 import { SidePane } from "./SidePane";
 import { TerminalView } from "./terminal/TerminalView";
-import { useTerminalPane } from "./terminal/useTerminalPane";
 import { Transcript } from "./Transcript";
 import { useSessionPanels } from "./useSessionPanels";
 import { ViewSwitch, type SessionView } from "./ViewSwitch";
@@ -129,14 +129,22 @@ export function SessionScreen({ id }: { id: string }) {
   const activeView: SessionView = terminalOnly ? "terminal" : hasPane ? view : "chat";
   const structured = session ? fidelityFor(session.transport, catalog) === "structured" : true;
   const full = density === "full";
-  const pane = useTerminalPane({ sessionId: id, session, catalog, active: !loadFailed && activeView === "terminal" });
+  const terminal = useTerminalPane({
+    host,
+    token,
+    sessionId: id,
+    session,
+    catalog,
+    active: !loadFailed && activeView === "terminal",
+    onAuthFailure: handleAuthFailure,
+  });
   const terminalView = activeView === "terminal";
   const exited = isExitedSession(session);
   // A terminal-only transport takes its input in the pane, with a compose
   // drawer where the pane is interactive.
   const chatComposer = !loadFailed && !terminalOnly;
-  const paneComposer = !loadFailed && terminalOnly && pane.interactive;
-  const composing = chatComposer || paneComposer;
+  const drawerComposer = !loadFailed && terminalOnly && terminal.interactive;
+  const composing = chatComposer || drawerComposer;
   const canOpenFiles = composing && session !== null && supportsAttachments(session.backend, catalog);
   const openFiles = useMemo(() => (canOpenFiles ? () => setFilesOpen(true) : null), [canOpenFiles]);
   const context = useMemo(
@@ -155,7 +163,7 @@ export function SessionScreen({ id }: { id: string }) {
   const focus = useSessionFocus({ host, token, sessionId: id, session, onSession: stream.setSession });
   const dormant = composerAvailability(session, catalog).dormant;
   const reconnectAction = dormant ? { busy: reconnecting, run: () => void reconnect() } : null;
-  const resumePane = async () => {
+  const resumeTerminal = async () => {
     try {
       await postAction(host, token, id, "resume");
     } catch (failure) {
@@ -166,13 +174,13 @@ export function SessionScreen({ id }: { id: string }) {
     reconnect: reconnectAction,
     terminal: terminalView
       ? {
-          refresh: pane.connection.refresh,
-          resume: !exited && session?.status !== "running" ? () => void resumePane() : null,
+          refresh: terminal.refresh,
+          resume: !exited && session?.status !== "running" ? () => void resumeTerminal() : null,
           tools: chatComposer
             ? null
             : {
                 focus: { on: focus.on, busy: focus.busy, toggle: () => void focus.set(!focus.on) },
-                schedule: paneComposer ? () => setScheduleOpen(true) : null,
+                schedule: drawerComposer ? () => setScheduleOpen(true) : null,
                 files: openFiles,
               },
         }
@@ -187,16 +195,8 @@ export function SessionScreen({ id }: { id: string }) {
       extra={menus.session}
     />
   ) : null;
-  const terminalMenu = session ? (
-    <SessionMenu
-      session={session}
-      subtitle={agent}
-      onAction={onAction}
-      extra={menus.terminal}
-      scope={{ label: "Terminal actions", title: "Terminal" }}
-    />
-  ) : null;
-  const terminalRef = useRef<HTMLElement>(null);
+  const terminalMenu = <ActionMenu label="Terminal actions" title="Terminal" subtitle={agent} items={menus.terminal} />;
+  const terminalViewRef = useRef<HTMLElement>(null);
   const title = session?.title || "Session";
   const columns = panels.mode === "columns";
   const railColumn = columns && panels.rail.open;
@@ -213,13 +213,13 @@ export function SessionScreen({ id }: { id: string }) {
     />
   ) : terminalView ? (
     <TerminalView
-      ref={terminalRef}
-      pane={pane}
+      ref={terminalViewRef}
+      pane={terminal}
       exited={exited}
       reconnect={reconnectAction}
       lead={
         !chatComposer && focus.on ? (
-          <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={terminalRef} />
+          <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={terminalViewRef} />
         ) : null
       }
       menu={terminalMenu}
@@ -272,14 +272,14 @@ export function SessionScreen({ id }: { id: string }) {
             {body}
             <SessionFooter
               composer={
-                paneComposer ? (
+                drawerComposer ? (
                   <TerminalCompose
                     sessionId={id}
                     session={session}
                     catalog={catalog}
-                    connection={pane.connection.state}
-                    submit={pane.connection.submit}
-                    refocusPane={() => pane.term.current?.focus()}
+                    connection={terminal.state}
+                    submit={terminal.submit}
+                    refocusPane={() => terminal.term.current?.focus()}
                     dropRoot={conversationNode}
                     filesOpen={filesOpen}
                     onFilesOpenChange={setFilesOpen}

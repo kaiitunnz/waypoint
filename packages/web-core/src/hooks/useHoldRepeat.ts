@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
 
-// A tap fires once; holding past the delay repeats until release, so a resting
-// thumb scrolls fast without rate-tapping.
 const REPEAT_DELAY_MS = 320;
 const REPEAT_INTERVAL_MS = 70;
 

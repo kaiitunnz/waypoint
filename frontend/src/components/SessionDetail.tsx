@@ -51,8 +51,6 @@ import {
   supportsAttachments,
   supportsPlanApproval,
   supportsStructuredApproval,
-  terminalInteractive,
-  terminalKeyInjection,
   transportLabel,
   transportPresentation,
   useBackendCatalog,
@@ -98,7 +96,7 @@ import {
 import { isImportantEvent } from "@waypoint/web-core/session/importance";
 import { toolNamesOfRun } from "@waypoint/web-core/session/toolRun";
 import { type ScrollDirection, wheelSequence } from "@waypoint/web-core/session/terminal";
-import { useTerminalConnection } from "@waypoint/web-core/hooks/useTerminalConnection";
+import { useTerminalPane } from "@waypoint/web-core/hooks/useTerminalPane";
 import { useTerminalPaste } from "@waypoint/web-core/hooks/useTerminalPaste";
 import { formatCwdSegments } from "@waypoint/web-core/workspacePaths";
 import {
@@ -135,7 +133,6 @@ import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { FileMentions } from "@/components/FileMentions";
-import { type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
 import { AssistantMark } from "@/components/AssistantMark";
 import {
@@ -1336,21 +1333,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const canShowTerminal = session
     ? hasTerminalPane(session.transport, catalog)
     : false;
-  // Whether the user can type into the terminal pane.
-  const canTerminalInteract = session
-    ? terminalInteractive(session.transport, catalog)
-    : false;
-  // Whether the pane accepts key-bar / scroll-wheel injection (true for the
-  // fully interactive tmux pane and the claude_tty escape hatch).
-  const canInjectKeys = session
-    ? terminalKeyInjection(session.transport, catalog)
-    : false;
-  const [unlockedSessionId, setUnlockedSessionId] = useState<string | null>(null);
-  if (unlockedSessionId !== null && unlockedSessionId !== sessionId) {
-    setUnlockedSessionId(null);
-  }
-  const paneUnlocked =
-    canInjectKeys && !canTerminalInteract && unlockedSessionId === sessionId;
   const activeView: ViewMode = terminalOnly
     ? "terminal"
     : !canShowTerminal
@@ -1370,41 +1352,28 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     !taskDockDismissed;
   const canShowTasks =
     activeView === "chat" && taskProgress !== null && taskDockDismissed;
-  const terminalRef = useRef<XTerminalHandle | null>(null);
-  // Connects lazily while the terminal tab shows, and reconnects when the
-  // session comes back from exited or its tmux pane changes.
-  const terminal = useTerminalConnection({
+  const {
+    term: terminalRef,
+    interactive: canTerminalInteract,
+    keyInjection: canInjectKeys,
+    unlocked: paneUnlocked,
+    toggleLock: toggleInputUnlocked,
+    appearance: terminalAppearance,
+    input: handleTerminalInput,
+    submit: submitOverSocket,
+    resize: resizeTerminal,
+    refresh: handleTerminalRefresh,
+  } = useTerminalPane({
     host,
     token,
     sessionId,
     session,
     catalog,
     active: activeView === "terminal",
-    interactive: paneUnlocked,
-    sink: terminalRef,
     onAuthFailure: handleAuthFailure,
   });
-  const terminalAppearance = terminal.appearance;
 
-  const toggleInputUnlocked = useCallback(() => {
-    const next = !paneUnlocked;
-    setUnlockedSessionId(next ? sessionId : null);
-    const term = terminalRef.current;
-    term?.setInputEnabled(next);
-    if (next) term?.focus();
-    else term?.blur();
-  }, [paneUnlocked, sessionId]);
-
-  const sendTerminalInput = terminal.input;
-  const handleTerminalInput = useCallback((data: string) => {
-    sendTerminalInput(data);
-  }, [sendTerminalInput]);
-
-  // Whole-message submission from the quick-compose drawer. ``/new`` and
-  // ``/fork`` run as Waypoint control commands; attachment-bearing messages go
-  // over HTTP so the transport appends the host file paths.
-  const submitOverSocket = terminal.submit;
-  const submitFromDrawer = useCallback(
+  const handleTerminalSubmit = useCallback(
     async (text: string, attachmentIds: string[]): Promise<TerminalSubmitResult> => {
       try {
         const { result, openSessionId } = await submitTerminalMessage({
@@ -1421,31 +1390,24 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         return result;
       } catch (e) {
         if (isAuthError(e)) handleAuthFailure();
-        else
-          setError(
-            e instanceof Error
-              ? e.message
-              : attachmentIds.length
-                ? "failed to send input"
-                : "failed to create session",
-          );
+        else setError(e instanceof Error ? e.message : "failed to send input");
         return "command-error";
       }
     },
     [host, token, sessionId, session, catalog, submitOverSocket, router, handleAuthFailure],
   );
-  const handleTerminalSubmit = useCallback((text: string) => submitFromDrawer(text, []), [submitFromDrawer]);
-  const handleTerminalSubmitWithAttachments = submitFromDrawer;
 
-  const paste = useTerminalPaste(handleTerminalInput, setError);
-  const pendingPaste = paste.pending;
-  const pasteSeq = paste.seq;
-  const sendPendingPaste = paste.sendPending;
-  const dismissPendingPaste = paste.dismiss;
+  const {
+    pending: pendingPaste,
+    seq: pasteSeq,
+    sendPending: sendPendingPaste,
+    dismiss: dismissPendingPaste,
+    request: readPaste,
+  } = useTerminalPaste(handleTerminalInput, setError);
   const requestPaste = useCallback(() => {
     setError("");
-    void paste.request();
-  }, [paste]);
+    void readPaste();
+  }, [readPaste]);
 
   const dismissClipboardPill = useCallback(() => {
     setPendingClipboard(null);
@@ -1453,7 +1415,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   }, []);
 
   const [terminalDims, setTerminalDims] = useState<{ cols: number; rows: number } | null>(null);
-  const resizeTerminal = terminal.resize;
   const handleTerminalResize = useCallback(
     ({ cols, rows }: { cols: number; rows: number }) => {
       setTerminalDims({ cols, rows });
@@ -1461,8 +1422,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     },
     [resizeTerminal],
   );
-  // The TUI inside the pane scrolls its own view on an injected wheel report
-  // (both tmux and the claude_tty escape hatch accept it).
   const handleTerminalScrollChip = useCallback(
     (direction: ScrollDirection) => handleTerminalInput(wheelSequence(direction, terminalDims)),
     [terminalDims, handleTerminalInput],
@@ -1497,11 +1456,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   }, [termMenuOpen]);
   const handleJumpToLive = useCallback(() => {
     terminalRef.current?.scrollToBottom();
-  }, []);
+  }, [terminalRef]);
   const handleTerminalScrollChange = useCallback((atBottom: boolean) => {
     setTermAtBottom(atBottom);
   }, []);
-  const handleTerminalRefresh = terminal.refresh;
   const interruptSession = useCallback(() => runAction("interrupt"), [runAction]);
   const resumeSession = useCallback(() => {
     void runAction("resume");
@@ -2095,7 +2053,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onRateLimitRefresh={handleRateLimitRefresh}
           onTerminalInput={handleTerminalInput}
           onTerminalSubmit={handleTerminalSubmit}
-          onTerminalSubmitWithAttachments={handleTerminalSubmitWithAttachments}
           attachmentsEnabled={
             session ? supportsAttachments(session.backend, catalog) : false
           }

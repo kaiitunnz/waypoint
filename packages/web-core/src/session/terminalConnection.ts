@@ -4,7 +4,6 @@ import { terminalHello, type TerminalAppearance, type TerminalDims } from "./ter
 
 export type TerminalConnectionState = "connecting" | "open" | "reconnecting" | "exited";
 
-// The pane the stream paints into.
 export interface TerminalSink {
   reset(): void;
   write(data: string): void;

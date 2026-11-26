@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
+from waypoint.backends.approvals import approval_request_id, open_approval_requests
 from waypoint.backends.base import DefaultLaunchContract
 from waypoint.backends.capabilities import (
     BackendCapabilities,
@@ -16,9 +17,18 @@ from waypoint.backends.capabilities import (
     SlashCommandSpec,
 )
 from waypoint.backends.completions import static_slash_completions
-from waypoint.backends.opencode.adapter import OpenCodeAdapter, OpenCodeError
+from waypoint.backends.opencode.adapter import (
+    MigrationGate,
+    OpenCodeAdapter,
+    OpenCodeError,
+)
+from waypoint.backends.opencode.catalog import Model
 from waypoint.backends.opencode.health import AdapterHealth
-from waypoint.backends.opencode.normalize import historical_events_from_messages
+from waypoint.backends.opencode.normalize import (
+    APPROVAL_DECISIONS,
+    STATUS_NOTES,
+    historical_events_from_messages,
+)
 from waypoint.backends.opencode.pane import composer_ready, composer_submitted
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
@@ -30,6 +40,7 @@ from waypoint.questions import (
     QuestionLiveness,
 )
 from waypoint.schemas import (
+    AttachmentSpec,
     CommandCompletion,
     CompletionDispatch,
     EventKind,
@@ -48,8 +59,6 @@ if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
 
 log = logging.getLogger("waypoint.backends.opencode")
-
-DEFAULT_OPENCODE_MODEL = "opencode/minimax-m2.5-free"
 
 OPENCODE_PERMISSION_MODES = (
     PermissionModeSpec(
@@ -111,12 +120,34 @@ def _normalize_remote_cwd(cwd: str) -> str:
     return cwd
 
 
-def _ruleset_for_mode(mode: str | None) -> list[dict[str, str]] | None:
-    # The runtime substitutes "default" when no mode is selected; that means
-    # "let OpenCode decide" — don't send a permission key at all.
+def _ruleset_for_mode(mode: str | None) -> list[dict[str, str]]:
+    # No rules means "let OpenCode decide": its agents' own defaults apply.
     if mode not in OPENCODE_PERMISSION_ACTIONS:
-        return None
-    return [{"permission": "*", "pattern": "*", "action": mode}]
+        return []
+    return [{"action": "*", "resource": "*", "effect": mode}]
+
+
+async def _rules_for_mode(
+    adapter: OpenCodeAdapter, mode: str | None
+) -> list[dict[str, str]]:
+    # In plan mode the session holds the plan agent's own rules, which a
+    # subagent copies when it starts: the whole tree then cannot edit.
+    if mode == "plan":
+        return await adapter.agent_rules("plan")
+    return _ruleset_for_mode(mode)
+
+
+def _sorted_efforts(efforts: tuple[str, ...]) -> list[str]:
+    def key(effort: str) -> tuple[int, int | float, str]:
+        level = OPENCODE_REASONING_EFFORT_LEVELS.get(effort.lower())
+        if level is not None:
+            return (0, level, effort)
+        try:
+            return (1, float(effort), effort)
+        except ValueError:
+            return (2, 0, effort.lower())
+
+    return sorted(efforts, key=key)
 
 
 def _agent_process_env(
@@ -183,9 +214,9 @@ class OpenCodePlugin(DefaultLaunchContract):
         supports_approval_note=True,
         supports_attachments=True,
         supports_custom_cli_args=True,
-        # OpenCode's "always" reply is surfaced as "approve for session"; it
-        # has no decision distinct from that, so no acceptAlways.
-        approval_decisions=("approve", "acceptForSession", "decline"),
+        # "Approve for session" is a rule on the session. OpenCode's own
+        # "always" allows project-wide, so there is no acceptAlways.
+        approval_decisions=APPROVAL_DECISIONS,
         permission_modes=OPENCODE_PERMISSION_MODES,
         effort_levels=(),
         model_source=ModelSource.LIVE_RPC,
@@ -194,6 +225,20 @@ class OpenCodePlugin(DefaultLaunchContract):
         cli_binary="opencode",
         target_aliases=("opencode",),
     )
+
+    def launch_flags(
+        self,
+        *,
+        model: str | None = None,
+        effort: str | None = None,
+        permission_mode: str | None = None,
+    ) -> list[str]:
+        return self.required_launch_flags()
+
+    def required_launch_flags(self) -> list[str]:
+        # Without it the TUI's tools run in a shared background service, which
+        # has neither the session's launch env nor its WAYPOINT_SESSION_ID.
+        return ["--standalone"]
 
     def __init__(self) -> None:
         # Adapter key is (launch_target_id, normalized_cwd, extra_args, env).
@@ -209,6 +254,8 @@ class OpenCodePlugin(DefaultLaunchContract):
         # Sessions tracked by the reconnect loop per adapter key.
         self._reconnect_targets: dict[OpenCodeAdapterKey, set[str]] = {}
         self._lock = asyncio.Lock()
+        # One per launch target, whose servers share one OpenCode database.
+        self._migration_gates: dict[str | None, MigrationGate] = {}
         self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._shutting_down = False
 
@@ -286,27 +333,6 @@ class OpenCodePlugin(DefaultLaunchContract):
             if key[0] == launch_target_id
         ]
 
-    def _require_adapter(
-        self,
-        runtime: "SessionRuntime",
-        launch_target_id: str | None = None,
-        cwd: str | None = None,
-        custom_args: tuple[str, ...] = (),
-        launch_env: dict[str, str] | None = None,
-    ) -> OpenCodeAdapter:
-        adapter = self._adapters.get(
-            self._adapter_key(runtime, launch_target_id, cwd, custom_args, launch_env)
-        )
-        if adapter is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=(
-                    "opencode adapter for target "
-                    f"{launch_target_id} and cwd {cwd} not initialized"
-                ),
-            )
-        return adapter
-
     async def _handle_agent_changed(
         self,
         runtime: "SessionRuntime",
@@ -314,41 +340,37 @@ class OpenCodePlugin(DefaultLaunchContract):
         old_agent: str | None,
         new_agent: str | None,
     ) -> None:
-        # If OpenCode automatically switched from the plan agent back to the build agent
-        # (e.g. after the user approved the plan via a question.replied event), we must
-        # sync Waypoint's permission_mode state so the UI drops out of plan mode.
+        # A switch Waypoint did not make, out of the plan agent: leave plan mode.
         if old_agent == "plan" and new_agent != "plan":
             session = runtime.get_session(session_id)
             if session.permission_mode == "plan":
-                try:
-                    adapter = self._require_adapter(
-                        runtime,
-                        session.launch_target_id,
-                        session.cwd,
-                        custom_args=tuple(
-                            self._effective_args(
-                                runtime, session.launch_target_id, session.args
-                            )
-                        ),
-                        launch_env=_agent_process_env(
-                            runtime, self.id, session.launch_env
-                        ),
-                    )
-                    target_mode = adapter.get_pre_plan_mode(session.id) or "default"
-                except HTTPException:
-                    target_mode = "default"
+                adapter = self.existing_session_adapter(runtime, session)
+                target_mode = (
+                    adapter.get_pre_plan_mode(session.id) if adapter else None
+                ) or "default"
 
                 if target_mode == "plan":
                     target_mode = "default"
 
                 runtime.storage.update_session(session_id, permission_mode=target_mode)
+                if adapter is not None and not await adapter.set_session_permission(
+                    session.id, _ruleset_for_mode(target_mode)
+                ):
+                    await runtime._record_system_event(
+                        session_id,
+                        f"Could not apply the {target_mode} permission mode after "
+                        "leaving plan mode; set the mode again",
+                    )
                 # Drop the persisted plan-agent footprint so a later restore
                 # doesn't re-enter plan mode.
                 self._persist_transport_state(
-                    runtime, session, agent=None, pre_plan_mode=None
+                    runtime,
+                    session,
+                    agent=None,
+                    pre_plan_mode=None,
+                    pre_plan_agent=None,
                 )
 
-                # Emit system note so transcript shows that plan mode exited
                 await runtime._emit_adapter_event(
                     session_id,
                     EventKind.SYSTEM_NOTE,
@@ -426,10 +448,19 @@ class OpenCodePlugin(DefaultLaunchContract):
                 on_token_usage=(
                     token_usage_callback() if callable(token_usage_callback) else None
                 ),
+                # A launch target names its own binary (``remote_bin``).
+                binary=(
+                    runtime.settings.plugin_config(self.id).local_bin
+                    if launch_target is None
+                    else None
+                ),
                 launch_target=launch_target,
                 on_agent_changed=_on_agent_changed,
                 on_server_died=_on_server_died,
                 on_questions_changed=_on_questions_changed,
+                migration_gate=self._migration_gates.setdefault(
+                    launch_target_id, MigrationGate()
+                ),
                 workdir=key[1],
                 extra_args=custom_args,
                 launch_env=dict(key[3]),
@@ -551,17 +582,9 @@ class OpenCodePlugin(DefaultLaunchContract):
                 self._reconnect_targets.get(key, set()).discard(session_id)
                 continue
             try:
-                await adapter.restore_session(
-                    session.id,
-                    session.cwd,
-                    opencode_session_id,
-                    model=session.model,
-                    agent=session.transport_state.get("agent"),
-                    effort=session.effort,
+                status_after = await self._restore_into(
+                    runtime, adapter, session, opencode_session_id
                 )
-                pre_plan_mode = session.transport_state.get("pre_plan_mode")
-                if pre_plan_mode is not None:
-                    await adapter.set_pre_plan_mode(session.id, pre_plan_mode)
             except Exception as exc:
                 log.warning(
                     "opencode resurrect of %s failed after reconnect: %s",
@@ -570,12 +593,44 @@ class OpenCodePlugin(DefaultLaunchContract):
                 )
                 # Leave session ERROR; user can retry via /reattach.
                 continue
-            runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
             await runtime._record_system_event(
                 session.id,
                 "OpenCode connection restored",
-                status=SessionStatus.IDLE,
+                status=status_after,
             )
+            await runtime.questions.reconcile(session.id)
+
+    async def _restore_into(
+        self,
+        runtime: "SessionRuntime",
+        adapter: OpenCodeAdapter,
+        session: SessionRecord,
+        opencode_session_id: str,
+    ) -> SessionStatus:
+        """Have ``adapter`` drive ``session`` again, and record the status the
+        server's state gives it."""
+        await adapter.restore_session(
+            session.id,
+            opencode_session_id,
+            permissions=await _rules_for_mode(adapter, session.permission_mode),
+            model=session.model,
+            agent=session.transport_state.get("agent"),
+            effort=session.effort,
+            open_approvals=[
+                request_id
+                for event in open_approval_requests(
+                    runtime.storage.list_approval_events(session.id)
+                )
+                if (request_id := approval_request_id(event))
+            ],
+            open_questions=runtime.storage.open_question_tool_use_ids(session.id),
+        )
+        pre_plan_mode = session.transport_state.get("pre_plan_mode")
+        if pre_plan_mode is not None:
+            adapter.set_pre_plan_mode(session.id, pre_plan_mode)
+        current = adapter.session_status(session.id) or SessionStatus.IDLE
+        runtime.storage.update_session(session.id, status=current)
+        return current
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         from waypoint.backends.opencode.transport import OpenCodeTransport
@@ -663,11 +718,11 @@ class OpenCodePlugin(DefaultLaunchContract):
     def native_thread_artifacts(
         self, session: SessionRecord, config_dir: str | None = None
     ) -> list[Path]:
-        # No config-dir env var / account-profile support in phase 1.
+        # OpenCode has no config-dir env var.
         return []
 
     def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
-        # No config-dir env var / account-profile support in phase 1.
+        # OpenCode has no config-dir env var.
         return None
 
     def on_session_deleted(
@@ -675,7 +730,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     ) -> None:
         if self._shutting_down:
             return
-        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        adapter = self.existing_session_adapter(runtime, session)
         if adapter is not None:
             task = asyncio.create_task(adapter.terminate_session(session.id))
             self._pending_tasks.add(task)
@@ -717,43 +772,56 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def apply_permission_mode(
         self, runtime: "SessionRuntime", session: SessionRecord, mode: str
     ) -> None:
-        adapter = self._require_adapter(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
-
-        if mode == "plan":
-            pre_plan_mode = (
-                session.permission_mode
-                if session.permission_mode != "plan"
-                else session.transport_state.get("pre_plan_mode")
-            )
-            await adapter.set_pre_plan_mode(session.id, pre_plan_mode)
-            await adapter.set_agent(session.id, "plan")
-            # OpenCode's plan agent applies its own permissions natively,
-            # so we drop to default ruleset for the session
-            ruleset = _ruleset_for_mode("default") or []
-            self._persist_transport_state(
-                runtime, session, agent="plan", pre_plan_mode=pre_plan_mode
-            )
-        else:
-            await adapter.set_agent(session.id, None)
-            ruleset = _ruleset_for_mode(mode) or []
-            self._persist_transport_state(
-                runtime, session, agent=None, pre_plan_mode=None
-            )
-
-        success = await adapter.set_session_permission(session.id, ruleset)
+        adapter = self._live_adapter(runtime, session)
+        try:
+            # Before any switch, so a failed fetch changes nothing.
+            rules = await _rules_for_mode(adapter, mode)
+            if mode == "plan":
+                in_plan = session.permission_mode == "plan"
+                pre_plan_mode = (
+                    session.transport_state.get("pre_plan_mode")
+                    if in_plan
+                    else session.permission_mode
+                )
+                pre_plan_agent = (
+                    session.transport_state.get("pre_plan_agent")
+                    if in_plan
+                    else adapter.get_agent(session.id)
+                )
+                if pre_plan_agent == "plan":
+                    pre_plan_agent = None
+                adapter.set_pre_plan_mode(session.id, pre_plan_mode)
+                success = await adapter.set_agent(session.id, "plan")
+                persisted: dict[str, Any] = {
+                    "agent": "plan",
+                    "pre_plan_mode": pre_plan_mode,
+                    "pre_plan_agent": pre_plan_agent,
+                }
+            else:
+                success = True
+                if adapter.get_agent(session.id) == "plan":
+                    agent = (
+                        session.transport_state.get("pre_plan_agent")
+                        or await adapter.default_agent()
+                    )
+                    success = await adapter.set_agent(session.id, agent)
+                persisted = {
+                    "agent": None,
+                    "pre_plan_mode": None,
+                    "pre_plan_agent": None,
+                }
+        except OpenCodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        if success:
+            success = await adapter.set_session_permission(session.id, rules)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to set permission mode to {mode}",
             )
+        self._persist_transport_state(runtime, session, **persisted)
 
     def _persist_transport_state(
         self,
@@ -765,24 +833,30 @@ class OpenCodePlugin(DefaultLaunchContract):
         session.transport_state = merged
         runtime.storage.update_session(session.id, transport_state=merged)
 
+    def _live_adapter(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> OpenCodeAdapter:
+        adapter = self.existing_session_adapter(runtime, session)
+        if adapter is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="opencode is not running for this session",
+            )
+        return adapter
+
     async def apply_model(
         self,
         runtime: "SessionRuntime",
         session: SessionRecord,
         model: str | None,
     ) -> None:
-        if model is None:
-            return
-        adapter = self._require_adapter(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
-        success = await adapter.set_model(session.id, model)
+        adapter = self._live_adapter(runtime, session)
+        try:
+            success = await adapter.set_model(session.id, model, session.effort)
+        except OpenCodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -795,22 +869,19 @@ class OpenCodePlugin(DefaultLaunchContract):
         session: SessionRecord,
         effort: str | None,
     ) -> bool:
-        adapter = self._require_adapter(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
-        success = await adapter.set_effort(session.id, effort)
+        adapter = self._live_adapter(runtime, session)
+        try:
+            success = await adapter.set_effort(session.id, effort)
+        except OpenCodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to set effort to {effort}",
             )
-        # OpenCode applies effort inline on the next prompt — no restart needed.
+        # OpenCode applies effort inline — no restart needed.
         return False
 
     def effort_swap_message(self, effort: str | None) -> str:
@@ -850,54 +921,57 @@ class OpenCodePlugin(DefaultLaunchContract):
             ]
 
         last_error: Exception | None = None
-        fallback: tuple[list[dict[str, Any]], dict[str, Any]] | None = None
         for adapter in adapters:
             try:
-                providers = await adapter.list_providers()
+                models = await adapter.list_models(include_deprecated=include_hidden)
+                if not models:
+                    continue
+                providers = await adapter.provider_names()
+                default_id = await adapter.default_model_id()
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 continue
-            models = self._flatten_provider_models(
-                providers, include_hidden=include_hidden
-            )
-            if models:
-                default_model_id, default_model_label = self._select_default_model(
-                    models, providers
-                )
-                return {
-                    "backend": self.id,
-                    "models": models,
-                    "default_model_id": default_model_id,
-                    "default_model_label": default_model_label,
-                    "default_effort": None,
-                    "supports_free_text": True,
-                }
-            fallback = (models, providers)
-
-        if fallback is not None:
-            models, providers = fallback
-            default_model_id, default_model_label = self._select_default_model(
-                models, providers
-            )
-            return {
-                "backend": self.id,
-                "models": models,
-                "default_model_id": default_model_id,
-                "default_model_label": default_model_label,
-                "default_effort": None,
-                "supports_free_text": True,
-            }
+            return self._model_listing(models, providers, default_id)
 
         if last_error is not None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"failed to list opencode providers: {last_error}",
+                detail=f"failed to list opencode models: {last_error}",
             ) from last_error
+        return self._model_listing([], {}, None)
 
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="failed to list opencode providers: no adapters available",
+    def _model_listing(
+        self,
+        models: list[Model],
+        providers: dict[str, str],
+        default_id: str | None,
+    ) -> dict[str, Any]:
+        entries = sorted(
+            (
+                {
+                    "id": model.id,
+                    "label": (
+                        f"{providers.get(model.provider_id, model.provider_id)}"
+                        f" · {model.name}"
+                    ),
+                    "supported_efforts": _sorted_efforts(model.variants),
+                    "default_effort": None,
+                }
+                for model in models
+            ),
+            key=lambda entry: str(entry["id"]),
         )
+        label = next(
+            (entry["label"] for entry in entries if entry["id"] == default_id), None
+        )
+        return {
+            "backend": self.id,
+            "models": entries,
+            "default_model_id": default_id,
+            "default_model_label": label,
+            "default_effort": None,
+            "supports_free_text": True,
+        }
 
     async def list_command_completions(
         self,
@@ -910,26 +984,16 @@ class OpenCodePlugin(DefaultLaunchContract):
         if trigger != "/":
             return []
         completions = static_slash_completions(self.id, self.capabilities)
+        adapter = self.existing_session_adapter(runtime, session)
+        if adapter is None:
+            return completions
         try:
-            adapter = self._require_adapter(
-                runtime,
-                session.launch_target_id,
-                session.cwd,
-                tuple(
-                    self._effective_args(
-                        runtime, session.launch_target_id, session.args
-                    )
-                ),
-                _agent_process_env(runtime, self.id, session.launch_env),
-            )
-            commands = await adapter.list_commands(session.id)
+            commands = await adapter.list_commands()
         except Exception:
             return completions
 
         seen = {f"/{item.name}" for item in completions}
         for item in commands:
-            if not isinstance(item, dict):
-                continue
             name = item.get("name")
             if not isinstance(name, str) or not name:
                 continue
@@ -937,140 +1001,53 @@ class OpenCodePlugin(DefaultLaunchContract):
             if command in seen:
                 continue
             description = item.get("description")
-            source = item.get("source")
-            is_skill = source == "skill"
+            source = item["source"]
             completions.append(
                 CommandCompletion(
-                    id=f"{self.id}:command:{name}",
+                    id=f"{self.id}:{source}:{name}",
                     trigger="/",
                     replacement=f"{command} ",
                     name=name,
                     description=description if isinstance(description, str) else None,
-                    kind="skill" if is_skill else "command",
-                    source="opencode_skill" if is_skill else "opencode_command",
+                    kind=source,
+                    source=f"opencode_{source}",
                     dispatch=CompletionDispatch.BACKEND_COMMAND,
-                    metadata={
-                        "source": source or "command",
-                    },
+                    metadata={"source": source},
                 )
             )
             seen.add(command)
         return completions
 
-    def _flatten_provider_models(
-        self,
-        providers: dict[str, Any],
-        include_hidden: bool,
-    ) -> list[dict[str, Any]]:
-        def _sort_efforts(efforts: list[str]) -> None:
-            def _key(e: str) -> tuple[int, Any]:
-                levels = OPENCODE_REASONING_EFFORT_LEVELS
-                e_lower = e.lower()
-                if e_lower in levels:
-                    return (levels[e_lower], e)
-                base_unknown_level = len(levels)
-                try:
-                    return (base_unknown_level, float(e))
-                except ValueError:
-                    return (base_unknown_level + 1, e_lower)
-
-            efforts.sort(key=_key)
-
-        # OpenCode only resolves models from providers it has actually
-        # *connected* (env API key, stored auth, or auto-loaded). Listing
-        # the rest leads the user into picking a model that the runtime
-        # rejects with "Model not found" mid-prompt. Filter when the key
-        # is present; if it's missing entirely (older server payloads or
-        # tests), fall back to listing everything.
-        raw_connected = providers.get("connected")
-        connected: set[str] | None
-        if isinstance(raw_connected, list):
-            connected = {
-                item for item in raw_connected if isinstance(item, str) and item
-            }
-        else:
-            connected = None
-        flattened: list[dict[str, Any]] = []
-        for provider in providers.get("all", []) or []:
-            if not isinstance(provider, dict):
-                continue
-            provider_id = provider.get("id")
-            if not isinstance(provider_id, str) or not provider_id:
-                continue
-            if connected is not None and provider_id not in connected:
-                continue
-            provider_label = provider.get("name") or provider_id
-            for model_id, model in (provider.get("models") or {}).items():
-                if not isinstance(model_id, str) or not model_id:
-                    continue
-                if not isinstance(model, dict):
-                    continue
-                if not include_hidden and model.get("status") == "deprecated":
-                    continue
-                model_label = model.get("name") or model_id
-
-                supported_efforts = []
-                variants = model.get("variants")
-                if isinstance(variants, dict):
-                    supported_efforts = list(variants.keys())
-                    _sort_efforts(supported_efforts)
-
-                flattened.append(
-                    {
-                        "id": f"{provider_id}/{model_id}",
-                        "label": f"{provider_label} · {model_label}",
-                        "supported_efforts": supported_efforts,
-                        "default_effort": None,
-                    }
-                )
-        flattened.sort(key=lambda entry: entry["id"])
-        return flattened
-
-    def _select_default_model(
-        self,
-        models: list[dict[str, Any]],
-        providers: dict[str, Any],
-    ) -> tuple[str, str | None]:
-        available = {entry["id"] for entry in models}
-        default_id: str | None = None
-        if DEFAULT_OPENCODE_MODEL in available:
-            default_id = DEFAULT_OPENCODE_MODEL
-        else:
-            defaults = providers.get("default") or {}
-            if isinstance(defaults, dict):
-                for provider_id, model_id in defaults.items():
-                    if isinstance(provider_id, str) and isinstance(model_id, str):
-                        candidate = f"{provider_id}/{model_id}"
-                        if candidate in available:
-                            default_id = candidate
-                            break
-            if default_id is None and models:
-                default_id = models[0]["id"]
-        if default_id is None:
-            default_id = DEFAULT_OPENCODE_MODEL
-
-        for model in models:
-            if model["id"] == default_id:
-                return default_id, model["label"]
-        return default_id, None
-
-    async def _execute_command_input(
+    async def _invoke(
         self,
         runtime: "SessionRuntime",
         session: SessionRecord,
         adapter: OpenCodeAdapter,
+        request: SessionInputRequest,
         *,
-        text: str,
-        command: str,
+        name: str,
         arguments: str,
-        submit: bool,
+        skill: bool,
     ) -> SessionRecord:
+        """Run a slash command, or a prompt carrying a skill. Both bypass the
+        runtime's input path, so the attachments are recorded here."""
+        attachments = runtime.resolve_attachments(session.id, request.attachments)
+        specs: list[AttachmentSpec] = [item.spec for item in attachments]
         updated = runtime.storage.update_session(
             session.id, status=SessionStatus.RUNNING
         )
-        await runtime._record_user_event(session.id, text, submit=submit)
+        await runtime._record_user_event(
+            session.id, request.text, submit=request.submit, attachments=specs
+        )
+        if specs:
+            runtime.attachments.mark_sent(session.id, [spec.id for spec in specs])
         try:
-            await adapter.execute_command(session.id, command, arguments)
+            if skill:
+                await adapter.send_input(
+                    session.id, request.text, attachments, skills=[name]
+                )
+            else:
+                await adapter.execute_command(session.id, name, arguments, attachments)
         except OpenCodeError as exc:
             runtime.storage.restore_status(session)
             raise HTTPException(
@@ -1108,15 +1085,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             )
             return runtime.get_session(session.id)
 
-        adapter = self._require_adapter(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        adapter = self._live_adapter(runtime, session)
 
         if command == "compact":
             await runtime._record_user_event(session.id, text, submit=request.submit)
@@ -1129,6 +1098,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             try:
                 await adapter.compact_session(session.id)
             except OpenCodeError as exc:
+                runtime.storage.restore_status(session)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=str(exc),
@@ -1140,29 +1110,32 @@ class OpenCodePlugin(DefaultLaunchContract):
             invocation is not None
             and invocation.dispatch == CompletionDispatch.BACKEND_COMMAND
         ):
-            return await self._execute_command_input(
+            return await self._invoke(
                 runtime,
                 session,
                 adapter,
-                text=text,
-                command=invocation.name,
+                request,
+                name=invocation.name,
                 arguments=invocation.arguments,
-                submit=request.submit,
+                skill=invocation.metadata.get("source") == "skill",
             )
 
         if command not in {"new", "fork"}:
-            cached_command = _cached_opencode_command_completion(
-                runtime, session.id, command
+            cached = runtime.cached_command_completion(
+                session.id, trigger="/", name=command
             )
-            if cached_command is not None:
-                return await self._execute_command_input(
+            if (
+                cached is not None
+                and cached.dispatch == CompletionDispatch.BACKEND_COMMAND
+            ):
+                return await self._invoke(
                     runtime,
                     session,
                     adapter,
-                    text=text,
-                    command=cached_command.name,
+                    request,
+                    name=cached.name,
                     arguments=arguments,
-                    submit=request.submit,
+                    skill=cached.metadata.get("source") == "skill",
                 )
 
         return None
@@ -1202,36 +1175,25 @@ class OpenCodePlugin(DefaultLaunchContract):
         tool_use_id: str | None,
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
-        adapter = self._require_adapter(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        adapter = self._live_adapter(runtime, session)
         request_id = tool_use_id or adapter.current_question_id(session.id)
         if not request_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="no pending question to answer",
             )
-        structured_answers = self._serialize_question_answers(answer, answers)
         with runtime.questions.operation(session.id, request_id):
             success = await adapter.answer_question(
-                session.id,
-                request_id,
-                structured_answers,
+                session.id, request_id, answer, answers
             )
             if not success:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="failed to answer question",
                 )
-            updated = runtime.storage.update_session(
-                session.id, status=SessionStatus.RUNNING
-            )
+            # The turn may already be over by the time the reply returns.
+            after = adapter.session_status(session.id) or SessionStatus.RUNNING
+            updated = runtime.storage.update_session(session.id, status=after)
             metadata: dict[str, Any] = {"kind": ASK_QUESTION_ANSWER}
             if answers:
                 metadata["answers"] = answers
@@ -1240,6 +1202,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                 session.id,
                 answer,
                 submit=True,
+                status=after,
                 extra_metadata=metadata,
             )
         return updated
@@ -1250,7 +1213,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         session: SessionRecord,
         tool_use_ids: list[str],
     ) -> dict[str, QuestionLiveness]:
-        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        adapter = self.existing_session_adapter(runtime, session)
         if adapter is None:
             return dict.fromkeys(tool_use_ids, QuestionLiveness.UNAVAILABLE)
         return adapter.question_liveness(session.id, tool_use_ids)
@@ -1258,15 +1221,10 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def decline_question(
         self, runtime: "SessionRuntime", session: SessionRecord, tool_use_id: str
     ) -> QuestionDecline:
-        adapter = self._adapters.get(self._session_adapter_key(runtime, session))
+        adapter = self.existing_session_adapter(runtime, session)
         if adapter is None:
             return QuestionDecline.FAILED
-        outcome = await adapter.reject_question(session.id, tool_use_id)
-        if outcome == "missing":
-            return QuestionDecline.MISSING
-        if outcome == "error":
-            return QuestionDecline.FAILED
-        return QuestionDecline.TURN_RESUMES
+        return await adapter.reject_question(session.id, tool_use_id)
 
     def _session_adapter_key(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -1280,6 +1238,24 @@ class OpenCodePlugin(DefaultLaunchContract):
             ),
             _agent_process_env(runtime, self.id, session.launch_env),
         )
+
+    async def session_adapter(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> OpenCodeAdapter:
+        """The adapter serving ``session``, created if there is none."""
+        launch_target_id, _, args, env = self._session_adapter_key(runtime, session)
+        return await self._get_or_create_adapter(
+            runtime,
+            launch_target_id,
+            session.cwd,
+            custom_args=args,
+            launch_env=dict(env),
+        )
+
+    def existing_session_adapter(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> OpenCodeAdapter | None:
+        return self._adapters.get(self._session_adapter_key(runtime, session))
 
     async def approve_plan(
         self,
@@ -1297,24 +1273,26 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def post_approval(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        pass
+        # The runtime writes a status after the reply returns, which can be
+        # after the stream reported the turn over: a rejection ends it at once.
+        adapter = self.existing_session_adapter(runtime, session)
+        if adapter is None:
+            return
+        actual = adapter.session_status(session.id)
+        if actual is None or actual == runtime.get_session(session.id).status:
+            return
+        await runtime._record_system_event(
+            session.id,
+            STATUS_NOTES.get(actual, STATUS_NOTES[SessionStatus.RUNNING]),
+            status=actual,
+        )
 
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
         key = self._session_adapter_key(runtime, session)
         try:
-            adapter = await self._get_or_create_adapter(
-                runtime,
-                session.launch_target_id,
-                session.cwd,
-                custom_args=tuple(
-                    self._effective_args(
-                        runtime, session.launch_target_id, session.args
-                    )
-                ),
-                launch_env=_agent_process_env(runtime, self.id, session.launch_env),
-            )
+            adapter = await self.session_adapter(runtime, session)
         except Exception as exc:
             self._health_for(key).record_failure()
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -1334,17 +1312,9 @@ class OpenCodePlugin(DefaultLaunchContract):
             )
             return
         try:
-            await adapter.restore_session(
-                session.id,
-                session.cwd,
-                opencode_session_id,
-                model=session.model,
-                agent=session.transport_state.get("agent"),
-                effort=session.effort,
+            after = await self._restore_into(
+                runtime, adapter, session, opencode_session_id
             )
-            pre_plan_mode = session.transport_state.get("pre_plan_mode")
-            if pre_plan_mode is not None:
-                await adapter.set_pre_plan_mode(session.id, pre_plan_mode)
         except Exception as exc:
             self._health_for(key).record_failure()
             log.exception("opencode restore failed", extra={"session_id": session.id})
@@ -1356,11 +1326,10 @@ class OpenCodePlugin(DefaultLaunchContract):
             )
             return
         self._health_for(key).record_success()
-        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
         await runtime._record_system_event(
             session.id,
             "OpenCode session restored from previous backend process",
-            status=SessionStatus.IDLE,
+            status=after,
         )
         await runtime.questions.reconcile(session.id)
 
@@ -1373,24 +1342,9 @@ class OpenCodePlugin(DefaultLaunchContract):
         raw_log: Path,
         structured_log: Path,
     ) -> SessionRecord:
-        effective_args = tuple(
-            self._effective_args(runtime, session.launch_target_id, session.args)
-        )
-        key = self._adapter_key(
-            runtime,
-            session.launch_target_id,
-            session.cwd,
-            effective_args,
-            _agent_process_env(runtime, self.id, session.launch_env),
-        )
+        key = self._session_adapter_key(runtime, session)
         try:
-            adapter = await self._get_or_create_adapter(
-                runtime,
-                session.launch_target_id,
-                session.cwd,
-                custom_args=effective_args,
-                launch_env=_agent_process_env(runtime, self.id, session.launch_env),
-            )
+            adapter = await self.session_adapter(runtime, session)
         except Exception as exc:
             self._health_for(key).record_failure()
             raise HTTPException(
@@ -1409,15 +1363,12 @@ class OpenCodePlugin(DefaultLaunchContract):
         try:
             new_opencode_session_id = await adapter.fork_session(
                 new_session_id,
-                session.cwd,
                 opencode_session_id,
-                model=session.model,
-                agent=agent,
-                effort=session.effort,
+                await _rules_for_mode(adapter, session.permission_mode),
             )
             pre_plan_mode = session.transport_state.get("pre_plan_mode")
             if pre_plan_mode is not None:
-                await adapter.set_pre_plan_mode(new_session_id, pre_plan_mode)
+                adapter.set_pre_plan_mode(new_session_id, pre_plan_mode)
         except Exception as exc:
             self._health_for(key).record_failure()
             log.exception("opencode fork failed", extra={"session_id": session.id})
@@ -1436,6 +1387,8 @@ class OpenCodePlugin(DefaultLaunchContract):
             forked_transport_state["agent"] = agent
         if pre_plan_mode is not None:
             forked_transport_state["pre_plan_mode"] = pre_plan_mode
+        if pre_plan_agent := session.transport_state.get("pre_plan_agent"):
+            forked_transport_state["pre_plan_agent"] = pre_plan_agent
         new_session = SessionRecord(
             id=new_session_id,
             backend=self.id,
@@ -1492,18 +1445,22 @@ class OpenCodePlugin(DefaultLaunchContract):
         }
         result = []
         seen: set[str] = set()
+        failure: Exception | None = None
+        listed = False
         for adapter in adapters:
             # One bad adapter (e.g. an ERROR session restored at boot whose
             # persisted cwd no longer resolves) must not take down thread
             # discovery for the rest. Skip and log.
             try:
                 sessions = await adapter.list_sessions()
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
                 log.exception(
                     "opencode list_sessions failed for adapter; skipping",
-                    extra={"workdir": adapter._workdir},
+                    extra={"workdir": adapter.workdir},
                 )
+                failure = exc
                 continue
+            listed = True
             for sess in sessions:
                 sess_id = sess.get("id")
                 if not sess_id or sess_id in seen:
@@ -1515,12 +1472,17 @@ class OpenCodePlugin(DefaultLaunchContract):
                 result.append(
                     OpenCodeThreadSummary(
                         id=sess_id,
-                        title=sess.get("title", "Untitled"),
-                        directory=sess.get("directory"),
+                        title=sess.get("title") or "Untitled",
+                        directory=(sess.get("location") or {}).get("directory"),
                         created_at=time_data.get("created"),
                         updated_at=time_data.get("updated"),
                     )
                 )
+        if failure is not None and not listed:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"failed to list opencode threads: {failure}",
+            ) from failure
         result.sort(
             key=lambda thread: (
                 thread.updated_at if thread.updated_at is not None else -1,
@@ -1541,12 +1503,8 @@ class OpenCodePlugin(DefaultLaunchContract):
         await self._reject_account_profile(
             runtime, launch_target_id, account_profile_id
         )
-        # OpenCode keeps sessions in its server's own store, so deletion is a
-        # `DELETE /session/{id}` against that server (the adapter routes it
-        # locally or over SSH) rather than a transcript unlink. A launch target
-        # can have several adapters — distinct cwds / custom args, each its own
-        # server — and the thread lives on exactly one, so try each and report
-        # success on the first that removes it.
+        # A launch target can have several servers (distinct cwds, args or
+        # env), and the thread lives on exactly one: try each.
         adapters = self._adapters_for_launch_target(launch_target_id)
         if not adapters:
             adapters = [
@@ -1595,8 +1553,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         # Fetch through any live adapter for this target first. The OpenCode
         # session already exists on that server with whatever directory it was
         # created in; after fetching metadata we cache the driving adapter
-        # under the actual session cwd so later _require_adapter(...,
-        # session.cwd) lookups find it.
+        # under the actual session cwd, where session lookups find it.
         fetch_adapter = self._find_adapter_for_launch_target(launch_target_id)
         if fetch_adapter is None:
             fetch_adapter = await self._get_or_create_adapter(
@@ -1605,20 +1562,22 @@ class OpenCodePlugin(DefaultLaunchContract):
                 requested_cwd,
                 launch_env=process_env,
             )
-        sess = await fetch_adapter.get_session(opencode_session_id)
+        try:
+            sess = await fetch_adapter.get_session(opencode_session_id)
+        except OpenCodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
         if not sess:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="session not found in OpenCode",
             )
-        raw_directory = sess.get("directory")
+        raw_directory = (sess.get("location") or {}).get("directory")
         cwd = (
             raw_directory
             if isinstance(raw_directory, str) and raw_directory
             else (requested_cwd or ".")
-        )
-        adapter = await self._get_or_create_adapter(
-            runtime, launch_target_id, cwd, launch_env=process_env
         )
         session_id = runtime._generate_session_id(self.id)
         session_dir = runtime._session_dir(session_id)
@@ -1631,7 +1590,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             backend=backend,
             source=SessionSource.MANAGED,
             transport=self.transport_id,
-            title=sess.get("title", "Imported session"),
+            title=sess.get("title") or "Imported session",
             cwd=cwd,
             launch_target_id=launch_target_id,
             repo_name=None,
@@ -1646,12 +1605,13 @@ class OpenCodePlugin(DefaultLaunchContract):
             permission_mode="ask",
             launch_env=request_launch_env,
         )
+        # Keyed as every later lookup of the session is, configured CLI args
+        # included.
+        adapter = await self.session_adapter(runtime, session)
         runtime.storage.create_session(session)
         try:
-            await adapter.restore_session(
-                session.id,
-                cwd,
-                opencode_session_id,
+            after = await self._restore_into(
+                runtime, adapter, session, opencode_session_id
             )
         except Exception as exc:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -1681,11 +1641,11 @@ class OpenCodePlugin(DefaultLaunchContract):
             reader=read_history,
             enabled=request.import_history,
         )
-        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+        runtime.storage.update_session(session.id, status=after)
         await runtime._record_system_event(
             session.id,
             f"Imported OpenCode session ({opencode_session_id})",
-            status=SessionStatus.IDLE,
+            status=after,
         )
         return runtime.get_session(session.id)
 
@@ -1755,19 +1715,15 @@ class OpenCodePlugin(DefaultLaunchContract):
         runtime.storage.create_session(session)
 
         agent = "plan" if permission_mode == "plan" else None
-        mapped_permission = _ruleset_for_mode(
-            "default" if permission_mode == "plan" else permission_mode
-        )
 
         try:
             opencode_session_id = await adapter.start_session(
                 session_id,
-                request.cwd,
                 model=resolved_model,
                 effort=resolved_effort,
                 agent=agent,
                 title=title,
-                permission=mapped_permission,
+                permissions=await _rules_for_mode(adapter, permission_mode),
             )
             session.transport_state = {"opencode_session_id": opencode_session_id}
             if agent is not None:
@@ -1784,31 +1740,15 @@ class OpenCodePlugin(DefaultLaunchContract):
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
         # The adapter already emits "OpenCode session started ({session_id})"
         # with the remote id; re-recording here would duplicate the note.
+        model, effort = adapter.selected_model(session_id)
+        if resolved_effort not in (None, "default", effort):
+            runtime.storage.update_session(session.id, effort=None)
+            await runtime._record_system_event(
+                session.id,
+                f"{model or 'The default model'} has no reasoning effort "
+                f"{resolved_effort!r}; running without one",
+            )
         return runtime.get_session(session.id)
-
-    def _serialize_question_answers(
-        self,
-        answer: str,
-        answers: list[dict[str, Any]] | None,
-    ) -> list[list[str]]:
-        if not answers:
-            return [[answer]]
-
-        structured: list[list[str]] = []
-        for entry in answers:
-            selected: list[str] = []
-            answer_value = entry.get("answer")
-            if isinstance(answer_value, str) and answer_value.strip():
-                selected.extend(
-                    item.strip() for item in answer_value.split(",") if item.strip()
-                )
-            notes = entry.get("notes")
-            if isinstance(notes, str) and notes.strip():
-                selected.append(notes.strip())
-            if selected:
-                structured.append(selected)
-
-        return structured or [[answer]]
 
 
 def _format_opencode_status(session: SessionRecord) -> str:
@@ -1836,21 +1776,6 @@ def _format_opencode_status(session: SessionRecord) -> str:
     if isinstance(opencode_session_id, str) and opencode_session_id:
         lines.append(f"- Thread: {opencode_session_id}")
     return "\n".join(lines)
-
-
-def _cached_opencode_command_completion(
-    runtime: "SessionRuntime", session_id: str, command: str
-) -> CommandCompletion | None:
-    completion = runtime.cached_command_completion(
-        session_id, trigger="/", name=command
-    )
-    if (
-        completion is not None
-        and completion.dispatch == CompletionDispatch.BACKEND_COMMAND
-        and completion.metadata.get("source") != "skill"
-    ):
-        return completion
-    return None
 
 
 def build_plugin() -> OpenCodePlugin:

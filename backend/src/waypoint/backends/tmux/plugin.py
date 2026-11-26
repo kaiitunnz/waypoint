@@ -478,6 +478,11 @@ class TmuxPlugin:
                 ),
                 *session.args,
             ]
+        else:
+            stored_args = [
+                *(f for f in inner.required_launch_flags() if f not in stored_args),
+                *stored_args,
+            ]
         # A captured thread_id is only useful if the inner CLI has
         # actually persisted the conversation to disk. ``claude
         # --session-id <uuid>`` doesn't create the session file until

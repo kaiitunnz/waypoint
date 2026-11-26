@@ -9,7 +9,10 @@ from waypoint.backends.opencode.client import (
     RemoteOpenCodeClient,
     _split_curl_status,
 )
+from waypoint.backends.opencode.server_auth import ServerAuth
 from waypoint.launch_targets import SshLaunchTargetConfig
+
+AUTH = ServerAuth("test-password")
 
 
 class _FakeStream:
@@ -30,8 +33,17 @@ class _FakeStream:
         return self._chunks.pop(0)
 
 
+class _FakeStdin:
+    def write(self, _data: bytes) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
 class _FakeProcess:
     def __init__(self) -> None:
+        self.stdin = _FakeStdin()
         self.stdout = _FakeStream([b'data: {"ok": true}\n', b"\n"])
         self.stderr = _FakeStream([])
         self.returncode: int | None = 0
@@ -75,7 +87,7 @@ async def test_stream_events_clean_exit_does_not_raise(
     target = SshLaunchTargetConfig(
         id="ssh-1", name="Remote", ssh_destination="user@example.com"
     )
-    client = RemoteOpenCodeClient(target, 4096)
+    client = RemoteOpenCodeClient(target, 4096, AUTH)
 
     events: list[str] = []
     async for line in client.stream_events("/event"):
@@ -124,7 +136,7 @@ async def test_remote_client_raises_on_http_error(
     target = SshLaunchTargetConfig(
         id="ssh-1", name="Remote", ssh_destination="user@example.com"
     )
-    client = RemoteOpenCodeClient(target, 4096)
+    client = RemoteOpenCodeClient(target, 4096, AUTH)
 
     with pytest.raises(OpenCodeHttpError) as excinfo:
         await client.get("/session/missing")
@@ -149,7 +161,7 @@ async def test_stream_events_raises_on_nonzero_exit(
     target = SshLaunchTargetConfig(
         id="ssh-1", name="Remote", ssh_destination="user@example.com"
     )
-    client = RemoteOpenCodeClient(target, 4096)
+    client = RemoteOpenCodeClient(target, 4096, AUTH)
 
     with pytest.raises(RuntimeError, match="sse stream ended with code 1"):
         async for _ in client.stream_events("/event"):
@@ -177,7 +189,7 @@ async def test_remote_client_delete_issues_delete_and_parses_boolean(
     target = SshLaunchTargetConfig(
         id="ssh-1", name="Remote", ssh_destination="user@example.com"
     )
-    client = RemoteOpenCodeClient(target, 4096)
+    client = RemoteOpenCodeClient(target, 4096, AUTH)
 
     assert await client.delete("/session/ses_1") is True
     flat = " ".join(str(arg) for arg in captured[0])
@@ -197,7 +209,7 @@ async def test_remote_web_ui_answer_is_not_json(
     target = SshLaunchTargetConfig(
         id="ssh-1", name="Remote", ssh_destination="user@example.com"
     )
-    client = RemoteOpenCodeClient(target, 4096)
+    client = RemoteOpenCodeClient(target, 4096, AUTH)
 
     with pytest.raises(OpenCodeNonJsonError, match="HTTP 200 instead of JSON"):
         await client.get("/config")
@@ -221,7 +233,7 @@ async def test_cancelled_remote_request_kills_its_process(
     target = SshLaunchTargetConfig(
         id="ssh-1", name="Remote", ssh_destination="user@example.com"
     )
-    client = RemoteOpenCodeClient(target, 4096)
+    client = RemoteOpenCodeClient(target, 4096, AUTH)
 
     request = asyncio.create_task(client.get("/config"))
     await asyncio.wait_for(started.wait(), timeout=5)

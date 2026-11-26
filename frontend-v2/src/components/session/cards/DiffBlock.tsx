@@ -7,7 +7,7 @@ import { DIFF_MARKER, type DiffLine } from "@waypoint/web-core/highlight";
 import { useHighlightedDiff } from "@waypoint/web-core/hooks/useHighlighted";
 import { compactDiff, fullDiff } from "@waypoint/web-core/session/diffCompact";
 import { displayChangeType, diffFilePathLabel } from "@waypoint/web-core/session/diffPreview";
-import { splitPath } from "@waypoint/web-core/workspacePaths";
+import { relativeToCwd, splitPath } from "@waypoint/web-core/workspacePaths";
 
 import { cx } from "@/lib/cx";
 
@@ -56,20 +56,22 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
   const change = displayChangeType(file);
   const { cwd } = useSessionContext();
   const shown = diffFilePathLabel(file, cwd);
-  const moved = Boolean(file.oldPath) && file.oldPath !== file.path;
-  const split = splitPath(shown);
+  const from = file.oldPath && file.oldPath !== file.path ? file.oldPath : null;
+  const label = (path: string) => <PathLabel {...splitPath(relativeToCwd(path, cwd))} full={path} className={styles.path} />;
 
   return (
     <div className={styles.file}>
       {showHeader ? (
         <div className={styles.head}>
           <span className={styles.change}>{change.label}</span>
-          {moved ? (
-            <span className={styles.path} title={diffFilePathLabel(file)}>
-              {shown}
+          {from ? (
+            <span className={styles.moved}>
+              {label(from)}
+              <span aria-label="renamed to">→</span>
+              {label(file.path)}
             </span>
           ) : (
-            <PathLabel dir={split.dir} base={split.base} className={styles.path} title={diffFilePathLabel(file)} />
+            label(file.path)
           )}
           <span className={styles.stats}>
             <DiffStat additions={file.additions} deletions={file.deletions} />

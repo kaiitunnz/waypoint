@@ -7,6 +7,7 @@ import {
   relativeToCwd,
   relativizeInText,
   remarkLinkifyPaths,
+  splitFileName,
   splitPath,
 } from "./workspacePaths";
 
@@ -193,5 +194,17 @@ describe("splitPath", () => {
   it("separates the directory from the name", () => {
     expect(splitPath("backend/src/runtime.py")).toEqual({ dir: "backend/src/", base: "runtime.py" });
     expect(splitPath("runtime.py")).toEqual({ dir: "", base: "runtime.py" });
+  });
+});
+
+describe("splitFileName", () => {
+  it("keeps the extension and a few characters before it in the tail", () => {
+    expect(splitFileName("2026-08-21_dynamic-workflow-architecture.md")).toEqual({ head: "2026-08-21_dynamic-workflow-archit", tail: "ecture.md" });
+  });
+
+  it("puts a short name, a dotfile and an over-long extension into the tail by length", () => {
+    expect(splitFileName("a.py")).toEqual({ head: "", tail: "a.py" });
+    expect(splitFileName(".gitignore")).toEqual({ head: ".git", tail: "ignore" });
+    expect(splitFileName("notes.somethingverylong")).toEqual({ head: "notes.somethingve", tail: "rylong" });
   });
 });

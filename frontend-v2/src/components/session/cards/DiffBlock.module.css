@@ -17,13 +17,17 @@
   color: var(--faint);
 }
 
-.path {
-  min-width: 0;
+.path,
+.moved {
   flex: 1 1 auto;
-  font-family: var(--mono);
-  font-size: var(--f-code);
   color: var(--text);
-  overflow-wrap: anywhere;
+}
+
+.moved {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
 }
 
 .stats {

@@ -112,6 +112,18 @@ export function splitPath(path: string): { dir: string; base: string } {
   return slash === -1 ? { dir: "", base: path } : { dir: path.slice(0, slash + 1), base: path.slice(slash + 1) };
 }
 
+const NAME_TAIL = 6;
+const MAX_EXTENSION = 10;
+
+// A file name as a head that may be cut short and a tail that stays: the extension
+// and the characters before it.
+export function splitFileName(name: string): { head: string; tail: string } {
+  const dot = name.lastIndexOf(".");
+  const extension = dot > 0 && name.length - dot <= MAX_EXTENSION ? name.length - dot : 0;
+  const at = Math.max(0, name.length - extension - NAME_TAIL);
+  return { head: name.slice(0, at), tail: name.slice(at) };
+}
+
 // A path as the session's own files read: relative to `cwd` when it lies inside it,
 // otherwise unchanged.
 export function relativeToCwd(path: string, cwd: string | null | undefined): string {

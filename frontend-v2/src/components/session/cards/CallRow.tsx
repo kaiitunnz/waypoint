@@ -86,12 +86,12 @@ export function CallRow({ row }: { row: CallView }) {
         <span className={styles.glyph} role="img" aria-label={row.toolLabel}>
           {row.glyph}
         </span>
-        <div className={styles.subject} title={command ? undefined : row.title}>
+        <div className={styles.subject} title={command || row.path ? undefined : row.title}>
           {command ? (
             <Command text={row.label} />
           ) : (
             <div className={cx(styles.text, row.mono && styles.mono)}>
-              {row.path ? <PathLabel dir={row.path.dir} base={row.path.base} /> : <Lines text={row.label} />}
+              {row.path ? <PathLabel dir={row.path.dir} base={row.path.base} full={row.title} /> : <Lines text={row.label} />}
             </div>
           )}
         </div>

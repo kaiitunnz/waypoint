@@ -1,11 +1,52 @@
 .path {
+  display: flex;
   min-width: 0;
+  max-width: 100%;
   font-family: var(--mono);
   font-size: var(--f-code);
   letter-spacing: -0.01em;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
+/* The far larger shrink factor spends the folder before the name gives anything up.
+   Right-to-left puts the ellipsis on the left; the isolate keeps the path's order. */
 .dir {
+  flex: 0 1000000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
   color: var(--faint);
+}
+
+.base {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.tail {
+  flex: none;
+  white-space: pre;
+}
+
+.open {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* A long press opens the path, so it must not select text or raise the system's callout. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .path {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
 }

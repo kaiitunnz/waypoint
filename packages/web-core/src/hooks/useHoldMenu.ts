@@ -12,7 +12,7 @@ import {
 } from "react";
 
 // How long a mouse hover or a held touch takes to open the menu.
-const HOLD_MS = 450;
+export const HOLD_MS = 450;
 
 export interface HoldMenu {
   open: boolean;

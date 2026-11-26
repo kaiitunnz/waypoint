@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { PasswordInput } from "@/components/PasswordInput";
 import { probeBackend } from "@waypoint/web-core/api";
@@ -20,6 +20,7 @@ interface LoginFormProps {
 }
 
 const CUSTOM_VALUE = "__custom__";
+const subscribeNever = () => () => {};
 
 type ProbeStatus = "idle" | "checking" | "reachable" | "unreachable";
 
@@ -37,7 +38,12 @@ export function LoginForm({ defaultHost, onSubmit }: LoginFormProps) {
   // they've interacted with the dropdown.
   const userTouchedRef = useRef(false);
 
-  const pageHost = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost";
+  // Hydration has to match the server, which can't know the hostname.
+  const pageHost = useSyncExternalStore(
+    subscribeNever,
+    () => window.location.hostname || "localhost",
+    () => "localhost",
+  );
 
   const backendPort = backendPortFromUrl(defaultHost) ?? DEFAULT_BACKEND_PORT;
   const options = useMemo<BackendOption[]>(

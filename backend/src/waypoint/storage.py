@@ -3396,7 +3396,10 @@ class Storage:
 
     @_synchronized
     def create_idle_scheduled_message(
-        self, record: ScheduledMessageRecord, mode: IdleMessageBatchMode
+        self,
+        record: ScheduledMessageRecord,
+        mode: IdleMessageBatchMode,
+        ignoring: Collection[str] = (),
     ) -> ScheduledMessageRecord:
         """Allocate a FIFO idle batch and persist ``record`` atomically.
 
@@ -3404,15 +3407,17 @@ class Storage:
         the insert inside one storage lock so two simultaneous API requests
         cannot both create a first batch or attach behind a later batch. Mutates
         ``record.idle_batch`` and ``record.wait_for_idle_transition`` in place.
+        Records in ``ignoring`` take no part in choosing the batch.
         """
         row = self.connection.execute(
-            """
+            f"""
             SELECT MIN(idle_batch) AS oldest, MAX(idle_batch) AS tail
             FROM scheduled_messages
             WHERE session_id = ? AND trigger = 'idle' AND status = 'pending'
               AND idle_batch IS NOT NULL
+              AND id NOT IN ({",".join("?" * len(ignoring))})
             """,
-            (record.session_id,),
+            (record.session_id, *ignoring),
         ).fetchone()
         oldest = row["oldest"] if row is not None else None
         tail = row["tail"] if row is not None else None

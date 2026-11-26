@@ -340,7 +340,9 @@ class Scheduler:
             status=ScheduledMessageStatus.PENDING,
             trigger=ScheduledMessageTrigger.IDLE,
         )
-        self._runtime.storage.create_idle_scheduled_message(record, mode)
+        self._runtime.storage.create_idle_scheduled_message(
+            record, mode, self._attempted
+        )
         self._register_attachment_references(record)
         # An already-idle with_previous (new batch) delivers now; the wake lets
         # the loop pick it up without waiting for the fallback poll.
@@ -507,14 +509,18 @@ class Scheduler:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
             ) from exc
-        updated = self._record_delivery(record, ran_at=now)
-        # Emptying the oldest batch consumes this idle point, as a delivery at idle
-        # does, so the next batch waits for a fresh idle transition.
-        if in_oldest_batch and all(
-            item.idle_batch != record.idle_batch
-            for item in self._batchable_idle(record.session_id)
-        ):
-            storage.arm_wait_for_oldest_idle_batch(record.session_id, self._attempted)
+        try:
+            updated = self._record_delivery(record, ran_at=now)
+        finally:
+            # Emptying the oldest batch consumes this idle point, as a delivery at
+            # idle does, whether or not its outcome was saved.
+            if in_oldest_batch and all(
+                item.idle_batch != record.idle_batch
+                for item in self._batchable_idle(record.session_id)
+            ):
+                storage.arm_wait_for_oldest_idle_batch(
+                    record.session_id, self._attempted
+                )
         return updated, isinstance(result, HeldMessageRecord)
 
     def _batchable_idle(self, session_id: str) -> list[ScheduledMessageRecord]:
@@ -723,9 +729,13 @@ class Scheduler:
         pending = self._runtime.storage.list_pending_idle_messages()
         if not pending:
             return
+        # Fixed with the listing: one sent by hand later in this pass still marks
+        # its batch, so the batch behind it is not picked from this stale listing.
+        lost = frozenset(self._attempted)
         by_session: dict[str, list[ScheduledMessageRecord]] = {}
         for record in pending:
-            by_session.setdefault(record.session_id, []).append(record)
+            if record.id not in lost:
+                by_session.setdefault(record.session_id, []).append(record)
         for session_id, records in by_session.items():
             with self._isolated(session_id=session_id):
                 await self._fire_idle_batch(session_id, records)
@@ -741,28 +751,23 @@ class Scheduler:
             return
         if session.status != SessionStatus.IDLE:
             return
-        # ``records`` is already FIFO by (batch, created_at, id); the first one
-        # still batching has the session's smallest batch.
-        records = [r for r in records if r.id not in self._attempted]
-        if not records:
-            return
+        # ``records`` is already FIFO by (batch, created_at, id); the first
+        # record's batch is the smallest for this session.
         selected_batch = records[0].idle_batch
         batch = [r for r in records if r.idle_batch == selected_batch]
         if batch[0].wait_for_idle_transition:
             # Still waiting for a later idle transition (a next_cycle created
             # while already idle, or a batch armed after an earlier delivery).
             return
-        consumed = False
+        fired = False
         for record in batch:
             with self._isolated(msg_id=record.id):
                 if not self._message_still_pending(record.id):
-                    # One sent by hand mid-pass used this idle point too.
-                    consumed = consumed or record.id in self._attempted
                     continue
-                consumed = True
+                fired = True
                 with self._claim(record.id):
                     await self._fire_idle_message(record)
-        if not consumed:
+        if not fired:
             return
         # Consume this idle point regardless of per-message outcome so a later
         # batch cannot leak into the same cycle.

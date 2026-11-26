@@ -1457,18 +1457,100 @@ async def test_a_lost_idle_outcome_does_not_stall_later_batches(
     runtime.scheduler._compute_wait_seconds()
     await runtime.scheduler._fire_due_schedules()
 
-    if not by_hand:
-        # The lost delivery used this idle point: the next batch waits.
-        assert [text for _, text in sends] == ["first"]
-        _set_status(runtime, "sess-1", SessionStatus.RUNNING)
-        _set_status(runtime, "sess-1", SessionStatus.IDLE)
-        runtime.scheduler.notify_idle("sess-1", datetime.now(UTC))
-        await runtime.scheduler._fire_due_schedules()
+    # The lost delivery used this idle point: the next batch waits.
+    assert [text for _, text in sends] == ["first"]
+    _set_status(runtime, "sess-1", SessionStatus.RUNNING)
+    _set_status(runtime, "sess-1", SessionStatus.IDLE)
+    runtime.scheduler.notify_idle("sess-1", datetime.now(UTC))
+    await runtime.scheduler._fire_due_schedules()
 
     assert [text for _, text in sends] == ["first", "second"]
     done = runtime.storage.get_scheduled_message(second.id)
     assert done is not None
     assert done.status == ScheduledMessageStatus.SENT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode, behind",
+    [
+        (IdleMessageBatchMode.NEXT_CYCLE, False),
+        (IdleMessageBatchMode.WITH_PREVIOUS, True),
+    ],
+    ids=["next-cycle", "with-previous"],
+)
+async def test_a_message_queued_after_a_lost_one_waits_its_turn(
+    tmp_path, monkeypatch, mode, behind
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    sends = _record_sends(runtime, monkeypatch)
+
+    def queue(text: str, batch_mode: IdleMessageBatchMode):
+        return runtime.scheduler.create_message_schedule(
+            "sess-1",
+            ScheduledMessageCreateRequest(
+                text=text,
+                trigger=ScheduledMessageTrigger.IDLE,
+                idle_batch_mode=batch_mode,
+            ),
+        )
+
+    lost = queue("lost", IdleMessageBatchMode.WITH_PREVIOUS)
+    if behind:
+        queue("behind", IdleMessageBatchMode.NEXT_CYCLE)
+    update = runtime.storage.update_scheduled_message
+
+    def update_unless_lost(message_id: str, **fields: Any):
+        if message_id == lost.id:
+            raise RuntimeError("database is locked")
+        return update(message_id, **fields)
+
+    monkeypatch.setattr(runtime.storage, "update_scheduled_message", update_unless_lost)
+    await runtime.scheduler._fire_due_schedules()
+    queue("new", mode)
+    await runtime.scheduler._fire_due_schedules()
+
+    assert [text for _, text in sends] == ["lost"]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_sent_by_hand_mid_pass_holds_the_next_one(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = _runtime_with_session(tmp_path)
+    runtime.storage.create_session(make_session(runtime.settings, "sess-0"))
+    sends, release = _block_first_send(runtime, monkeypatch)
+    _, first, second = (
+        runtime.scheduler.create_message_schedule(
+            session_id,
+            ScheduledMessageCreateRequest(
+                text=text,
+                trigger=ScheduledMessageTrigger.IDLE,
+                idle_batch_mode=batch_mode,
+            ),
+        )
+        for session_id, text, batch_mode in (
+            ("sess-0", "other", IdleMessageBatchMode.WITH_PREVIOUS),
+            ("sess-1", "first", IdleMessageBatchMode.WITH_PREVIOUS),
+            ("sess-1", "second", IdleMessageBatchMode.NEXT_CYCLE),
+        )
+    )
+
+    firing = asyncio.create_task(runtime.scheduler._fire_due_schedules())
+    while not sends:
+        await asyncio.sleep(0)
+    try:
+        # The pass has listed both sessions and is busy with the first one.
+        await asyncio.wait_for(runtime.scheduler.send_message_now(first.id), 5)
+    finally:
+        release.set()
+        await firing
+
+    assert sends == ["other", "first"]
+    waiting = runtime.storage.get_scheduled_message(second.id)
+    assert waiting is not None
+    assert waiting.status == ScheduledMessageStatus.PENDING
+    assert waiting.wait_for_idle_transition is True
 
 
 @pytest.mark.asyncio

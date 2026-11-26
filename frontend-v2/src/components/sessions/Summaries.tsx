@@ -94,11 +94,20 @@ export function LimitsReadout({ usage, now }: { usage: UsageSummaryState; now: n
   );
 }
 
-export function ScheduledSummaryList({ summary }: { summary: ScheduledSummary }) {
-  if (summary.queued === 0) return null;
+export function ScheduledSummaryList({ summary, onOpen }: { summary: ScheduledSummary; onOpen: () => void }) {
+  if (summary.total === 0) return null;
   return (
     <section>
-      <SectionHeading title="Scheduled" count={summary.queued} />
+      <SectionHeading
+        title="Scheduled"
+        count={summary.queued}
+        action={
+          <button type="button" onClick={onOpen}>
+            All
+          </button>
+        }
+      />
+      {summary.queued === 0 ? <p className={styles.empty}>Nothing pending</p> : null}
       <ul className={styles.scheduled}>
         {summary.items.map((item) => (
           <li key={item.key} className={styles.item}>

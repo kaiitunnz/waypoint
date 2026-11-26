@@ -17,6 +17,7 @@ import type { PendingAsk, SessionRecord } from "@waypoint/web-core/types";
 
 import { LaunchDialog, type LaunchRequest } from "@/components/launch/LaunchDialog";
 import { StartFromPreset } from "@/components/launch/StartFromPreset";
+import { ScheduledSheet } from "@/components/scheduled/ScheduledSheet";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { List } from "@/components/ui/List";
 import { SectionHeading } from "@/components/ui/SectionHeading";
@@ -55,6 +56,7 @@ export function SessionsHome() {
   const [showExited, setShowExited] = useShowExited();
   const launch = useLaunchContext(host, token, launchTargets.targets, launchTargets.activeTargetId, handleAuthFailure);
   const [launchRequest, setLaunchRequest] = useState<LaunchRequest | null>(null);
+  const [scheduledOpen, setScheduledOpen] = useState(false);
   const { refresh: refreshLaunch } = launch;
   const { sessions: knownSessions, schedules: knownSchedules } = feed;
   const openLaunch = useCallback(
@@ -176,17 +178,15 @@ export function SessionsHome() {
     </>
   );
 
-  const scheduled = useMemo(
-    () =>
-      summarizeScheduled(
-        feed.schedules,
-        feed.messageSchedules,
-        new Map((feed.sessions ?? []).map((session) => [session.id, session.title])),
-        3,
-        now,
-      ),
-    [feed.schedules, feed.messageSchedules, feed.sessions, now],
+  const titleById = useMemo(
+    () => new Map((feed.sessions ?? []).map((session) => [session.id, session.title])),
+    [feed.sessions],
   );
+  const scheduled = useMemo(
+    () => summarizeScheduled(feed.schedules, feed.messageSchedules, titleById, 3, now),
+    [feed.schedules, feed.messageSchedules, titleById, now],
+  );
+  const openScheduled = () => setScheduledOpen(true);
 
   const main = (
     <>
@@ -204,7 +204,7 @@ export function SessionsHome() {
       {sectionsView}
       {phone && !searching ? (
         <div className={styles.summaries}>
-          <ScheduledSummaryList summary={scheduled} />
+          <ScheduledSummaryList summary={scheduled} onOpen={openScheduled} />
           <BoardSummaryCard summary={board} hideEmpty />
         </div>
       ) : null}
@@ -226,13 +226,22 @@ export function SessionsHome() {
               />
             ) : null}
             <LimitsReadout usage={usage} now={now} />
-            <ScheduledSummaryList summary={scheduled} />
+            <ScheduledSummaryList summary={scheduled} onOpen={openScheduled} />
             <BoardSummaryCard summary={board} />
           </div>
         </aside>
       )}
 
       <LaunchDialog request={launchRequest} launch={launch} onClose={() => setLaunchRequest(null)} />
+      {scheduledOpen ? (
+        <ScheduledSheet
+          onClose={() => setScheduledOpen(false)}
+          schedules={feed.schedules}
+          messages={feed.messageSchedules}
+          titleById={titleById}
+          catalog={catalog}
+        />
+      ) : null}
       {dialogs}
     </div>
   );

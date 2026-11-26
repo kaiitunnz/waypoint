@@ -74,6 +74,13 @@ describe("another tool read off the screen", () => {
     expect(onScreen(pane, events)).toMatchObject({ whole: true, input, fields: { tool_input: input } });
   });
 
+  it("never takes a subagent launch, which a subagent's own dialog reads as", () => {
+    for (const tool of ["Agent", "Task"]) {
+      const launch = call(2, "t1", tool, { description: "Sweep", prompt: "Delete the caches" });
+      expect(onScreen(approve(tool, { description: "Sweep" }), [launch])).toMatchObject({ whole: false, input: null });
+    }
+  });
+
   it("is locked on the screen's summary alone", () => {
     for (const events of [[], [call(2, "t1", "mcp__mail__send", input), call(3, "t2", "mcp__mail__send", { to: "x" })]]) {
       expect(onScreen(pane, events)).toMatchObject({ whole: false, input: null });

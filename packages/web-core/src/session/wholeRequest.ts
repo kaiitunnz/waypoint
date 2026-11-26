@@ -52,7 +52,8 @@ const canonical = (value: unknown): string =>
 function callBehind(request: EventRecord, events: readonly EventRecord[], cwd: string): Record<string, unknown> | null {
   const tool = readToolName(request);
   const asked = asRecord(request.metadata?.tool_input);
-  if (!tool || !asked) return null;
+  // A subagent's own dialog reads as its parent's launch, so a launch is never matched.
+  if (!tool || !asked || tool === "Task" || tool === "Agent") return null;
   const spoke = events.filter((event) => event.kind === "user_input" && event.sequence < request.sequence);
   const turn = events.filter((event) => event.sequence > Math.max(-1, ...spoke.map((event) => event.sequence)));
   const answered = new Set(turn.filter((event) => event.kind === "tool_result").map(callId));

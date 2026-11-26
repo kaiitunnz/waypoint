@@ -5,19 +5,25 @@ import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversatio
 import { PickerRow, SettingsSection, SwitchRow } from "@/components/ui/Settings";
 import { useTheme } from "@/lib/theme";
 
-export function Appearance() {
+export function ThemeRow() {
   const { theme, setTheme } = useTheme();
   return (
+    <PickerRow
+      label="Theme"
+      value={theme}
+      onChange={setTheme}
+      options={[
+        { value: "dark", label: "Dark" },
+        { value: "light", label: "Light" },
+      ]}
+    />
+  );
+}
+
+export function Appearance() {
+  return (
     <SettingsSection>
-      <PickerRow
-        label="Theme"
-        value={theme}
-        onChange={setTheme}
-        options={[
-          { value: "dark", label: "Dark" },
-          { value: "light", label: "Light" },
-        ]}
-      />
+      <ThemeRow />
     </SettingsSection>
   );
 }

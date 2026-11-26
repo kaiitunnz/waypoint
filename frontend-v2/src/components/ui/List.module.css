@@ -94,14 +94,17 @@
   white-space: nowrap;
 }
 
-.compact {
+/* One line: the compact exited row, and a live row without its preview. */
+.compact,
+.single {
   align-items: center;
   min-height: 44px;
   padding-top: 0;
   padding-bottom: 0;
 }
 
-.compact .lamp {
+.compact .lamp,
+.single .lamp {
   margin-top: 0;
 }
 
@@ -117,17 +120,6 @@
 
 .compact .chev {
   height: 22px;
-}
-
-.single {
-  align-items: center;
-  min-height: 44px;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.single .lamp {
-  margin-top: 0;
 }
 
 .dimmed .title {

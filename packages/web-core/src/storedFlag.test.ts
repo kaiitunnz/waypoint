@@ -14,24 +14,33 @@ function memoryStorage() {
 }
 
 describe("readStoredFlag and writeStoredFlag", () => {
-  it("shows exited sessions until they are turned off", () => {
+  it("stores only a choice that differs from the fallback", () => {
+    for (const fallback of [true, false]) {
+      const storage = memoryStorage();
+      expect(readStoredFlag(storage, "k", fallback)).toBe(fallback);
+      writeStoredFlag(storage, "k", !fallback, fallback);
+      expect(storage.data.get("k")).toBe(fallback ? "0" : "1");
+      expect(readStoredFlag(storage, "k", fallback)).toBe(!fallback);
+      writeStoredFlag(storage, "k", fallback, fallback);
+      expect(storage.data.has("k")).toBe(false);
+    }
+  });
+
+  it("lets a stored choice win over either fallback", () => {
     const storage = memoryStorage();
-    expect(readStoredFlag(storage, "k")).toBe(true);
-    expect(writeStoredFlag(storage, "k", false)).toBe(true);
-    expect(readStoredFlag(storage, "k")).toBe(false);
-    expect(writeStoredFlag(storage, "k", true)).toBe(true);
-    expect(readStoredFlag(storage, "k")).toBe(true);
-    expect(storage.data.size).toBe(0);
+    storage.setItem("k", "0");
+    expect(readStoredFlag(storage, "k", true)).toBe(false);
+    storage.setItem("k", "1");
+    expect(readStoredFlag(storage, "k", false)).toBe(true);
   });
 
   it("keeps each key apart", () => {
     const storage = memoryStorage();
-    writeStoredFlag(storage, "panel", false);
-    expect(readStoredFlag(storage, "switcher")).toBe(true);
+    writeStoredFlag(storage, "a", false);
+    expect(readStoredFlag(storage, "b")).toBe(true);
   });
 
-  it("falls back to shown when storage is missing or throws", () => {
-    expect(readStoredFlag(null, "k")).toBe(true);
+  it("falls back when storage is missing or throws", () => {
     const broken = {
       getItem: () => {
         throw new Error("denied");
@@ -43,52 +52,12 @@ describe("readStoredFlag and writeStoredFlag", () => {
         throw new Error("denied");
       },
     };
-    expect(readStoredFlag(broken, "k")).toBe(true);
-    expect(writeStoredFlag(broken, "k", false)).toBe(false);
-    expect(writeStoredFlag(null, "k", false)).toBe(false);
-  });
-});
-
-describe("show exited sessions, by default", () => {
-  it("v1's default shows them and stores only a hide, exactly as before", () => {
-    const storage = memoryStorage();
-    expect(readStoredFlag(storage, "k")).toBe(true);
-    writeStoredFlag(storage, "k", false);
-    expect(storage.data.get("k")).toBe("0");
-    expect(readStoredFlag(storage, "k")).toBe(false);
-    writeStoredFlag(storage, "k", true);
-    expect(storage.data.has("k")).toBe(false);
-    expect(readStoredFlag(storage, "k")).toBe(true);
-  });
-
-  it("a hidden default starts hidden, remembers a show, and returns to the default when hidden again", () => {
-    const storage = memoryStorage();
-    expect(readStoredFlag(storage, "k", false)).toBe(false);
-    writeStoredFlag(storage, "k", true, false);
-    expect(storage.data.get("k")).toBe("1");
-    expect(readStoredFlag(storage, "k", false)).toBe(true);
-    writeStoredFlag(storage, "k", false, false);
-    expect(storage.data.has("k")).toBe(false);
-    expect(readStoredFlag(storage, "k", false)).toBe(false);
-  });
-
-  it("a stored choice wins over either default", () => {
-    const storage = memoryStorage();
-    storage.setItem("k", "0");
-    expect(readStoredFlag(storage, "k", true)).toBe(false);
-    storage.setItem("k", "1");
-    expect(readStoredFlag(storage, "k", false)).toBe(true);
-  });
-
-  it("falls back to the default when storage is missing or throws", () => {
-    expect(readStoredFlag(null, "k", false)).toBe(false);
-    const broken = {
-      getItem: () => {
-        throw new Error("denied");
-      },
-    };
-    expect(readStoredFlag(broken, "k", false)).toBe(false);
-    expect(readStoredFlag(broken, "k")).toBe(true);
+    for (const fallback of [true, false]) {
+      expect(readStoredFlag(null, "k", fallback)).toBe(fallback);
+      expect(readStoredFlag(broken, "k", fallback)).toBe(fallback);
+      expect(writeStoredFlag(broken, "k", !fallback, fallback)).toBe(false);
+      expect(writeStoredFlag(null, "k", !fallback, fallback)).toBe(false);
+    }
   });
 });
 

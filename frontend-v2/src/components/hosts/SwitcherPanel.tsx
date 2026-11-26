@@ -18,12 +18,12 @@ import { SETTINGS_HREF } from "@waypoint/web-core/shellNav";
 import type { LaunchTargetSummary } from "@waypoint/web-core/types";
 
 import { Button } from "@/components/ui/Button";
-import { LinkRow, PickerRow, SettingsSection } from "@/components/ui/Settings";
+import { ThemeRow } from "@/components/settings/DeviceSections";
+import { LinkRow, SettingsSection } from "@/components/ui/Settings";
 import { switchHost } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { PROBE_LABEL } from "@/lib/probe";
 import { useShellData } from "@/lib/shell-data";
-import { useTheme } from "@/lib/theme";
 
 import { HostPicker } from "./HostPicker";
 import styles from "./SwitcherPanel.module.css";
@@ -168,18 +168,9 @@ function SshTargetStatus({
 
 // Touch has no nav rail, so the sheet carries the quick theme choice and the way to settings.
 function DeviceRows({ onDone }: { onDone: () => void }) {
-  const { theme, setTheme } = useTheme();
   return (
     <SettingsSection>
-      <PickerRow
-        label="Theme"
-        value={theme}
-        onChange={setTheme}
-        options={[
-          { value: "dark", label: "Dark" },
-          { value: "light", label: "Light" },
-        ]}
-      />
+      <ThemeRow />
       <LinkRow label="Settings" href={SETTINGS_HREF} onNavigate={onDone} />
     </SettingsSection>
   );

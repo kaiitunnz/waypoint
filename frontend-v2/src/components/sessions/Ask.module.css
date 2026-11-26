@@ -33,14 +33,7 @@
   padding: 8px 12px;
   border-radius: 8px;
   background: var(--sunken);
-  font-family: var(--mono);
-  font-size: var(--f-code);
   line-height: 19px;
-  color: var(--text-strong);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 160px;
-  overflow-y: auto;
 }
 
 .path {

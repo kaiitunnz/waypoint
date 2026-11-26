@@ -14,6 +14,7 @@ import {
 import type { PendingApprovalAsk, PendingPlanAsk } from "@waypoint/web-core/types";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
+import { CommandText } from "@/components/session/cards/CommandText";
 import { PathLabel } from "@/components/session/cards/PathLabel";
 import { Button } from "@/components/ui/Button";
 import { TextInput } from "@/components/ui/Field";
@@ -56,7 +57,12 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
   };
   const status = <AskStatus availability={ask.availability} phase={phase} />;
   const headline = openHref ? <OpenHeadline href={openHref}>{ask.title}</OpenHeadline> : <h3 className={styles.headline}>{ask.title}</h3>;
-  const command = preview?.kind === "command" ? <pre className={styles.command}>{preview.text}</pre> : null;
+  const command =
+    preview?.kind === "command" ? (
+      <div className={styles.command}>
+        <CommandText text={preview.text} />
+      </div>
+    ) : null;
   const path =
     preview?.kind === "path" ? (
       <div className={styles.path}>

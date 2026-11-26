@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
-import { approvalPager, findPendingApprovals, stepApprovalPage } from "./approvals";
+import {
+  approvalActions,
+  approvalBody,
+  approvalCopyText,
+  approvalId,
+  approvalPager,
+  approvalPrompt,
+  findPendingApprovals,
+  planApprovalActions,
+  stepApprovalPage,
+} from "./approvals";
 
 const request = (seq: number, approvalId?: string) =>
   ev(seq, "approval_request", "allow?", approvalId ? { approval_id: approvalId } : {});
@@ -82,5 +92,70 @@ describe("stepApprovalPage", () => {
   it("steps from the raw index, so a stale index past the end only moves down by one", () => {
     expect(stepApprovalPage(5, "prev", 2)).toBe(4);
     expect(stepApprovalPage(5, "next", 2)).toBe(1);
+  });
+});
+
+const approval = (toolName: string, toolInput: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+  ev(1, "approval_request", "raw text", { tool_name: toolName, tool_input: toolInput, approval_id: "ap1", ...extra });
+
+describe("approvalBody", () => {
+  it("reads each tool's body and prompt", () => {
+    const plan = approvalBody(approval("ExitPlanMode", { plan: "# Plan" }));
+    expect(plan).toEqual({ kind: "plan", plan: "# Plan" });
+    expect(approvalPrompt(plan)).toBe("Approve plan and exit plan mode");
+
+    const task = approvalBody(approval("Agent", { prompt: "go", description: "Audit", subagent_type: "Explore" }));
+    expect(approvalPrompt(task)).toBe("Approve subagent task: Audit (via Explore)");
+
+    const bash = approvalBody(approval("Bash", { command: "ls", description: "List" }));
+    expect(bash).toEqual({ kind: "command", description: "List", command: "ls" });
+    expect(approvalPrompt(bash)).toBe("Approve Bash command: List");
+
+    const workflow = approvalBody(approval("Workflow", { script: "x()" }));
+    expect(approvalPrompt(workflow)).toBe("Review this dynamic workflow before it runs");
+
+    const edit = approvalBody(approval("Edit", { file_path: "/a.ts" }));
+    expect(edit).toEqual({ kind: "edit", tool: "Edit", path: "/a.ts" });
+    expect(approvalPrompt(edit)).toBe("Approve Edit on /a.ts");
+
+    const raw = approvalBody(approval("Mystery", {}));
+    expect(raw).toEqual({ kind: "raw", text: "raw text" });
+    expect(approvalPrompt(raw)).toBeNull();
+  });
+
+  it("prefers a diff preview over the tool body", () => {
+    const event = approval("Edit", { file_path: "/a.ts" }, {
+      diff_preview: { files: [{ path: "/a.ts", hunks: [] }], truncated: false },
+    });
+    const body = approvalBody(event);
+    expect(body.kind === "diff" ? body.prompt : null).toBe("raw text");
+  });
+
+  it("copies the command, plan, prompt or script, else the text", () => {
+    expect(approvalCopyText(approval("Bash", { command: "ls" }))).toBe("ls");
+    expect(approvalCopyText(approval("ExitPlanMode", { plan: "p" }))).toBe("p");
+    expect(approvalCopyText(approval("Task", { prompt: "go" }))).toBe("go");
+    expect(approvalCopyText(approval("Mystery", {}))).toBe("raw text");
+    expect(approvalId(approval("Bash", { command: "ls" }))).toBe("ap1");
+  });
+});
+
+describe("approval actions", () => {
+  it("shows escalations only when the agent lists them", () => {
+    expect(approvalActions(["approve", "decline"]).map((a) => a.id)).toEqual(["accept", "decline", "cancel"]);
+    expect(approvalActions(["acceptForSession", "acceptAlways"]).map((a) => a.id)).toEqual([
+      "accept",
+      "acceptForSession",
+      "acceptAlways",
+      "decline",
+      "cancel",
+    ]);
+    expect(approvalActions(undefined).filter((a) => a.primary).map((a) => a.id)).toEqual(["accept"]);
+  });
+
+  it("offers every plan decision unless the plan lists its own", () => {
+    expect(planApprovalActions(undefined)).toHaveLength(4);
+    expect(planApprovalActions([]).map((a) => a.id)).toEqual(["accept", "acceptForSession", "decline", "cancel"]);
+    expect(planApprovalActions(["accept", "decline"]).map((a) => a.id)).toEqual(["accept", "decline"]);
   });
 });

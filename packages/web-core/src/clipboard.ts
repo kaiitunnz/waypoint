@@ -35,3 +35,56 @@ export async function copyText(text: string): Promise<boolean> {
   }
   return legacyCopy(text);
 }
+
+// iOS Safari rejects ``navigator.clipboard.writeText`` even from inside a
+// click handler — the Promise microtask ends the transient activation
+// window before the write resolves. ``document.execCommand("copy")`` is
+// deprecated everywhere but remains the one synchronous clipboard write
+// that survives that gauntlet across iOS Safari, desktop Safari, and
+// modern Chromium.
+//
+// A contenteditable ``<div>`` is the right host: textarea's ``.value``
+// lives in an internal buffer (not DOM children), so
+// ``Range.selectNodeContents(textarea)`` selects nothing — execCommand
+// then reports success against an empty selection and the paste is
+// blank. The div holds the text in real text nodes; ``white-space: pre``
+// preserves newlines so multi-line ``/copy`` results survive intact.
+export function copyTextSync(text: string): boolean {
+  if (typeof document === "undefined") return false;
+  const host = document.createElement("div");
+  host.textContent = text;
+  host.setAttribute("contenteditable", "true");
+  // ``left: -9999px`` keeps the node selectable but visually off-canvas
+  // (opacity 0 in the same coordinate space can still flash a focus
+  // ring on iOS). ``font-size: 16px`` prevents iOS's auto-zoom on
+  // focused editable fields. ``white-space: pre`` carries newlines.
+  host.style.cssText = [
+    "position:fixed",
+    "top:0",
+    "left:-9999px",
+    "width:1px",
+    "height:1px",
+    "white-space:pre",
+    "font-size:16px",
+    "user-select:text",
+    "-webkit-user-select:text",
+  ].join(";");
+  document.body.appendChild(host);
+  let ok = false;
+  const sel = window.getSelection();
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(host);
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  } finally {
+    sel?.removeAllRanges();
+    document.body.removeChild(host);
+  }
+  return ok;
+}

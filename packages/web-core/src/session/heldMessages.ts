@@ -24,8 +24,11 @@ export function holdReasonLabel(
   if (focus) {
     return { text: "Paused by Focus", manual: true };
   }
-  return {
-    text: message.hold_reason === "dialog" ? "Sends after you respond" : "Sends when idle",
-    manual: false,
-  };
+  const text =
+    message.hold_reason === "dialog"
+      ? "Sends after you respond"
+      : message.hold_reason === "restore"
+        ? "Sends when the session restores"
+        : "Sends when idle";
+  return { text, manual: false };
 }

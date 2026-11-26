@@ -8,6 +8,8 @@ import {
   readTodoEntries,
   summarizeTodos,
   type TodoEntry,
+  dismissedTaskSequence,
+  isTaskProgressDismissed,
 } from "./todos";
 
 const todoWrite = (todos: unknown) =>
@@ -140,5 +142,21 @@ describe("currentTodoEvent", () => {
   it("falls back to the loaded one", () => {
     expect(currentTodoEvent([], todo(1))?.sequence).toBe(1);
     expect(currentTodoEvent([ev(1, "agent_output", "x")], null)).toBeNull();
+  });
+});
+
+describe("task progress dismissal", () => {
+  it("lets an in-flight request for this session win over the record", () => {
+    expect(dismissedTaskSequence({ sessionId: "s1", sequence: 7 }, "s1", 3)).toBe(7);
+    expect(dismissedTaskSequence({ sessionId: "s1", sequence: null }, "s1", 3)).toBeNull();
+    expect(dismissedTaskSequence({ sessionId: "s2", sequence: 7 }, "s1", 3)).toBe(3);
+    expect(dismissedTaskSequence(null, "s1", undefined)).toBeNull();
+  });
+
+  it("dismisses only the snapshot it names", () => {
+    const todo = ev(4, "tool_call", "", {});
+    expect(isTaskProgressDismissed(todo, 4)).toBe(true);
+    expect(isTaskProgressDismissed(todo, 3)).toBe(false);
+    expect(isTaskProgressDismissed(null, null)).toBe(false);
   });
 });

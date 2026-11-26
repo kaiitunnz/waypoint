@@ -1,6 +1,7 @@
 import { readToolName } from "../events";
 import type {
   EventRecord,
+  PendingQuestion,
   PendingQuestionAvailability,
   PendingQuestionsSnapshot,
 } from "../types";
@@ -275,4 +276,71 @@ export function askCardState(
           : "not answered";
   const answers = resolution.state === "answered" ? askAnswerEntries(resolution.answerEvent) : [];
   return { waiting, outcome, answers };
+}
+
+// ─── Answer form ───
+
+// An option the agent recommends carries a trailing "(Recommended)" marker.
+export function isRecommendedLabel(label: string): boolean {
+  return /\(recommended\)\s*$/i.test(label);
+}
+
+export function setAskNote(draft: AskDraft, index: number, note: string): AskDraft {
+  return { ...draft, notes: { ...draft.notes, [index]: note } };
+}
+
+export function setAskNoteOpen(draft: AskDraft, index: number, open: boolean): AskDraft {
+  return { ...draft, notesOpen: { ...draft.notesOpen, [index]: open } };
+}
+
+export function stepAskQuestion(draft: AskDraft, direction: "prev" | "next", total: number): AskDraft {
+  const index = Math.min(draft.activeIndex, Math.max(0, total - 1));
+  const activeIndex = direction === "prev" ? Math.max(0, index - 1) : Math.min(total - 1, index + 1);
+  return { ...draft, activeIndex };
+}
+
+// Clears the answers and notes, keeping the page and which notes are open.
+export function clearAskAnswers(draft: AskDraft): AskDraft {
+  return { ...draft, picked: {}, notes: {} };
+}
+
+export interface AskFormView {
+  // The question on screen, clamped to the list.
+  index: number;
+  total: number;
+  entry: AskUserQuestion | undefined;
+  paginated: boolean;
+  // Whether each question has an answer or a note.
+  filled: boolean[];
+  // Something to send or clear.
+  hasAnswer: boolean;
+  // A question with no options is answered in free text.
+  freeText: boolean;
+}
+
+export function askFormView(questions: AskUserQuestion[], draft: AskDraft): AskFormView {
+  const total = questions.length;
+  const index = Math.min(draft.activeIndex, Math.max(0, total - 1));
+  const entry = questions[index];
+  const filled = questions.map(
+    (_, i) => Boolean(draft.picked[i]?.length) || Boolean((draft.notes[i] ?? "").trim()),
+  );
+  return {
+    index,
+    total,
+    entry,
+    paginated: total > 1,
+    filled,
+    hasAnswer: filled.some(Boolean),
+    freeText: entry !== undefined && entry.options.length === 0,
+  };
+}
+
+// The question a pending-question entry asks first, for a one-line headline.
+export function pendingQuestionPrompt(question: PendingQuestion): string {
+  return parseAskUserQuestion(question.event)?.[0]?.question ?? question.event.text;
+}
+
+export function pendingQuestionsCountLabel(count: number): string {
+  return count === 1 ? "Question waiting" : `${count} questions waiting`;
 }

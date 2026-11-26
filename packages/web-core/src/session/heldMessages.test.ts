@@ -62,6 +62,10 @@ describe("holdReasonLabel", () => {
       text: "Sends when idle",
       manual: false,
     });
+    expect(holdReasonLabel(held({ hold_reason: "restore" }), false)).toEqual({
+      text: "Sends when the session restores",
+      manual: false,
+    });
   });
 
   it("treats an unknown reason like idle", () => {

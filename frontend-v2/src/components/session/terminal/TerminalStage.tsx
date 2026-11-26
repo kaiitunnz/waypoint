@@ -9,7 +9,7 @@ import type { TerminalAppearance } from "@waypoint/web-core/session/terminal";
 
 import { cx } from "@/lib/cx";
 import { usePointerUI } from "@/lib/layout";
-import { terminalFontSize, terminalThemeFor } from "@/lib/terminalTheme";
+import { terminalFontFamily, terminalFontSize, terminalThemeFor } from "@/lib/terminalTheme";
 
 import styles from "./TerminalStage.module.css";
 
@@ -41,6 +41,7 @@ export function TerminalStage({ termRef, fit, typable, appearance, onData, onRes
     readOnly: !typable,
     autoFit: fit,
     fontSize,
+    fontFamily: terminalFontFamily(),
     themeFor: terminalThemeFor,
     appearance,
     onData: typable ? onData : undefined,
@@ -54,11 +55,12 @@ export function TerminalStage({ termRef, fit, typable, appearance, onData, onRes
     };
   }, [termRef, handle]);
 
-  // A grid wider than a phone pans sideways, with a thin indicator.
+  // A grid that fits sits on a letterbox; a wider one pans, and on touch,
+  // where scrollbars hide, shows a thin indicator.
   const [pan, setPan] = useState<Pan | null>(null);
   const measure = useCallback(() => {
     const node = host.current;
-    if (!node || fit || pointer) return;
+    if (!node) return;
     const { scrollLeft, scrollWidth, clientWidth } = node;
     if (scrollWidth <= clientWidth + 1) {
       setPan(null);
@@ -69,33 +71,31 @@ export function TerminalStage({ termRef, fit, typable, appearance, onData, onRes
       size: clientWidth / scrollWidth,
       atEnd: scrollLeft + clientWidth >= scrollWidth - 1,
     });
-  }, [fit, pointer]);
+  }, []);
   useEffect(() => {
     const node = host.current;
-    if (!node || fit || pointer) {
-      setPan(null);
-      return;
-    }
+    if (!node || fit) return;
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     const grid = node.firstElementChild;
     if (grid) observer.observe(grid);
     return () => observer.disconnect();
-  }, [fit, pointer, measure]);
+  }, [fit, measure]);
+  const indicator = pan && !pointer ? pan : null;
 
   return (
     <div
-      className={cx(styles.stage, !fit && (pointer ? styles.letterbox : styles.pan))}
+      className={cx(styles.stage, !fit && (pan ? styles.pan : styles.letterbox))}
       data-appearance={appearance}
     >
       <div
         ref={host}
-        className={cx(styles.host, fit ? styles.fit : styles.fixed, pan && !pan.atEnd && styles.fade)}
-        onScroll={pan || (!fit && !pointer) ? measure : undefined}
+        className={cx(styles.host, fit ? styles.fit : styles.fixed, indicator && !indicator.atEnd && styles.fade)}
+        onScroll={fit ? undefined : measure}
       />
-      {pan ? (
+      {indicator ? (
         <div className={styles.track} aria-hidden="true">
-          <i style={{ left: `${pan.start * 100}%`, width: `${pan.size * 100}%` }} />
+          <i style={{ left: `${indicator.start * 100}%`, width: `${indicator.size * 100}%` }} />
         </div>
       ) : null}
     </div>

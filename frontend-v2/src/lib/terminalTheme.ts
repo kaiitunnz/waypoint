@@ -56,3 +56,8 @@ export function terminalThemeFor(appearance: TerminalAppearance): ITheme {
 export function terminalFontSize(): number {
   return parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--f-term")) || 13;
 }
+
+// The app's mono face; next/font registers it under its own family name.
+export function terminalFontFamily(): string | undefined {
+  return getComputedStyle(document.documentElement).getPropertyValue("--mono").trim() || undefined;
+}

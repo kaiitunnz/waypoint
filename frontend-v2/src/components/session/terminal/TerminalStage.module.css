@@ -21,10 +21,20 @@
   min-height: 0;
 }
 
-/* A resizable pane fits the stage; xterm scrolls its own scrollback. */
+/* xterm's sheet paints its viewport black under the grid's padding. */
+.host :global(.xterm .xterm-viewport) {
+  background-color: var(--term-bg);
+}
+
+/* A resizable pane fits the stage; xterm scrolls its own scrollback. The
+   padding is xterm's own, which its fit subtracts. */
 .fit {
-  padding: 8px 10px;
   overflow: hidden;
+}
+
+.fit > :global(.xterm) {
+  height: 100%;
+  padding: 8px 10px;
 }
 
 /* A fixed grid keeps its native size and the host scrolls it. Auto margins
@@ -42,7 +52,7 @@
   background: var(--term-bg);
 }
 
-/* Wider than the grid on a pointer: the grid sits centred on a letterbox. */
+/* A stage wider than the grid centres it on a letterbox. */
 .letterbox {
   background: color-mix(in srgb, var(--term-bg) 55%, var(--ground));
 }
@@ -56,13 +66,16 @@
   outline: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
 }
 
-/* A phone pans the grid sideways from its left edge, the live row at the bottom. */
-.pan .fixed {
-  scrollbar-width: none;
-}
+/* A narrower one pans the grid from its left edge, the live row at the bottom.
+   Touch hides the scrollbars and draws its own indicator. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .pan .fixed {
+    scrollbar-width: none;
+  }
 
-.pan .fixed::-webkit-scrollbar {
-  display: none;
+  .pan .fixed::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .pan .fixed > :global(.xterm) {

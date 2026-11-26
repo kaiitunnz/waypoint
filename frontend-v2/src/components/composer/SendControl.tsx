@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import { useHoldMenu } from "@waypoint/web-core/hooks/useHoldMenu";
 import { SEND_MODES, type SendMode } from "@waypoint/web-core/session/sendModes";
 
@@ -20,13 +22,17 @@ interface SendControlProps {
 
 export function SendControl({ canSend, sending, dormant, onSend, keepFocus }: SendControlProps) {
   const modes = dormant ? SEND_MODES.filter((mode) => mode.value === "now") : SEND_MODES;
-  const { open, close, triggerRef, itemRefs, wrapRef, wrapProps, triggerProps, menuProps } = useHoldMenu(
+  const { open, close, dismiss, triggerRef, itemRefs, wrapRef, wrapProps, triggerProps, menuProps } = useHoldMenu(
     !canSend,
     () => {
       keepFocus();
       onSend("now");
     },
   );
+  // Sending from the keyboard goes around this control, and disables it.
+  useEffect(() => {
+    if (!canSend) dismiss();
+  }, [canSend, dismiss]);
   return (
     <div ref={wrapRef} className={styles.wrap} {...wrapProps}>
       <button

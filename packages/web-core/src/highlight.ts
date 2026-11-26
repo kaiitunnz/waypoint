@@ -214,6 +214,14 @@ function classifyDiffLine(line: string): DiffLineKind {
   return "context";
 }
 
+function classifyHunkLine(line: string): DiffLineKind {
+  if (line.startsWith("+")) return "add";
+  if (line.startsWith("-")) return "del";
+  // "No newline at end of file", and a header after a hunk that ran short.
+  if (line.startsWith("\\ ") || line.startsWith("diff --git")) return "meta";
+  return line.startsWith("@@") ? "hunk" : "context";
+}
+
 interface DiffStructRow {
   kind: DiffLineKind;
   oldNo: number | null;
@@ -230,13 +238,19 @@ function parseDiffStructure(diff: string): DiffStructRow[] {
   let oldLine = 0;
   let newLine = 0;
   let inHunk = false;
+  // Lines the hunk's header says are still to come: among them a leading `+++` or
+  // `---` is content, not a file header.
+  let oldLeft = 0;
+  let newLeft = 0;
   for (const line of body.split("\n")) {
-    const kind = classifyDiffLine(line);
+    const kind = oldLeft > 0 || newLeft > 0 ? classifyHunkLine(line) : classifyDiffLine(line);
     if (kind === "hunk") {
-      const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
       if (match) {
         oldLine = Number(match[1]);
-        newLine = Number(match[2]);
+        newLine = Number(match[3]);
+        oldLeft = Number(match[2] ?? 1);
+        newLeft = Number(match[4] ?? 1);
         inHunk = true;
       }
       rows.push({ kind, oldNo: null, newNo: null, content: line });
@@ -247,6 +261,8 @@ function parseDiffStructure(diff: string): DiffStructRow[] {
       continue;
     }
     const content = line.slice(1);
+    if (kind !== "add") oldLeft -= 1;
+    if (kind !== "del") newLeft -= 1;
     if (kind === "add") {
       rows.push({ kind, oldNo: null, newNo: newLine++, content });
     } else if (kind === "del") {

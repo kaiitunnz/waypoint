@@ -84,3 +84,18 @@ describe("fullDiff", () => {
     expect(rows.every((row) => row.kind === "line")).toBe(true);
   });
 });
+
+describe("buildPlainDiffLines", () => {
+  const shown = (diff: string) =>
+    fullDiff(buildPlainDiffLines(diff)).map((row) => (row.kind === "line" ? `${row.line.kind}:${row.line.tokens[0].text}` : row.kind));
+
+  it("keeps hunk lines that look like file headers", () => {
+    const diff = "--- a/x.sql\n+++ b/x.sql\n@@ -1,3 +1,3 @@\n keep\n--- old comment\n+++i;\n+ok\n tail\n";
+    expect(shown(diff)).toEqual(["context:keep", "del:-- old comment", "add:++i;", "add:ok", "context:tail"]);
+  });
+
+  it("reads the next file's headers once a hunk is done", () => {
+    const diff = "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-one\n+two\n\\ No newline at end of file\n--- a/b\n+++ b/b\n@@ -0,0 +1 @@\n+three\n";
+    expect(shown(diff)).toEqual(["del:one", "add:two", "add:three"]);
+  });
+});

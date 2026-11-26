@@ -46,6 +46,13 @@
   margin-bottom: 8px;
 }
 
+/* The 44px tap target reaches 8px above the chip, so it clears the floating bar at the top. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .older {
+    padding-top: 8px;
+  }
+}
+
 .jump {
   composes: hit from "../../styles/hit.module.css";
   position: absolute;

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, type MouseEvent, useContext, useState } from "react";
 
 import { attachmentUrl } from "@waypoint/web-core/api";
 import { filesSummary, formatFileSize, typeTag } from "@waypoint/web-core/attachments";
@@ -162,6 +162,10 @@ export function MessageAttachments({ specs }: { specs: AttachmentSpec[] }) {
   );
 }
 
+// A tray button that takes focus collapses the composer's leading buttons, which
+// reflows the tray and can move the button before its click lands.
+const keepFocus = (event: MouseEvent) => event.preventDefault();
+
 export function AttachmentTray({
   items,
   onRemove,
@@ -179,7 +183,12 @@ export function AttachmentTray({
     <div className="attachment-tray-wrap">
       <div className="attachment-tray-header">
         <span className="attachment-tray-count">{summary}</span>
-        <button type="button" className="attachment-clear" onClick={onClear}>
+        <button
+          type="button"
+          className="attachment-clear"
+          onMouseDown={keepFocus}
+          onClick={onClear}
+        >
           Clear all
         </button>
       </div>
@@ -224,8 +233,7 @@ export function AttachmentTray({
                 className="attachment-retry"
                 aria-label={`Retry ${item.name}`}
                 title="Retry upload"
-                // Focus inside the composer collapses its buttons, which moves this one.
-                onMouseDown={(event) => event.preventDefault()}
+                onMouseDown={keepFocus}
                 onClick={() => onRetry(item.localId)}
               >
                 ↻
@@ -235,7 +243,7 @@ export function AttachmentTray({
               type="button"
               className="attachment-remove"
               aria-label={`Remove ${item.name}`}
-              onMouseDown={(event) => event.preventDefault()}
+              onMouseDown={keepFocus}
               onClick={() => onRemove(item.localId)}
             >
               ×

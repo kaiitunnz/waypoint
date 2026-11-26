@@ -131,8 +131,8 @@ class Scheduler:
         self._wakeup = asyncio.Event()
         # Message schedules being delivered, by the loop or a send-now request.
         self._sending: set[str] = set()
-        # One-shots the loop has run. One whose outcome could not be written stays
-        # pending and must not run again.
+        # One-shots already run, by the loop or a send-now. One whose outcome could
+        # not be written stays pending, and the loop must not run it again.
         self._attempted: set[str] = set()
 
     async def start(self) -> None:

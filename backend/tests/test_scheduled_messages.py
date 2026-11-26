@@ -1413,6 +1413,8 @@ async def test_a_send_now_whose_outcome_is_lost_is_not_sent_again(
     await runtime.scheduler._fire_due_schedules()
 
     assert sends == [("sess-1", "once")]
+    # Still pending and overdue, but it must not keep the loop polling hot.
+    assert runtime.scheduler._compute_wait_seconds() == 60.0
 
 
 @pytest.mark.asyncio

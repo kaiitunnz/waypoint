@@ -1,10 +1,10 @@
 import { CWD_NOT_FOUND_DETAIL, SSH_MASTER_REQUIRED_DETAIL } from "./api";
 import { humaniseBackend, permissionModeLabel, type BackendCatalog } from "./backends";
-import { cronCadence } from "./recurrence";
+import { cronCadence, WEEKDAY_LABELS } from "./recurrence";
 import { messageText } from "./session/heldMessages";
 import type { MessageSchedule, ScheduledSession } from "./types";
+import { splitPath } from "./workspacePaths";
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAY_NAMES = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_MS = 86_400_000;
@@ -17,7 +17,7 @@ const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(),
 export function dayClock(date: Date, now: Date): string {
   const days = Math.round((startOfDay(date) - startOfDay(now)) / DAY_MS);
   if (days === 0) return `today at ${clock(date)}`;
-  if (Math.abs(days) < 7) return `${WEEKDAYS[date.getDay()]} ${clock(date)}`;
+  if (Math.abs(days) < 7) return `${WEEKDAY_LABELS[date.getDay()]} ${clock(date)}`;
   return `${MONTHS[date.getMonth()]} ${date.getDate()} ${clock(date)}`;
 }
 
@@ -63,7 +63,7 @@ export function failureText(reason: string | null | undefined): string {
 export type ScheduledAction = "open" | "openLast" | "sendNow" | "cancel" | "dismiss";
 
 export interface ScheduledRowView {
-  key: string;
+  id: string;
   recurring: boolean;
   title: string;
   // Time left until a pending run.
@@ -79,6 +79,7 @@ export interface ScheduledRowView {
 }
 
 export interface ScheduledLaunchView extends ScheduledRowView {
+  kind: "launch";
   // Agent, model and permission mode.
   agent: string;
   folder: string;
@@ -86,6 +87,7 @@ export interface ScheduledLaunchView extends ScheduledRowView {
 }
 
 export interface ScheduledMessageView extends ScheduledRowView {
+  kind: "message";
   target: string;
   sessionId: string;
 }
@@ -124,7 +126,7 @@ function lastRun(record: { cron?: string | null; last_run_at?: string | null; la
   return { text: `Last run ${dayClock(new Date(record.last_run_at), now)}, ${record.last_run_status ?? "done"}`, failed: false };
 }
 
-const folderName = (cwd: string) => cwd.replace(/\/+$/, "").split("/").pop() || cwd;
+const folderName = (cwd: string) => splitPath(cwd.replace(/\/+$/, "")).base || cwd;
 
 export function launchRowView(
   schedule: ScheduledSession,
@@ -153,7 +155,8 @@ export function launchRowView(
   else if (schedule.status === "launched" && schedule.session_id) actions = ["open", "dismiss"];
   else actions = ["dismiss"];
   return {
-    key: `launch:${schedule.id}`,
+    id: schedule.id,
+    kind: "launch",
     recurring,
     title: schedule.title || folderName(schedule.cwd),
     countdown: pending ? countdown(at, now) : null,
@@ -178,16 +181,20 @@ export function messageRowView(
   const idle = message.trigger === "idle";
   const pending = message.status === "pending";
   const at = message.scheduled_at ? new Date(message.scheduled_at) : null;
+  // An idle message's time is when it was queued until a delivery replaces it.
+  const idleRanAt = at && message.scheduled_at !== message.created_at ? at : null;
   let state: string;
   if (message.status === "failed") state = `Failed: ${failureText(message.failure_reason)}`;
   else if (message.status === "cancelled") state = "Cancelled";
-  else if (message.status === "sent") state = idle ? "Sent when idle" : at && !recurring ? `Sent ${dayClock(at, now)}` : "Sent";
+  else if (message.status === "sent" && idle) state = idleRanAt ? `Sent when idle, ${dayClock(idleRanAt, now)}` : "Sent when idle";
+  else if (message.status === "sent") state = at && !recurring ? `Sent ${dayClock(at, now)}` : "Sent";
   else if (idle) state = "When idle";
   else if (recurring) state = recurrenceSentence(message.cron ?? "", message.timezone, localZone);
   else state = at ? capitalize(dayClock(at, now)) : "Pending";
   const command = message.command ? `/${message.command.name}` : "";
   return {
-    key: `message:${message.id}`,
+    id: message.id,
+    kind: "message",
     recurring,
     title: messageText(message.text || command, message.attachments?.length ?? 0),
     countdown: pending && !idle && at ? countdown(at, now) : null,

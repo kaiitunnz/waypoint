@@ -1668,7 +1668,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       {session ? (
         <ScheduledMessagesDock
           messages={scheduledMessages.messages}
-          onCancel={scheduledMessages.cancel}
+          onCancel={(scheduleId) =>
+            runHeldAction(() => scheduledMessages.cancel(scheduleId))
+          }
         />
       ) : null}
     </>

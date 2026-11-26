@@ -134,8 +134,3 @@
 .actions .strong {
   color: var(--text-strong);
 }
-
-.actions .quiet {
-  font-weight: 400;
-  color: var(--muted);
-}

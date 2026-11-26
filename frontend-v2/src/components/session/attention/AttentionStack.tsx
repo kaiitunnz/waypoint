@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { cancelHeldMessages, releaseHeldMessages } from "@waypoint/web-core/api";
 import { approvalDecisionsFor, supportsApprovalNote, type BackendCatalog } from "@waypoint/web-core/backends";
 import type { PlanViewModel } from "@waypoint/web-core/events";
-import { buildMessageQueue, type QueueAction, type QueueItem } from "@waypoint/web-core/session/messageQueue";
+import { buildMessageQueue, sendNowOutcome, type QueueAction, type QueueItem } from "@waypoint/web-core/session/messageQueue";
 import type { SideQuestionState } from "@waypoint/web-core/session/sideQuestions";
 import type {
   EventRecord,
@@ -100,12 +100,9 @@ export function AttentionStack({
   };
   const onAction = async (item: QueueItem, action: QueueAction) => {
     if (item.kind === "scheduled") {
-      if (action === "cancel") await scheduled.cancel(item.id);
+      if (action === "cancel") await run(() => scheduled.cancel(item.id), "Could not cancel the message");
       if (action === "sendNow") {
-        await run(async () => {
-          const held = await scheduled.sendNow(item.id);
-          toast({ message: held ? "Held: the session will send it when it can" : "Sent" });
-        }, "Could not send the message");
+        await run(async () => toast({ message: sendNowOutcome(await scheduled.sendNow(item.id)) }), "Could not send the message");
       }
       return;
     }

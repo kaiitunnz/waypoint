@@ -8,7 +8,6 @@ import {
   clearMessageScheduleHistory,
   clearScheduleHistory,
   deleteMessageSchedule,
-  isAuthError,
   sendMessageScheduleNow,
 } from "@waypoint/web-core/api";
 import type { BackendCatalog } from "@waypoint/web-core/backends";
@@ -23,6 +22,7 @@ import {
   type ScheduledLaunchView,
   type ScheduledMessageView,
 } from "@waypoint/web-core/scheduledSheet";
+import { sendNowOutcome } from "@waypoint/web-core/session/messageQueue";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import type { MessageSchedule, ScheduledSession } from "@waypoint/web-core/types";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
@@ -35,9 +35,9 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
-import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { useShellData } from "@/lib/shell-data";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 import styles from "./ScheduledSheet.module.css";
 
@@ -53,14 +53,6 @@ const ACTION_LABEL: Record<ScheduledAction, string> = {
 };
 
 type RowView = ScheduledLaunchView | ScheduledMessageView;
-
-function useFailure() {
-  const { toast } = useToast();
-  return (error: unknown, fallback: string) => {
-    if (isAuthError(error)) handleAuthFailure();
-    else toast({ message: error instanceof Error ? error.message : fallback, tone: "error" });
-  };
-}
 
 interface ScheduledSheetProps {
   onClose: () => void;
@@ -114,7 +106,7 @@ interface GroupProps {
 function Group({ kind, title, rows, onClose }: GroupProps) {
   const { host, token } = useShellData();
   const { toast } = useToast();
-  const fail = useFailure();
+  const fail = useFailureToast();
   const [expanded, setExpanded] = useState(false);
   const [confirming, setConfirming] = useState(false);
   if (rows.length === 0) return null;
@@ -147,7 +139,7 @@ function Group({ kind, title, rows, onClose }: GroupProps) {
       </div>
       <ul className={styles.rows}>
         {shown.map((row) => (
-          <Row key={row.key} row={row} onClose={onClose} />
+          <Row key={row.id} row={row} onClose={onClose} />
         ))}
       </ul>
       {hidden > 0 ? (
@@ -171,11 +163,10 @@ function Row({ row, onClose }: { row: RowView; onClose: () => void }) {
   const { host, token } = useShellData();
   const router = useRouter();
   const { toast } = useToast();
-  const fail = useFailure();
+  const fail = useFailureToast();
   const [busy, setBusy] = useState(false);
-  const launch = "folder" in row ? row : null;
-  const message = "target" in row ? row : null;
-  const id = row.key.slice(row.key.indexOf(":") + 1);
+  const launch = row.kind === "launch" ? row : null;
+  const message = row.kind === "message" ? row : null;
 
   async function act(action: ScheduledAction) {
     if (action === "open" || action === "openLast") {
@@ -188,12 +179,12 @@ function Row({ row, onClose }: { row: RowView; onClose: () => void }) {
     setBusy(true);
     try {
       if (action === "sendNow") {
-        const { held } = await sendMessageScheduleNow(host, token, id);
-        toast({ message: held ? "Held: the session will send it when it can" : "Sent" });
-      } else if (launch) {
-        await cancelSchedule(host, token, id);
+        const { held } = await sendMessageScheduleNow(host, token, row.id);
+        toast({ message: sendNowOutcome(held) });
+      } else if (row.kind === "launch") {
+        await cancelSchedule(host, token, row.id);
       } else {
-        await deleteMessageSchedule(host, token, id);
+        await deleteMessageSchedule(host, token, row.id);
       }
     } catch (error) {
       fail(error, "Could not update the schedule");
@@ -237,7 +228,7 @@ function Row({ row, onClose }: { row: RowView; onClose: () => void }) {
               key={action}
               variant="text"
               size="sm"
-              className={action === "cancel" || action === "dismiss" ? styles.quiet : styles.strong}
+              className={action === "cancel" || action === "dismiss" ? undefined : styles.strong}
               disabled={busy}
               onClick={() => void act(action)}
             >

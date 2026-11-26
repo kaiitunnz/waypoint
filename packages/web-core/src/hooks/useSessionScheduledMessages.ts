@@ -49,27 +49,29 @@ export function useSessionScheduledMessages(
     return () => window.clearInterval(id);
   }, [refresh, messages]);
 
+  // Both actions throw a failure for the caller to report.
   const cancel = useCallback(
     async (scheduleId: string) => {
       setMessages((current) => current.filter((m) => m.id !== scheduleId));
       try {
         await deleteMessageSchedule(host, token, scheduleId);
-      } catch {
+      } catch (error) {
         // Re-sync from the server if the cancel didn't land.
-        void refresh();
+        await refresh();
+        throw error;
       }
     },
     [host, token, refresh],
   );
 
-  // Delivers one now and resolves to whether the session held it; a failure is
-  // thrown for the caller to report.
+  // Delivers one now and resolves to whether the session held it, once the list
+  // reflects it.
   const sendNow = useCallback(
     async (scheduleId: string): Promise<boolean> => {
       try {
         return (await sendMessageScheduleNow(host, token, scheduleId)).held;
       } finally {
-        void refresh();
+        await refresh();
       }
     },
     [host, token, refresh],

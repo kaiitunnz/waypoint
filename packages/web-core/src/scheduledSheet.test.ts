@@ -162,10 +162,14 @@ describe("messageRowView", () => {
       target: "session abc123",
     });
     expect(messageRowView(message({ trigger: "idle", status: "sent" }), "t", now, "UTC")).toMatchObject({
-      state: "Sent when idle",
+      state: "Sent when idle, today at 14:41",
       actions: ["open", "dismiss"],
       resolved: true,
     });
+    // A record delivered without a recorded time still holds its queue time.
+    expect(
+      messageRowView(message({ trigger: "idle", status: "sent", scheduled_at: iso(local(26, 9)) }), "t", now, "UTC").state,
+    ).toBe("Sent when idle");
     expect(messageRowView(message({ status: "failed", failure_reason: "session is busy" }), "t", now, "UTC")).toMatchObject({
       state: "Failed: session is busy",
       failed: true,

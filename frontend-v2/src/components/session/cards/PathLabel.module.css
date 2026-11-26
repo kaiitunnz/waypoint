@@ -10,7 +10,8 @@
 }
 
 /* Inline blocks, so a selection copies as one unbroken path; flex items would copy as
-   separate lines. `--name` and `--tail` are their widths in monospace columns. */
+   separate lines. `--name` and `--tail` are the file name's and its kept tail's widths
+   in monospace columns, each 1ch less the letter-spacing. */
 .dir,
 .head,
 .tail {

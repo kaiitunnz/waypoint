@@ -33,7 +33,7 @@ function Line({ line }: { line: DiffLine }) {
   );
 }
 
-// Unchanged lines between two changes that the diff carries: they open where they are.
+// Unchanged lines between two changes that the diff carries.
 function ContextFold({ lines }: { lines: DiffLine[] }) {
   const [open, setOpen] = useState(false);
   return (

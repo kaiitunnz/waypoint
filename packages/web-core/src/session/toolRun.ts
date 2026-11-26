@@ -131,10 +131,9 @@ const PHRASE_ORDER: Category[] = [
   "other",
 ];
 
-// The chips on a collapsed run: a glyph and a count, in a fixed order.
+// The chips on a collapsed run: a glyph, what it counts and the count, in a fixed order.
 export interface RunGlyph {
   glyph: string;
-  // What the glyph counts.
   label: string;
   count: number;
 }

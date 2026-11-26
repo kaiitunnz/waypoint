@@ -11,7 +11,7 @@ import {
   type RefObject,
 } from "react";
 
-// How long a mouse hover or a held touch takes to open the menu.
+// How long a mouse hover or a held touch takes to count as a hold.
 export const HOLD_MS = 450;
 
 export interface HoldMenu {

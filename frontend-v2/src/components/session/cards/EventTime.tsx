@@ -4,7 +4,7 @@ import { formatEventTime } from "@waypoint/web-core/session/cardText";
 export function EventTime({ ts, until, className }: { ts: string; until?: string; className?: string }) {
   const from = formatEventTime(ts);
   const to = until ? formatEventTime(until) : from;
-  if (!until || to === from) {
+  if (to === from) {
     return (
       <time className={className} dateTime={ts}>
         {from}

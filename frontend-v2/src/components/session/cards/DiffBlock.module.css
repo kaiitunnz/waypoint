@@ -23,7 +23,6 @@
   color: var(--text);
 }
 
-/* A rename takes two lines: the old path, then an arrow and the new one. */
 .moved {
   display: flex;
   flex-direction: column;
@@ -34,7 +33,6 @@
   display: flex;
   align-items: baseline;
   gap: 6px;
-  min-width: 0;
 }
 
 .stats {

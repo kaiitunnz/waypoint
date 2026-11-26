@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeNavKey, formatBadgeCount, NAV_DESTINATIONS, sessionFilesHref, sessionHref, showsTabBar } from "./shellNav";
+import { NAV_DESTINATIONS, activeNavKey, formatBadgeCount, isSettingsPath, sessionFilesHref, sessionHref, settingsSectionHref, settingsSectionOf, showsTabBar } from "./shellNav";
 
 describe("activeNavKey", () => {
   it("maps each route to its destination", () => {
@@ -63,5 +63,27 @@ describe("sessionFilesHref", () => {
 
   it("opens the explorer at its root without a path", () => {
     expect(sessionFilesHref("a b")).toBe("/session/a%20b/files");
+  });
+});
+
+describe("settings paths", () => {
+  it("covers the page and its sections, nothing else", () => {
+    expect(isSettingsPath("/settings")).toBe(true);
+    expect(isSettingsPath("/settings/")).toBe(true);
+    expect(isSettingsPath(settingsSectionHref("session-lists"))).toBe(true);
+    expect(isSettingsPath("/settingsx")).toBe(false);
+    expect(isSettingsPath("/session/settings")).toBe(false);
+  });
+
+  it("reads the section back from its path", () => {
+    expect(settingsSectionOf(settingsSectionHref("session lists"))).toBe("session lists");
+    expect(settingsSectionOf("/settings/appearance/")).toBe("appearance");
+    expect(settingsSectionOf("/settings")).toBeUndefined();
+    expect(settingsSectionOf("/")).toBeUndefined();
+  });
+
+  it("keeps the page outside the navigation and the tab bar", () => {
+    expect(activeNavKey("/settings")).toBeNull();
+    expect(showsTabBar("/settings")).toBe(false);
   });
 });

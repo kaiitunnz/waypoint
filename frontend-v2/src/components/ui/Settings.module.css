@@ -1,0 +1,48 @@
+.heading {
+  padding: 18px 0 6px;
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.rows > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  font-size: var(--f-body);
+  color: var(--text);
+}
+
+.pressable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.detail {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chev {
+  display: inline-grid;
+  place-items: center;
+  color: var(--faint);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .row {
+    min-height: 44px;
+  }
+}

@@ -118,6 +118,8 @@ export interface ActivityLoaderOptions<T> {
   fetch: (id: string, signal: AbortSignal) => Promise<T>;
   // `lastEventAt` is the value the result was fetched for.
   onResult: (id: string, result: T, lastEventAt: string) => void;
+  // A fetch that failed; one the loader aborted itself is not a failure.
+  onFailure?: (id: string, lastEventAt: string) => void;
   // A change settles for this long before it is fetched, but never waits past
   // `maxWaitMs`, so a session that streams constantly still refreshes.
   settleMs?: number;
@@ -234,6 +236,7 @@ export class ActivityLoader<T> {
             const previous = this.failures.get(id);
             const count = previous?.lastEventAt === held.lastEventAt ? previous.count + 1 : 1;
             this.failures.set(id, { lastEventAt: held.lastEventAt, count });
+            this.options.onFailure?.(id, held.lastEventAt);
           }
           this.inflight.delete(id);
           if (this.pending.get(id)?.ready) this.enqueue(id);

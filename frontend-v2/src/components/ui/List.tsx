@@ -23,6 +23,8 @@ interface ListRowProps {
   selected?: boolean;
   // One-line row (exited): no status line.
   compact?: boolean;
+  // One line that keeps the title's type.
+  single?: boolean;
   dimmed?: boolean;
   href?: string;
   onClick?: () => void;
@@ -39,6 +41,7 @@ export function ListRow({
   trailing,
   selected,
   compact,
+  single,
   dimmed,
   href,
   onClick,
@@ -48,6 +51,7 @@ export function ListRow({
     styles.row,
     !lamp && styles.noLamp,
     compact && styles.compact,
+    single && styles.single,
     dimmed && styles.dimmed,
     selected && styles.selected,
   );

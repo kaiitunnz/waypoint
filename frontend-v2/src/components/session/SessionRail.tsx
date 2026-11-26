@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { formatSessionTime, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
@@ -61,7 +62,8 @@ export function SessionRail({ currentId, onClose, onPick }: SessionRailProps) {
 
   // The previews follow the rows that show them: pinned and live, not the exited.
   const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
-  const activities = useSessionActivity(host, token, previewed, handleAuthFailure);
+  const [previews] = useConversationPreviews();
+  const activities = useSessionActivity(host, token, previewed, handleAuthFailure, previews);
   const { count: exitedCount, listed, paging } = useExitedSessions({ query: "", live: exitedLive, enabled: showExited, remember: true });
   const asks = feed.pendingAsks?.items ?? [];
 
@@ -69,14 +71,16 @@ export function SessionRail({ currentId, onClose, onPick }: SessionRailProps) {
     const lamp = sessionLamp(session, feed.askSessionIds.has(session.id));
     const word = lampWord(lamp, session.status);
     const ask = asks.find((item) => item.session_id === session.id);
-    const single = section === "exited";
+    const exited = section === "exited";
+    // Needs-you rows keep their ask line.
+    const single = exited || (!previews && section !== "needs");
     return (
       <li key={session.id}>
         <Link
           href={sessionHref(session.id)}
           onNavigate={onPick && (() => onPick(session.id !== currentId))}
           aria-current={session.id === currentId ? "page" : undefined}
-          className={cx(styles.item, session.id === currentId && styles.on, single && styles.single)}
+          className={cx(styles.item, session.id === currentId && styles.on, single && styles.single, exited && styles.exited)}
         >
           <StatusLamp state={lamp} size="sm" label={word} />
           <span className={styles.name}>{session.title}</span>

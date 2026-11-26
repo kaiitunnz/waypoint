@@ -18,7 +18,7 @@
   overscroll-behavior: contain;
 }
 
-/* The column fills the view, so "Load older" stays at its top. */
+/* The column fills the view, so a short transcript can sit at its bottom. */
 .col {
   display: flex;
   flex: 1 0 auto;
@@ -44,6 +44,13 @@
   display: flex;
   justify-content: center;
   margin-bottom: 8px;
+}
+
+/* The 44px tap target reaches 8px above the 28px chip; the padding keeps that clear of the floating bar. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .older {
+    padding-top: 8px;
+  }
 }
 
 .jump {

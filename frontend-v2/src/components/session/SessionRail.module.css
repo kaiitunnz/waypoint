@@ -110,7 +110,7 @@
   min-height: 36px;
 }
 
-.single .name {
+.exited .name {
   font-weight: 400;
   color: var(--muted);
 }

@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { InboxItemPane } from "@/components/InboxItemPane";
 import { InboxRow } from "@/components/InboxRow";
@@ -11,127 +11,38 @@ import { SearchInput } from "@/components/SearchInput";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   batchDeleteInboxItems,
-  connectSessionsSocket,
   deleteInboxItem,
   deleteResolvedInboxItems,
-  fetchInboxList,
   isAuthError,
 } from "@waypoint/web-core/api";
+import { useInboxList } from "@waypoint/web-core/hooks/useInboxList";
+import { useResizablePane } from "@waypoint/web-core/hooks/useResizablePane";
+import { useSelection } from "@waypoint/web-core/hooks/useSelection";
+import {
+  inboxBlockChips,
+  inboxRelativeTime,
+  type InboxStatusFilter,
+} from "@waypoint/web-core/inbox";
 import { clearToken, readHost, readToken } from "@waypoint/web-core/store";
 import { useTheme } from "@/lib/theme";
-import type { InboxItem, InboxStatus, SessionEnvelope } from "@waypoint/web-core/types";
 
-type StatusFilter = InboxStatus | "all";
+const SIDEBAR: Parameters<typeof useResizablePane>[0] = {
+  storageKey: "waypoint.inboxSidebarWidth",
+  defaultWidth: 340,
+  min: 260,
+  max: 560,
+  snap: 14,
+};
 
-const LIMIT = 30;
-
-const SIDEBAR_WIDTH_KEY = "waypoint.inboxSidebarWidth";
-const SIDEBAR_WIDTH_DEFAULT = 340;
-const SIDEBAR_WIDTH_MIN = 260;
-const SIDEBAR_WIDTH_MAX = 560;
-const SIDEBAR_SNAP_THRESHOLD = 14;
-
-function clampSidebarWidth(w: number): number {
-  const max =
-    typeof window === "undefined"
-      ? SIDEBAR_WIDTH_MAX
-      : Math.min(SIDEBAR_WIDTH_MAX, Math.round(window.innerWidth * 0.5));
-  return Math.max(SIDEBAR_WIDTH_MIN, Math.min(w, max));
+function toggleResizingClass(dragging: boolean) {
+  document.body.classList.toggle("wp-dock-resizing", dragging);
 }
 
-// A width within the snap threshold of the default collapses to `undefined`,
-// the sentinel for "no stored preference" that reverts to the default position.
-function snapSidebarWidth(w: number): number | undefined {
-  const clamped = clampSidebarWidth(w);
-  return Math.abs(clamped - SIDEBAR_WIDTH_DEFAULT) <= SIDEBAR_SNAP_THRESHOLD
-    ? undefined
-    : clamped;
-}
-
-const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
+const STATUS_FILTERS: { id: InboxStatusFilter; label: string }[] = [
   { id: "open", label: "Open" },
   { id: "resolved", label: "Resolved" },
   { id: "all", label: "All" },
 ];
-
-function matchesFilter(
-  item: InboxItem,
-  filter: { status: StatusFilter; q: string },
-): boolean {
-  if (filter.status !== "all" && item.status !== filter.status) return false;
-  const query = filter.q.trim().toLowerCase();
-  if (query) {
-    const hay = `${item.subject} ${item.from_label ?? ""}`.toLowerCase();
-    if (!hay.includes(query)) return false;
-  }
-  return true;
-}
-
-function byUpdatedDesc(a: InboxItem, b: InboxItem): number {
-  if (a.updated_at < b.updated_at) return 1;
-  if (a.updated_at > b.updated_at) return -1;
-  return 0;
-}
-
-function relativeTime(value: string): string {
-  const then = new Date(value).getTime();
-  if (Number.isNaN(then)) return "";
-  const sec = Math.round((Date.now() - then) / 1000);
-  if (sec < 45) return "now";
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const day = Math.round(hr / 24);
-  if (day < 7) return `${day}d`;
-  const wk = Math.round(day / 7);
-  if (wk < 5) return `${wk}w`;
-  return new Date(value).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-}
-
-type BlockChip = { key: string; label: string; pending: boolean };
-
-function blockChips(item: InboxItem): BlockChip[] {
-  let questions = 0;
-  let questionsPending = 0;
-  let approvals = 0;
-  let approvalsPending = 0;
-  let files = 0;
-  for (const block of item.blocks) {
-    if (block.type === "question") {
-      questions += 1;
-      if (block.answer === null) questionsPending += 1;
-    } else if (block.type === "approval") {
-      approvals += 1;
-      if (block.answer === null) approvalsPending += 1;
-    } else if (block.type === "attachment") {
-      files += 1;
-    }
-  }
-  const chips: BlockChip[] = [];
-  if (questions > 0)
-    chips.push({
-      key: "q",
-      label: `${questions} question${questions > 1 ? "s" : ""}`,
-      pending: questionsPending > 0,
-    });
-  if (approvals > 0)
-    chips.push({
-      key: "a",
-      label: `${approvals} approval${approvals > 1 ? "s" : ""}`,
-      pending: approvalsPending > 0,
-    });
-  if (files > 0)
-    chips.push({
-      key: "f",
-      label: `${files} file${files > 1 ? "s" : ""}`,
-      pending: false,
-    });
-  return chips;
-}
 
 function EnvelopeGlyph() {
   return (
@@ -201,75 +112,38 @@ function InboxPageInner() {
   const { theme } = useTheme();
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
-  const [items, setItems] = useState<InboxItem[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<StatusFilter>("open");
+  const [status, setStatus] = useState<InboxStatusFilter>("open");
   const [q, setQ] = useState("");
-  const [debouncedQ, setDebouncedQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"list" | "item">("list");
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState<number | undefined>(() => {
-    if (typeof window === "undefined") return undefined;
-    const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
-    return Number.isFinite(stored) && stored > 0
-      ? clampSidebarWidth(stored)
-      : undefined;
-  });
+  const sidebar = useResizablePane(SIDEBAR, toggleResizingClass);
   const didInit = useRef(false);
-  const filterRef = useRef({ status, q: debouncedQ });
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (sidebarWidth === undefined) {
-      window.localStorage.removeItem(SIDEBAR_WIDTH_KEY);
-    } else {
-      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
-    }
-  }, [sidebarWidth]);
-
-  const startSidebarResize = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startWidth = sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT;
-      const onMove = (ev: PointerEvent) =>
-        setSidebarWidth(snapSidebarWidth(startWidth + (ev.clientX - startX)));
-      const onUp = () => {
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        document.body.classList.remove("wp-dock-resizing");
-      };
-      document.body.classList.add("wp-dock-resizing");
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-    },
-    [sidebarWidth],
-  );
-
-  const onSidebarResizeKey = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "ArrowRight") {
-      e.preventDefault();
-      setSidebarWidth((w) => snapSidebarWidth((w ?? SIDEBAR_WIDTH_DEFAULT) + 24));
-    } else if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      setSidebarWidth((w) => snapSidebarWidth((w ?? SIDEBAR_WIDTH_DEFAULT) - 24));
-    }
-  }, []);
-
-  useEffect(() => {
-    filterRef.current = { status, q: debouncedQ };
-  }, [status, debouncedQ]);
 
   const handleAuthFailure = useCallback(() => {
     clearToken();
     setToken("");
     router.replace("/");
   }, [router]);
+
+  const {
+    items,
+    query: debouncedQ,
+    loading,
+    hasMore,
+    loadMore,
+    remove,
+  } = useInboxList({ host, token, status, q, onAuthFailure: handleAuthFailure });
+  const itemIds = useMemo(() => items.map((it) => it.id), [items]);
+  const {
+    selecting: selectMode,
+    selected: selectedIds,
+    allState,
+    start: startSelect,
+    exit: exitSelect,
+    toggle: toggleSelect,
+    toggleAll: toggleSelectAll,
+  } = useSelection(itemIds);
 
   useEffect(() => {
     setHost(readHost());
@@ -283,111 +157,6 @@ function InboxPageInner() {
       }
     }
   }, [searchParams]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQ(q), 250);
-    return () => clearTimeout(timer);
-  }, [q]);
-
-  useEffect(() => {
-    if (!host || !token) return;
-    let active = true;
-    setLoading(true);
-    fetchInboxList(host, token, {
-      status: status === "all" ? undefined : status,
-      q: debouncedQ || undefined,
-      limit: LIMIT,
-    })
-      .then((page) => {
-        if (!active) return;
-        setItems(page.items);
-        setCursor(page.cursor);
-        setHasMore(page.hasMore);
-      })
-      .catch((err) => {
-        if (active && isAuthError(err)) handleAuthFailure();
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [host, token, status, debouncedQ, handleAuthFailure]);
-
-  useEffect(() => {
-    if (!host || !token) return;
-    let active = true;
-    let socket: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
-
-    function connect() {
-      socket = connectSessionsSocket(
-        host,
-        token,
-        (message: SessionEnvelope) => {
-          if (message.type !== "inbox_update") return;
-          const payload = message.payload;
-          const id = payload.item_id as string;
-          const deleted = Boolean(payload.deleted);
-          const updated = (payload.item as InboxItem | null) ?? null;
-          setItems((prev) => {
-            const next = prev.filter((it) => it.id !== id);
-            if (!deleted && updated && matchesFilter(updated, filterRef.current)) {
-              next.unshift(updated);
-            }
-            next.sort(byUpdatedDesc);
-            return next;
-          });
-        },
-        () => {
-          if (active) handleAuthFailure();
-        },
-        {
-          onOpen: () => {
-            attempt = 0;
-          },
-          onClose: () => {
-            if (!active) return;
-            const delay = Math.min(15000, 500 * 2 ** attempt);
-            attempt += 1;
-            reconnectTimer = setTimeout(connect, delay);
-          },
-        },
-      );
-    }
-    connect();
-
-    return () => {
-      active = false;
-      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      socket?.close();
-    };
-  }, [host, token, handleAuthFailure]);
-
-  const loadMore = useCallback(() => {
-    if (!cursor || loading || !host || !token) return;
-    setLoading(true);
-    fetchInboxList(host, token, {
-      status: status === "all" ? undefined : status,
-      q: debouncedQ || undefined,
-      limit: LIMIT,
-      cursor,
-    })
-      .then((page) => {
-        setItems((prev) => {
-          const seen = new Set(prev.map((it) => it.id));
-          return [...prev, ...page.items.filter((it) => !seen.has(it.id))];
-        });
-        setCursor(page.cursor);
-        setHasMore(page.hasMore);
-      })
-      .catch((err) => {
-        if (isAuthError(err)) handleAuthFailure();
-      })
-      .finally(() => setLoading(false));
-  }, [cursor, loading, host, token, status, debouncedQ, handleAuthFailure]);
 
   const select = useCallback(
     (id: string) => {
@@ -411,54 +180,22 @@ function InboxPageInner() {
         // The inbox_update {deleted} WS event also removes it; this is a
         // belt-and-braces immediate removal. Only clear selection if the
         // deleted row was the open one.
-        setItems((prev) => prev.filter((it) => it.id !== id));
+        remove(new Set([id]));
         if (id === selectedId) handleDeleted();
       } catch (err) {
         if (isAuthError(err)) handleAuthFailure();
       }
     },
-    [host, token, selectedId, handleDeleted, handleAuthFailure],
+    [host, token, selectedId, remove, handleDeleted, handleAuthFailure],
   );
 
   // Leaving the current filter/search invalidates any in-flight selection.
   useEffect(() => {
-    setSelectMode(false);
-    setSelectedIds(new Set());
-  }, [status, debouncedQ]);
+    exitSelect();
+  }, [status, debouncedQ, exitSelect]);
 
-  // Keep the selection to ids still present (WS deletions, load-more churn).
-  useEffect(() => {
-    setSelectedIds((prev) => {
-      if (prev.size === 0) return prev;
-      const present = new Set(items.map((it) => it.id));
-      const next = new Set<string>();
-      for (const id of prev) if (present.has(id)) next.add(id);
-      return next.size === prev.size ? prev : next;
-    });
-  }, [items]);
-
-  const toggleSelect = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const exitSelect = useCallback(() => {
-    setSelectMode(false);
-    setSelectedIds(new Set());
-  }, []);
-
-  const allSelected = items.length > 0 && selectedIds.size === items.length;
-  const someSelected = selectedIds.size > 0 && !allSelected;
-
-  const toggleSelectAll = useCallback(() => {
-    setSelectedIds((prev) =>
-      prev.size === items.length ? new Set() : new Set(items.map((it) => it.id)),
-    );
-  }, [items]);
+  const allSelected = allState === "all";
+  const someSelected = allState === "some";
 
   const handleBatchDelete = useCallback(async () => {
     const ids = [...selectedIds];
@@ -475,7 +212,7 @@ function InboxPageInner() {
     try {
       const deleted = await batchDeleteInboxItems(host, token, ids);
       const gone = new Set(deleted);
-      setItems((prev) => prev.filter((it) => !gone.has(it.id)));
+      remove(gone);
       if (selectedId && gone.has(selectedId)) handleDeleted();
       exitSelect();
     } catch (err) {
@@ -489,6 +226,7 @@ function InboxPageInner() {
     host,
     token,
     selectedId,
+    remove,
     handleDeleted,
     exitSelect,
     handleAuthFailure,
@@ -508,7 +246,7 @@ function InboxPageInner() {
     try {
       const deleted = await deleteResolvedInboxItems(host, token);
       const gone = new Set(deleted);
-      setItems((prev) => prev.filter((it) => !gone.has(it.id)));
+      remove(gone);
       if (selectedId && gone.has(selectedId)) handleDeleted();
       exitSelect();
     } catch (err) {
@@ -516,7 +254,7 @@ function InboxPageInner() {
     } finally {
       setBusy(false);
     }
-  }, [busy, host, token, selectedId, handleDeleted, exitSelect, handleAuthFailure]);
+  }, [busy, host, token, selectedId, remove, handleDeleted, exitSelect, handleAuthFailure]);
 
   return (
     <div className="page-shell inbox-shell">
@@ -548,9 +286,7 @@ function InboxPageInner() {
         <div
           className="inbox-layout"
           style={
-            {
-              "--inbox-sidebar-w": `${sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT}px`,
-            } as React.CSSProperties
+            { "--inbox-sidebar-w": `${sidebar.rendered}px` } as React.CSSProperties
           }
         >
           <div
@@ -583,7 +319,7 @@ function InboxPageInner() {
                     className={`inbox-action${selectMode ? " active" : ""}`}
                     aria-pressed={selectMode}
                     disabled={!selectMode && items.length === 0}
-                    onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+                    onClick={() => (selectMode ? exitSelect() : startSelect())}
                   >
                     {selectMode ? "Done" : "Select"}
                   </button>
@@ -620,8 +356,8 @@ function InboxPageInner() {
                   key={item.id}
                   item={item}
                   active={item.id === selectedId}
-                  chips={blockChips(item)}
-                  timeLabel={relativeTime(item.updated_at)}
+                  chips={inboxBlockChips(item)}
+                  timeLabel={inboxRelativeTime(item.updated_at)}
                   onSelect={select}
                   onDelete={handleRowDelete}
                   selectMode={selectMode}
@@ -681,12 +417,12 @@ function InboxPageInner() {
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize inbox sidebar"
-              aria-valuenow={sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT}
-              aria-valuemin={SIDEBAR_WIDTH_MIN}
-              aria-valuemax={SIDEBAR_WIDTH_MAX}
+              aria-valuenow={sidebar.rendered}
+              aria-valuemin={SIDEBAR.min}
+              aria-valuemax={SIDEBAR.max}
               tabIndex={0}
-              onPointerDown={startSidebarResize}
-              onKeyDown={onSidebarResizeKey}
+              onPointerDown={sidebar.startDrag}
+              onKeyDown={sidebar.onKeyDown}
             />
           </div>
 

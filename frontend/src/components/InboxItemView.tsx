@@ -1,35 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, type ClipboardEvent } from "react";
+import { useRef, type ClipboardEvent } from "react";
 
 import { AttachmentTray, PaperclipIcon } from "@/components/AttachmentTray";
 import { filesFromDataTransfer } from "@waypoint/web-core/fileDrop";
-import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
-import { useElementFileDrop } from "@/components/FileDrop";
+import { useElementFileDrop } from "@waypoint/web-core/hooks/useElementFileDrop";
+import { useInboxBlock } from "@waypoint/web-core/hooks/useInboxBlock";
 import { InboxAttachment, InboxAttachments } from "@/components/InboxAttachment";
 import { InboxQuestionCard } from "@/components/InboxQuestionCard";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { SharedApprovalCard } from "@/components/ApprovalCard";
-import { submitInboxBlock, type InboxBlockSubmit } from "@waypoint/web-core/api";
-import type {
-  InboxApprovalAnswer,
-  InboxAttachmentRef,
-  InboxBlock,
-  InboxItem,
-  InboxQuestionAnswer,
-} from "@waypoint/web-core/types";
+import { blockAnswerEcho, blockEditLabel, isDecisionBlock } from "@waypoint/web-core/inbox";
+import type { InboxBlock, InboxItem } from "@waypoint/web-core/types";
 
 function formatTime(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
-function blockAnswered(block: InboxBlock): boolean {
-  if (block.type === "question" || block.type === "approval") {
-    return block.answer !== null;
-  }
-  return false;
 }
 
 export function InboxItemView({
@@ -110,164 +97,31 @@ function InboxBlockRow({
   item: InboxItem;
   block: InboxBlock;
 }) {
-  const [error, setError] = useState<string | null>(null);
-  const attachments = useAttachments({
-    host,
-    token,
-    sessionId: item.from_session_id,
-    pin: true,
-    onError: setError,
-  });
-  // Pre-fill with the existing reply so a re-submit visibly edits that one
-  // reply instead of silently overwriting an invisible prior (single reply
-  // per block — no thread).
-  const [notes, setNotes] = useState(block.reply?.notes ?? "");
-  const [submitting, setSubmitting] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(
-    () =>
-      new Set(block.type === "question" ? block.answer?.selected ?? [] : []),
-  );
-  const [other, setOther] = useState(
-    block.type === "question" ? block.answer?.other ?? "" : "",
-  );
+  const {
+    attachments,
+    error,
+    notes,
+    setNotes,
+    selected,
+    toggle,
+    other,
+    setOther,
+    decision,
+    setDecision,
+    editing,
+    answered,
+    pending,
+    submitting,
+    canSave,
+    startEdit,
+    cancel,
+    save,
+  } = useInboxBlock({ host, token, item, block });
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // The reply's persisted attachments as of the last successful submit. Carried
-  // forward on the next edit so a re-submit landing before the WS refresh (when
-  // the `block.reply` prop is still stale) can't drop just-sent files.
-  const sentReplyAttachmentsRef = useRef<InboxAttachmentRef[] | null>(null);
-
-  const [decision, setDecision] = useState<string | null>(
-    block.type === "approval" ? (block.answer?.decision ?? null) : null,
-  );
-
-  const answered = blockAnswered(block);
-  const isDecisionBlock =
-    block.type === "question" || block.type === "approval";
-  const pending = isDecisionBlock && !answered;
-  const hasCommittedReply = block.reply != null;
-  // Unanswered decision blocks open straight into edit mode (low-friction
-  // first answer); everything else starts read-only behind an Edit/Reply
-  // affordance.
-  const [editing, setEditing] = useState(pending);
+  const isDecision = isDecisionBlock(block);
   const { dragActive, dropProps } = useElementFileDrop(editing, attachments.addFiles);
   const decisionTag = block.type === "approval" ? "APPROVAL" : "QUESTION";
-  let answerEcho = "";
-  if (block.type === "approval" && block.answer) {
-    answerEcho = block.answer.decision;
-  } else if (block.type === "question" && block.answer) {
-    answerEcho = [
-      ...block.answer.selected,
-      ...(block.answer.other ? [block.answer.other] : []),
-    ].join(", ");
-  }
-
-  function toggle(label: string) {
-    if (block.type !== "question") return;
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (block.multi) {
-        if (next.has(label)) next.delete(label);
-        else next.add(label);
-      } else if (next.has(label) && next.size === 1) {
-        next.clear();
-      } else {
-        next.clear();
-        next.add(label);
-      }
-      return next;
-    });
-  }
-
-  // The answer built from the current edit-mode selection, or undefined when
-  // there's nothing to record. Omitting it (e.g. a required question with no
-  // selection) leaves any existing answer untouched and never sends an empty
-  // answer the backend would reject.
-  function buildAnswer(): InboxQuestionAnswer | InboxApprovalAnswer | undefined {
-    if (block.type === "question") {
-      if (selected.size === 0 && !other.trim()) return undefined;
-      return { selected: Array.from(selected), other: other.trim() || null };
-    }
-    if (block.type === "approval") {
-      return decision ? { decision } : undefined;
-    }
-    return undefined;
-  }
-
-  function startEdit() {
-    // Re-seed from the latest committed values so an edit opens on current
-    // state even if props changed since mount.
-    setSelected(
-      new Set(block.type === "question" ? (block.answer?.selected ?? []) : []),
-    );
-    setOther(block.type === "question" ? (block.answer?.other ?? "") : "");
-    setDecision(block.type === "approval" ? (block.answer?.decision ?? null) : null);
-    setNotes(block.reply?.notes ?? "");
-    setError(null);
-    setEditing(true);
-  }
-
-  function cancel() {
-    // Revert local edits and free any uncommitted (pinned) uploads.
-    setSelected(
-      new Set(block.type === "question" ? (block.answer?.selected ?? []) : []),
-    );
-    setOther(block.type === "question" ? (block.answer?.other ?? "") : "");
-    setDecision(block.type === "approval" ? (block.answer?.decision ?? null) : null);
-    setNotes(block.reply?.notes ?? "");
-    attachments.discardAll();
-    setError(null);
-    // Restore the initial edit state: a never-answered decision block
-    // (pending) stays open/answerable rather than collapsing into a
-    // misleading answered-looking view; everything else returns to its
-    // read-only trigger.
-    setEditing(pending);
-  }
-
-  async function save() {
-    if (submitting) return;
-    const answer = buildAnswer();
-    const trimmed = notes.trim();
-    const hasReply = trimmed.length > 0 || attachments.readyIds.length > 0;
-    if (!answer && !hasReply) {
-      // Nothing to persist — just leave edit mode.
-      cancel();
-      return;
-    }
-    const body: InboxBlockSubmit = {};
-    if (answer) body.answer = answer;
-    if (hasReply) {
-      const newAttachments = attachments.readyIds.map((attachmentId) => ({
-        session_id: item.from_session_id,
-        attachment_id: attachmentId,
-      }));
-      // The single reply is replaced on submit, so carry the existing reply's
-      // attachments forward — an edit must not drop prior files. Prefer the
-      // last-sent set (ref) over the prop, which lags the WS refresh.
-      const prior =
-        sentReplyAttachmentsRef.current ?? block.reply?.attachments ?? [];
-      body.reply = {
-        notes: trimmed || null,
-        attachments: [...prior, ...newAttachments],
-      };
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      await submitInboxBlock(host, token, item.id, block.id, body);
-      if (body.reply) {
-        sentReplyAttachmentsRef.current = body.reply.attachments ?? [];
-      }
-      // Drop the pinned reply blobs from the orphan set so the hook's
-      // unmount/pagehide cleanup can't delete them out from under the lead.
-      attachments.clear();
-      setNotes(trimmed);
-      setEditing(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed to submit");
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  const answerEcho = blockAnswerEcho(block);
 
   function onFilesPicked(files: FileList | null) {
     const list = files ? Array.from(files) : [];
@@ -282,18 +136,14 @@ function InboxBlockRow({
     attachments.addFiles(files);
   }
 
-  const canSave =
-    !!buildAnswer() ||
-    notes.trim().length > 0 ||
-    attachments.readyIds.length > 0;
-  const editTrigger = pending ? "Answer" : hasCommittedReply || answered ? "Edit" : "Reply";
+  const editTrigger = blockEditLabel(block);
 
   return (
     <section
       className={`inbox-block${pending ? " pending" : ""}${dragActive ? " is-drag-active" : ""}`}
       {...dropProps}
     >
-      {isDecisionBlock ? (
+      {isDecision ? (
         <div className="inbox-block-head">
           <span className="inbox-block-tag">{decisionTag}</span>
           <span

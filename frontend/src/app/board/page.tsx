@@ -40,6 +40,8 @@ import {
   CHANNEL_GROUP_LABELS,
   CHANNEL_GROUP_ORDER,
   DEFAULT_TICKET_QUERY,
+  awaitingTickets,
+  gateView,
   groupChannels,
   isAwaiting,
   isFilteredQuery,
@@ -47,6 +49,7 @@ import {
   laneForState,
   LANES,
   priorityTone,
+  prNumber,
   SCALE_OPTIONS,
   SORT_OPTIONS,
   STATE_FACET_GROUPS,
@@ -166,11 +169,6 @@ function semanticFacts(metadata: Record<string, unknown>): SemanticFacts {
     if (!SEMANTIC_META_KEYS.has(key)) rest[key] = metadata[key];
   }
   return { pr, checks, commit, rest };
-}
-
-function prNumber(pr: string): string | null {
-  const match = pr.match(/\/pull\/(\d+)|#(\d+)|\/(\d+)(?:$|[/?#])/);
-  return match ? match[1] ?? match[2] ?? match[3] ?? null : null;
 }
 
 // Green/passing → success, failing → danger, running/pending → warn.
@@ -1090,19 +1088,7 @@ function NeedsYouCard({
   ticket: ManagerTicket;
   onOpen: (ticket: ManagerTicket) => void;
 }) {
-  const gate =
-    ticket.state === "review_requested"
-      ? "PR review"
-      : ticket.state === "spec_review"
-        ? "Spec review"
-        : "Blocked";
-  const num = ticket.pr_url ? prNumber(ticket.pr_url) : null;
-  const summary =
-    ticket.state === "review_requested" && ticket.pr_url
-      ? `Review PR${num ? ` #${num}` : ""} and merge, request changes, or abort.`
-      : ticket.state === "spec_review"
-        ? "Approve the spec, request changes, or reject."
-        : "The tech-lead is blocked and needs your decision.";
+  const { gate, summary } = gateView(ticket);
   return (
     <article className="board-need-card board-dogear">
       <header className="board-need-head">
@@ -2180,10 +2166,7 @@ export default function BoardPage() {
 
   // Global decision queue from the full snapshot; not narrowed by board filters.
   const needsYou = useMemo(
-    () =>
-      (managerStateForSelection?.tickets ?? [])
-        .filter((ticket) => isAwaiting(ticket.state))
-        .sort((a, b) => a.priority.localeCompare(b.priority)),
+    () => awaitingTickets(managerStateForSelection?.tickets ?? []),
     [managerStateForSelection],
   );
 

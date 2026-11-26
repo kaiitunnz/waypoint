@@ -30,6 +30,10 @@ export function SettingsScreen({ sectionId }: { sectionId?: string }) {
   const phone = usePhoneLayout();
   const columns = useMultiColumn();
   const section = SETTINGS_SECTIONS.find((entry) => entry.id === sectionId);
+  // Every section is on the page, so a section's path opens the page at it.
+  useEffect(() => {
+    if (!phone && sectionId) document.getElementById(sectionId)?.scrollIntoView();
+  }, [phone, sectionId]);
 
   if (phone && section) {
     return (
@@ -78,7 +82,7 @@ export function SettingsScreen({ sectionId }: { sectionId?: string }) {
 function scrollerOf(node: Element): Element {
   for (let parent = node.parentElement; parent; parent = parent.parentElement) {
     const { overflowY } = getComputedStyle(parent);
-    if ((overflowY === "auto" || overflowY === "scroll") && parent.scrollHeight > parent.clientHeight) return parent;
+    if (overflowY === "auto" || overflowY === "scroll") return parent;
   }
   return document.scrollingElement ?? document.documentElement;
 }
@@ -88,10 +92,6 @@ function scrollerOf(node: Element): Element {
 function SectionList({ opened }: { opened?: string }) {
   const [current, setCurrent] = useState<string | undefined>(opened ?? SETTINGS_SECTIONS[0]?.id);
   const picked = useRef(0);
-
-  useEffect(() => {
-    if (opened) document.getElementById(opened)?.scrollIntoView();
-  }, [opened]);
 
   useEffect(() => {
     const first = document.getElementById(SETTINGS_SECTIONS[0]?.id ?? "");

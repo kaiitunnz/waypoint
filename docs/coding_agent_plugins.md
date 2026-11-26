@@ -796,14 +796,15 @@ password Waypoint generates. A 1.x server is refused with an upgrade message.
 - Interrupt stops the subagents too. OpenCode then runs the session to take
   their results, and the session stays interrupted until new input.
 - Permission modes are the permission rulesets of the session and its
-  subagents, rewritten on a mode change and on restore. In plan mode the session
-  runs the plan agent, and its subagents, including ones started later, ask.
-  When a subagent's rules cannot be written, the session gets a note and the
-  mode change stands.
-- "Approve for session" adds allow rules, which a mode change, restore or fork
-  resets; in plan mode a subagent's approval reaches the subagents, not the
-  plan agent. OpenCode's own `always` reply allows for the whole project and is
-  not used.
+  subagents, rewritten on a mode change and on restore. A subagent copies the
+  session's rules when it starts. In plan mode the session runs the plan agent
+  and holds that agent's own rules, so its subagents follow them from their
+  first step: they can read and run commands but not edit. When a subagent's
+  rules cannot be written, the session gets a note and the mode change stands.
+  Leaving plan mode returns to the agent used before it.
+- "Approve for session" adds allow rules to the asking session and the session
+  itself; a mode change, restore or fork resets them. OpenCode's own `always`
+  reply allows for the whole project and is not used.
 - Model, effort (a model variant) and agent are selected on the session when
   they change. An effort the model has no variant for is refused, or dropped
   with a note when a session is launched with it.

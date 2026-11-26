@@ -2,8 +2,9 @@
 submit-confirm loop. Captured from live OpenCode 1.17.7 and 2.4.1 panes: the
 composer is the run of ``┃`` lines directly above the *only* ``╹▀▀`` border
 (its bottom), with the typed message at the top of the box and the model/status
-footer at the bottom. Submitted messages echo in ``┃`` boxes higher up, but those carry no
-``╹`` border, so submission is keyed on the sent text leaving the composer box."""
+footer at the bottom. Submitted messages echo in ``┃`` boxes higher up, but
+those carry no ``╹`` border, so submission is keyed on the sent text leaving the
+composer box."""
 
 from waypoint.backends.opencode.pane import composer_ready, composer_submitted
 

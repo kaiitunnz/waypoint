@@ -843,6 +843,8 @@ class OpenCodeAdapter:
             await self._emit(state, normalize.note("Turn interrupted", kind))
         elif state.status() == SessionStatus.IDLE:
             await self._emit(state, normalize.note("Session idle", kind))
+        elif state.status() == SessionStatus.INTERRUPTED:
+            await self._emit(state, normalize.note("Turn interrupted", kind))
 
     async def _settle_after_subagent(self, state: SessionState, mark: int) -> None:
         """A finished subagent hands its result to the parent, which runs again.
@@ -1563,6 +1565,7 @@ class OpenCodeAdapter:
             )
         except Exception as exc:
             raise OpenCodeError(f"failed to send message: {exc}") from exc
+        state.input_sent()
 
     async def execute_command(
         self,
@@ -1583,6 +1586,7 @@ class OpenCodeAdapter:
             )
         except Exception as exc:
             raise OpenCodeError(f"failed to execute command: {exc}") from exc
+        state.input_sent()
 
     async def compact_session(self, session_id: str) -> None:
         state = self._require_session(session_id)
@@ -1592,6 +1596,7 @@ class OpenCodeAdapter:
             )
         except Exception as exc:
             raise OpenCodeError(f"failed to compact session: {exc}") from exc
+        state.input_sent()
 
     async def interrupt(self, session_id: str) -> None:
         state = self._sessions.get(session_id)
@@ -1600,8 +1605,7 @@ class OpenCodeAdapter:
         client = self._require_client()
         # Subagents run on their own: interrupting the root leaves them running.
         subagents = state.running - {state.root_id}
-        if state.running or state.permissions or state.forms:
-            state.interrupted = True
+        state.interrupt_requested()
         for target in [*subagents, state.root_id]:
             try:
                 await client.post(f"/api/session/{target}/interrupt")

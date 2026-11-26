@@ -62,6 +62,9 @@ class SessionState:
     running: set[str] = field(default_factory=set)
     # Whether the human interrupted the session's last turn.
     interrupted: bool = False
+    # Set when the interrupt stopped subagents: OpenCode then runs the parent to
+    # take their results, which is still the interrupted turn.
+    stopped_subagents: bool = False
     permissions: dict[str, Permission] = field(default_factory=dict)
     forms: dict[str, Form] = field(default_factory=dict)
     # Asks with a reply in flight, whose resolution is Waypoint's own.
@@ -125,7 +128,8 @@ class SessionState:
         self.touch(opencode_session_id)
         self.running.add(opencode_session_id)
         if opencode_session_id == self.root_id:
-            self.interrupted = False
+            if not self.stopped_subagents:
+                self.interrupted = False
             self.changed_files = False
 
     def execution_ended(
@@ -135,6 +139,17 @@ class SessionState:
         self.running.discard(opencode_session_id)
         if opencode_session_id == self.root_id and by_human:
             self.interrupted = True
+
+    def interrupt_requested(self) -> None:
+        if self.running or self.permissions or self.forms:
+            self.interrupted = True
+        if self.running - {self.root_id}:
+            self.stopped_subagents = True
+
+    def input_sent(self) -> None:
+        """New input from the human ends what their interrupt held."""
+        self.stopped_subagents = False
+        self.interrupted = False
 
     def add_permission(self, permission: Permission) -> None:
         self.touch(permission.id)

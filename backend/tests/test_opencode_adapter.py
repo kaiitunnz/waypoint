@@ -549,9 +549,25 @@ async def test_interrupting_a_subagent_the_turn_left_running_stays_interrupted(
             event("session.execution.interrupted", "ses_child", reason="user"),
         )
         await asyncio.gather(*adapter._tasks)
-
         assert adapter.session_status("local") == SessionStatus.INTERRUPTED
-    assert SessionStatus.IDLE not in emitted.statuses
+
+        # The parent then takes the cancelled result: still the interrupted turn.
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            event("session.execution.succeeded"),
+        )
+        assert SessionStatus.IDLE not in emitted.statuses
+        assert emitted.statuses[-1] == SessionStatus.INTERRUPTED
+
+        await adapter.send_input("local", "go on")
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            event("session.execution.succeeded"),
+        )
+
+    assert emitted.statuses[-1] == SessionStatus.IDLE
 
 
 @pytest.mark.asyncio

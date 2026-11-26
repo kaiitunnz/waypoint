@@ -59,8 +59,16 @@ const text = (value: unknown): string => (typeof value === "string" ? value : ""
 export function approvalBody(event: EventRecord): ApprovalBody {
   const preview = parseEvent(event).diffPreview;
   if (preview) return { kind: "diff", prompt: event.text, preview };
-  const tool = readToolName(event);
-  const input = asRecord(event.metadata?.tool_input);
+  return approvalBodyForTool(readToolName(event), asRecord(event.metadata?.tool_input), event.text);
+}
+
+// The body from the tool call alone, for a request whose event is not at hand.
+// `tool` is a normalized tool name; `raw` stands for input no kind matches.
+export function approvalBodyForTool(
+  tool: string | null,
+  input: Record<string, unknown> | null,
+  raw: string,
+): ApprovalBody {
   if (tool === "ExitPlanMode" && typeof input?.plan === "string") return { kind: "plan", plan: input.plan };
   if ((tool === "Task" || tool === "Agent") && typeof input?.prompt === "string") {
     return { kind: "task", prompt: input.prompt, description: text(input.description), subagent: text(input.subagent_type) };
@@ -72,7 +80,7 @@ export function approvalBody(event: EventRecord): ApprovalBody {
     return { kind: "workflow", script: input.script };
   }
   if (tool && FILE_EDIT_TOOLS.has(tool)) return { kind: "edit", tool, path: toolFilePath(input) };
-  return { kind: "raw", text: event.text };
+  return { kind: "raw", text: raw };
 }
 
 export function approvalPrompt(body: ApprovalBody): string | null {

@@ -5,6 +5,7 @@ import type { SessionRecord } from "../types";
 import {
   approvalActions,
   approvalBody,
+  approvalBodyForTool,
   approvalCopyText,
   approvalId,
   approvalPrompt,
@@ -65,6 +66,14 @@ describe("findPendingApprovals", () => {
 
 const approval = (toolName: string, toolInput: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
   ev(1, "approval_request", "raw text", { tool_name: toolName, tool_input: toolInput, approval_id: "ap1", ...extra });
+
+describe("approvalBodyForTool", () => {
+  it("reads a request from the tool call alone", () => {
+    expect(approvalBodyForTool("Bash", { command: "ls" }, "Run a command")).toEqual({ kind: "command", description: "", command: "ls" });
+    expect(approvalBodyForTool("Edit", { file_path: "/a.ts" }, "Edit")).toEqual({ kind: "edit", tool: "Edit", path: "/a.ts" });
+    expect(approvalBodyForTool(null, null, "Allow the thing")).toEqual({ kind: "raw", text: "Allow the thing" });
+  });
+});
 
 describe("approvalBody", () => {
   it("reads each tool's body and prompt", () => {

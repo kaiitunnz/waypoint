@@ -6,18 +6,26 @@ import {
   DEFAULT_TICKET_QUERY,
   LANES,
   STATE_FACET_GROUPS,
+  awaitingTickets,
   classifyChannel,
+  gateBoardHref,
+  gateHeadline,
+  gateKey,
+  gateView,
+  isGateAnswered,
+  prNumber,
   groupChannels,
   isAwaiting,
   isFilteredQuery,
   kindTone,
   laneForState,
+  managerGates,
   priorityTone,
   stateLabel,
   stateTone,
   ticketIdFromChannel,
 } from "./board";
-import type { BoardChannel, ManagerTicketListQuery, ManagerTicketState } from "./types";
+import type { BoardChannel, InboxItem, ManagerTicket, ManagerTicketListQuery, ManagerTicketState } from "./types";
 
 const channel = (name: string) => ({ channel: name }) as BoardChannel;
 
@@ -197,5 +205,70 @@ describe("isFilteredQuery", () => {
 
   it("ignores whitespace-only search text", () => {
     expect(isFilteredQuery(query({ q: "   " }))).toBe(false);
+  });
+});
+
+describe("gates", () => {
+  const ticket = (id: string, state: ManagerTicketState, over: Partial<ManagerTicket> = {}) =>
+    ({ id, state, priority: "p2", title: id, ...over }) as ManagerTicket;
+  const gate = (over: Partial<ManagerTicket> = {}, item: InboxItem | null = null, channelPrefix: string | null = "p-ticket-") => ({
+    managerId: "mgr-1",
+    project: "waypoint",
+    channelPrefix,
+    ticket: ticket("t1", "spec_review", over),
+    item,
+  });
+
+  it("lists awaiting tickets, highest priority first", () => {
+    const tickets = [
+      ticket("b", "blocked", { priority: "p1" }),
+      ticket("x", "building"),
+      ticket("a", "review_requested", { priority: "p0" }),
+    ];
+    expect(awaitingTickets(tickets).map((entry) => entry.id)).toEqual(["a", "b"]);
+  });
+
+  it("reads a pull request number", () => {
+    expect(prNumber("https://github.com/o/r/pull/594")).toBe("594");
+    expect(prNumber("#12")).toBe("12");
+    expect(prNumber("https://example.test/mr/7/")).toBe("7");
+    expect(prNumber("none")).toBeNull();
+  });
+
+  it("names the gate and what it asks", () => {
+    expect(gateView(ticket("t", "review_requested", { pr_url: "https://github.com/o/r/pull/9" }))).toEqual({
+      gate: "PR review",
+      summary: "Review PR #9 and merge, request changes, or abort.",
+    });
+    expect(gateView(ticket("t", "spec_review")).gate).toBe("Spec review");
+    expect(gateView(ticket("t", "blocked")).summary).toBe("The tech-lead is blocked and needs your decision.");
+    expect(gateHeadline(ticket("t", "review_requested", { pr_url: "#9" }))).toBe("PR #9 ready to merge");
+    expect(gateHeadline(ticket("t", "review_requested"))).toBe("Ready for review");
+    expect(gateHeadline(ticket("t", "spec_review"))).toBe("Spec ready for review");
+    expect(gateHeadline(ticket("t", "blocked"))).toBe("Blocked, needs your decision");
+  });
+
+  it("takes a manager's awaiting tickets as gates", () => {
+    const summary = { id: "mgr-1", project: "waypoint", repo_dir: "/r", ticket_count: 2, attention_count: 1 };
+    const state = {
+      config: { render_context: { templates_dir: "", tickets_channel: "t", ticket_channel_prefix: "p-ticket-" } },
+      tree: { free: true },
+      tickets: [ticket("t1", "spec_review"), ticket("t2", "building")],
+    } as unknown as Parameters<typeof managerGates>[1];
+    expect(managerGates(summary, state)).toEqual([
+      { managerId: "mgr-1", project: "waypoint", channelPrefix: "p-ticket-", ticket: state.tickets[0], item: null },
+    ]);
+  });
+
+  it("keys and links a gate", () => {
+    expect(gateKey(gate())).toBe("gate:mgr-1:t1");
+    expect(gateBoardHref(gate())).toBe("/board?channel=p-ticket-t1");
+    expect(gateBoardHref(gate({}, null, null))).toBe("/board");
+  });
+
+  it("is answered once its item is resolved", () => {
+    expect(isGateAnswered(gate())).toBe(false);
+    expect(isGateAnswered(gate({}, { status: "open" } as InboxItem))).toBe(false);
+    expect(isGateAnswered(gate({}, { status: "resolved" } as InboxItem))).toBe(true);
   });
 });

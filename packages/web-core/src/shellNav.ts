@@ -51,9 +51,12 @@ export function settingsSectionOf(pathname: string): string | undefined {
 }
 
 // The touch tab bar shows on the top-level screens only. A session, a single
-// needs-you item and the assistant take the whole screen.
-export function showsTabBar(pathname: string): boolean {
-  return ["/", "/inbox", "/board", "/telemetry"].includes(normalize(pathname));
+// needs-you item and the assistant take the whole screen. In columns the
+// needs-you queue stays beside its item, and the bar with it.
+export function showsTabBar(pathname: string, columns = false): boolean {
+  const path = normalize(pathname);
+  if (columns && isUnder(path, "/inbox")) return true;
+  return ["/", "/inbox", "/board", "/telemetry"].includes(path);
 }
 
 const MAX_BADGE_COUNT = 99;

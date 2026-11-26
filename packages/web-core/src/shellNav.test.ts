@@ -46,6 +46,12 @@ describe("showsTabBar", () => {
       expect(showsTabBar(path)).toBe(false);
     }
   });
+
+  it("stays beside a needs-you item in columns", () => {
+    expect(showsTabBar("/inbox/7", true)).toBe(true);
+    expect(showsTabBar("/session/a", true)).toBe(false);
+    expect(showsTabBar("/assistant", true)).toBe(false);
+  });
 });
 
 describe("formatBadgeCount", () => {

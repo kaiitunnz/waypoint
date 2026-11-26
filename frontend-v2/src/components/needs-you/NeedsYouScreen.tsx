@@ -33,6 +33,12 @@ export function NeedsYouScreen({ children }: { children: ReactNode }) {
   const columns = useMultiColumn();
   const pane = useResizablePane(QUEUE_WIDTH);
 
+  // The pane scrolls for every item in turn; each one starts at its top.
+  const detail = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    detail.current?.scrollTo(0, 0);
+  }, [selected]);
+
   // Whether the item was opened from the queue, so that "back" is a history step.
   const previous = useRef<string | null | undefined>(undefined);
   const opened = useRef(false);
@@ -73,7 +79,7 @@ export function NeedsYouScreen({ children }: { children: ReactNode }) {
               />
             ) : null}
           </section>
-          <div className={cx(styles.detail, !columns && selected === null && styles.off)}>
+          <div ref={detail} className={cx(styles.detail, !columns && selected === null && styles.off)}>
             {children}
             {columns && selected === null ? <EmptyState title="Select an item to read it" /> : null}
           </div>

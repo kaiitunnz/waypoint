@@ -40,6 +40,12 @@ export function useQueue(status: InboxStatusFilter, source: SourceFilter, q: str
     enabled: status === "open",
   });
 
+  // Asks and gates arrive apart from the items: until they have, an empty queue
+  // may not be one.
+  const awaiting =
+    status !== "resolved" &&
+    (((source === "all" || source === "sessions") && !pendingAsks) || (source === "board" && !loadedGates));
+
   // Items of an earlier status or search are not shown while the next ones load.
   const loaded = list.loadedFor === inboxListKey(status, list.query);
   const items = loaded ? list.items : NO_ITEMS;
@@ -63,6 +69,7 @@ export function useQueue(status: InboxStatusFilter, source: SourceFilter, q: str
     todayEntries,
     todayMore,
     counts: waiting,
+    awaiting,
     loaded,
     list,
     resolved,

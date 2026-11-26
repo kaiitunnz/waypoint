@@ -86,8 +86,9 @@
   color: var(--text);
 }
 
-/* Each file keeps its own reply, side by side where there is room. */
-.grid > * + * {
+/* Each file keeps its own reply, side by side where there is room. The files of a
+   group take no hairline between them. */
+.blocks > .group > .grid > * {
   border-top: 0;
 }
 

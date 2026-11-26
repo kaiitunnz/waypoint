@@ -45,6 +45,8 @@ const STATUSES: { value: InboxStatusFilter; label: string }[] = [
   { value: "all", label: "All" },
 ];
 
+const NO_ENTRIES: QueueEntry[] = [];
+
 type Deletion = { kind: "one"; id: string } | { kind: "selected"; ids: string[] } | { kind: "resolved" };
 
 const CONFIRM: Record<Deletion["kind"], (count: number) => { title: string; detail: string; confirm: string }> = {
@@ -76,12 +78,13 @@ export function QueuePane() {
   const [deletion, setDeletion] = useState<Deletion | null>(null);
   const searchField = useRef<HTMLInputElement>(null);
   const queue = useQueue(status, source, q, now);
-  const { entries, todayEntries, list, resolved, counts, loaded } = queue;
+  const { entries, todayEntries, list, resolved, counts, loaded, awaiting } = queue;
 
   // Select-all and bulk delete act on the rows shown, never on a hidden item.
+  const shownToday = showToday ? todayEntries : NO_ENTRIES;
   const selectable = useMemo(
-    () => entries.flatMap((entry) => (entry.source === "inbox" ? [entry.item.id] : [])),
-    [entries],
+    () => [...entries, ...shownToday].flatMap((entry) => (entry.source === "inbox" ? [entry.item.id] : [])),
+    [entries, shownToday],
   );
   const selection = useSelection(selectable);
   const { exit: exitSelect } = selection;
@@ -145,10 +148,10 @@ export function QueuePane() {
     );
   };
 
-  const loading = list.loading && !loaded;
+  const loading = (list.loading && !loaded) || (awaiting && entries.length === 0);
   const failed = !loaded && !list.loading && list.error !== null;
   const pageable = list.hasMore && loaded && (source === "all" || source === "inbox");
-  const empty = entries.length === 0 && loaded;
+  const empty = entries.length === 0 && loaded && !awaiting;
   const confirm = deletion ? CONFIRM[deletion.kind](deletion.kind === "selected" ? deletion.ids.length : 1) : null;
 
   return (

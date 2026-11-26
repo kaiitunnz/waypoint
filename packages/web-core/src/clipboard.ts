@@ -36,6 +36,11 @@ export function copyTextSync(text: string): boolean {
     "user-select:text",
     "-webkit-user-select:text",
   ].join(";");
+  // Selecting DOM text would also copy an HTML flavour with its computed styles.
+  host.addEventListener("copy", (event) => {
+    event.preventDefault();
+    event.clipboardData?.setData("text/plain", text);
+  });
   document.body.appendChild(host);
   const selection = window.getSelection();
   let ok = false;

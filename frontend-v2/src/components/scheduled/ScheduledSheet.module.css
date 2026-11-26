@@ -6,7 +6,7 @@
 
 .head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-height: 32px;
 }
@@ -22,7 +22,6 @@
 }
 
 .clear {
-  align-self: center;
   margin-left: auto;
   margin-right: -8px;
 }

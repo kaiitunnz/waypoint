@@ -13,6 +13,7 @@ import {
 } from "@waypoint/web-core/api";
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useScheduleModels } from "@waypoint/web-core/hooks/useScheduleModels";
 import { browserTimezone } from "@waypoint/web-core/recurrence";
 import {
   launchRowView,
@@ -71,6 +72,8 @@ interface ScheduledSheetProps {
 
 // Rows update from the schedule broadcast, so the actions only call the server.
 export function ScheduledSheet({ onClose, schedules, messages, titleById, catalog }: ScheduledSheetProps) {
+  const { host, token } = useShellData();
+  const modelLabel = useScheduleModels(host, token, schedules);
   const now = new Date(useNow(30_000));
   const zone = browserTimezone();
   const launches = useMemo(() => sortScheduled(schedules), [schedules]);
@@ -86,7 +89,7 @@ export function ScheduledSheet({ onClose, schedules, messages, titleById, catalo
           <Group
             kind="launch"
             title="Sessions"
-            rows={launches.map((schedule) => launchRowView(schedule, catalog, now, zone))}
+            rows={launches.map((schedule) => launchRowView(schedule, catalog, now, zone, modelLabel(schedule)))}
             onClose={onClose}
           />
           <Group

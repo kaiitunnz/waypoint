@@ -71,8 +71,10 @@ export function useInboxBlock({ host, token, item, block }: InboxBlockOptions) {
   }
 
   // Reverts local edits and frees uncommitted uploads. An unanswered decision
-  // stays open rather than looking answered.
+  // stays open rather than looking answered. A save in flight owns its uploads,
+  // so there is nothing to cancel until it settles.
   function cancel() {
+    if (saving.current) return;
     reset();
     attachments.discardAll();
     setError(null);

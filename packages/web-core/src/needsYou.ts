@@ -167,12 +167,42 @@ export interface AskSummary {
   mono: boolean;
 }
 
+// A row of the split view answers an ask only where it shows everything asked;
+// a longer request is decided in the detail.
+const ROW_MAX_LENGTH = 160;
+const ROW_MAX_LINES = 3;
+
+const fitsRow = (text: string) => text.length <= ROW_MAX_LENGTH && text.split("\n").length <= ROW_MAX_LINES;
+
+export interface AskRow extends AskSummary {
+  // Set instead of `text` being shown: a path keeps its file name on one line.
+  path: string | null;
+  // The row shows the whole request and takes the reply.
+  answers: boolean;
+}
+
+export function askRow(ask: PendingAsk): AskRow {
+  const summary = askSummary(ask);
+  const inline = ask.kind !== "plan_approval" && !askNeedsDetail(ask);
+  if (ask.kind === "question") {
+    return { ...summary, path: null, answers: inline && fitsRow(ask.question.questions[0].question) };
+  }
+  const preview = ask.kind === "approval" ? decisionView(ask).preview : null;
+  if (preview?.kind === "path") return { ...summary, path: preview.path, answers: inline };
+  const whole = preview?.kind === "command" ? preview.text : summary.text;
+  const answers = inline && fitsRow(whole);
+  return { ...summary, text: answers ? whole : summary.text, path: null, answers };
+}
+
 // The line under a row's headline.
 export function askSummary(ask: PendingAsk): AskSummary {
   if (ask.kind === "question") return { text: questionSummary(ask), mono: false };
   if (ask.kind === "plan_approval") return { text: planPreview(ask.plan.text, 1), mono: false };
   const { preview } = decisionView(ask);
-  if (preview?.kind === "command") return { text: preview.text.split("\n")[0], mono: true };
+  if (preview?.kind === "command") {
+    const [first, ...rest] = preview.text.split("\n");
+    return { text: rest.length > 0 ? `${first} …` : first, mono: true };
+  }
   if (preview?.kind === "path") return { text: preview.path, mono: true };
   return { text: ask.body ?? ask.approval.tool_name ?? ask.title, mono: false };
 }

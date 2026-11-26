@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BoardGate } from "./board";
 import {
   askNeedsDetail,
+  askRow,
   askSummary,
   askUserQuestions,
   buildQueue,
@@ -192,9 +193,32 @@ describe("asks", () => {
   it("summarises an ask", () => {
     expect(askSummary(question(1))).toEqual({ text: "2 options, B recommended", mono: false });
     expect(askSummary(question(1, []))).toEqual({ text: "Free-form answer", mono: false });
-    expect(askSummary(approval(1))).toEqual({ text: "git push", mono: true });
+    expect(askSummary(approval(1))).toEqual({ text: "git push …", mono: true });
+    expect(askSummary(approval(1, { command: "ls" }))).toEqual({ text: "ls", mono: true });
     expect(askSummary(approval(1, {}))).toEqual({ text: "Bash", mono: false });
     expect(askSummary(plan)).toEqual({ text: "Regenerate figures", mono: false });
+  });
+
+  it("lets a row answer only what it can show whole", () => {
+    expect(askRow(question(1))).toMatchObject({ answers: true, path: null });
+    expect(askRow(question(1, ["A"], true)).answers).toBe(false);
+    expect(askRow(plan).answers).toBe(false);
+    expect(askRow(approval(1))).toMatchObject({ text: "git push\nls", mono: true, answers: true });
+    expect(askRow(approval(1, { command: "git status\nrm -rf a\nrm -rf b\ngit push" }))).toMatchObject({
+      text: "git status …",
+      answers: false,
+    });
+    expect(askRow(approval(1, { command: `echo ${"x".repeat(200)}` })).answers).toBe(false);
+    expect(askRow(approval(1, { command: "ls" }, true)).answers).toBe(false);
+
+    const long = question(1);
+    long.question.questions[0].question = `Which ${"very ".repeat(40)}fix?`;
+    expect(askRow(long).answers).toBe(false);
+
+    const edit = approval(1);
+    edit.approval.tool_name = "Edit";
+    edit.approval.tool_input = { file_path: `/srv/${"deep/".repeat(50)}secrets.env` };
+    expect(askRow(edit)).toMatchObject({ answers: true, path: edit.approval.tool_input.file_path });
   });
 
   it("shapes a question for the editor", () => {

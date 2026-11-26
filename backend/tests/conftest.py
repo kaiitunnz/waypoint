@@ -58,6 +58,14 @@ def offline_account_probe(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def quiet_warming(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "waypoint.runtime.SessionRuntime._warm_command_completions",
+        lambda *_, **__: None,
+    )
+
+
+@pytest.fixture
 def isolate_waypoint_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for var in _HOST_WAYPOINT_ENV:
         monkeypatch.delenv(var, raising=False)

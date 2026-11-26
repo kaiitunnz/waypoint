@@ -784,7 +784,7 @@ async def test_a_failing_session_does_not_hide_the_others(
 
     def plugin_for(session: SessionRecord) -> FakePlugin:
         if session.id == "bad":
-            raise KeyError("legacy row")
+            raise RuntimeError("plugin bug")
         return healthy
 
     monkeypatch.setattr(env.runtime.registry, "plugin_for", plugin_for)

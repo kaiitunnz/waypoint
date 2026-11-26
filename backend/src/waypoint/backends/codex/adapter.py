@@ -461,8 +461,15 @@ class CodexAppServerAdapter:
 
         factory = client_factory_override or self._client_factory
         client = factory(cwd, approval_handler)
-        await asyncio.to_thread(client.start)
-        await asyncio.to_thread(client.initialize)
+        starting = asyncio.ensure_future(asyncio.to_thread(client.start))
+        try:
+            await asyncio.shield(starting)
+            await asyncio.to_thread(client.initialize)
+        except BaseException:
+            # ``start`` cannot be interrupted, and ``close`` is a no-op until it
+            # has spawned the process.
+            starting.add_done_callback(lambda _: _close_detached(client))
+            raise
         state = CodexSessionState(
             session_id=session_id,
             cwd=cwd,
@@ -483,7 +490,10 @@ class CodexAppServerAdapter:
         client when it fails."""
         try:
             return await self._call_client(state, func, *args)
-        except BaseException:
+        except BaseException as exc:
+            if isinstance(exc, asyncio.CancelledError):
+                # ``terminate_session`` closes on the executor, so this goes first.
+                _close_detached(state.client)
             await self.terminate_session(state.session_id)
             raise
 
@@ -1206,6 +1216,12 @@ class CodexAppServerAdapter:
         if lowered in {"cancel"}:
             return "cancel"
         return "decline"
+
+
+def _close_detached(client: CodexClient) -> None:
+    """Close ``client`` off the executor: the SDK waits without a timeout, and
+    abandoned waits can fill the pool."""
+    threading.Thread(target=client.close, daemon=True).start()
 
 
 def _release_stuck_read(state: CodexSessionState) -> None:

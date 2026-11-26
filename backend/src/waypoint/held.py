@@ -1,8 +1,8 @@
 """Held delivery for agent sends, scheduled firings, and board/inbox wakes.
 
 Each held message records what releases it: the human (Focus), the session's
-open dialog clearing, or the session going idle (wakes). Focus pauses every
-automatic release."""
+open dialog clearing, the session going idle (wakes), or its restore ending
+(sends). Focus pauses every automatic release."""
 
 import asyncio
 import logging
@@ -54,6 +54,9 @@ class HeldQueue:
         self._draining: set[str] = set()
         self._rerun: set[str] = set()
         self._retries: dict[str, asyncio.TimerHandle] = {}
+        # Session id -> when its pane was first seen not taking input in the
+        # current wait.
+        self._unready_since: dict[str, float] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._stopped = False
 
@@ -76,21 +79,62 @@ class HeldQueue:
         if self._runtime.get_session(session_id).focus:
             return await self._hold(session_id, request, origin, HeldReason.FOCUS)
         wake = origin is HeldMessageOrigin.WAKE
-        async with self._send_locks[session_id]:
-            session = self._runtime.get_session(session_id)
-            if session.focus:
-                return await self._hold(session_id, request, origin, HeldReason.FOCUS)
-            if self._deliverable_now(session, wake):
-                with suppress(InputBlockedError):
-                    delivered = await self._runtime.handle_input(session_id, request)
-                    if wake and self._runtime.storage.delete_held_wake(session_id):
-                        await self._publish(session_id)
-                    return delivered
-            reason = HeldReason.IDLE if wake else HeldReason.DIALOG
+        if self._runtime.restores.holds_sends(session_id):
+            # No send lock: a send that reopened the session holds it until the
+            # restore ends.
+            reason = HeldReason.IDLE if wake else HeldReason.RESTORE
             record = await self._hold(session_id, request, origin, reason)
+        else:
+            async with self._send_locks[session_id]:
+                session = self._runtime.get_session(session_id)
+                if session.focus:
+                    return await self._hold(
+                        session_id, request, origin, HeldReason.FOCUS
+                    )
+                if not wake:
+                    # An unavailable session queues no send either.
+                    self._runtime.availability.require(session)
+                queued = self._queued_behind_restore(session)
+                if not queued and self._deliverable_now(session, wake):
+                    with suppress(InputBlockedError):
+                        delivered = await self._runtime.handle_input(
+                            session_id, request
+                        )
+                        if wake and self._runtime.storage.delete_held_wake(session_id):
+                            await self._publish(session_id)
+                        return delivered
+                if wake:
+                    reason = HeldReason.IDLE
+                else:
+                    reason = HeldReason.RESTORE if queued else HeldReason.DIALOG
+                record = await self._hold(session_id, request, origin, reason)
+                if queued and not wake and session.status is SessionStatus.EXITED:
+                    # Under the send lock, so only one send reopens it.
+                    try:
+                        await self._reopen(session_id)
+                    except BaseException:
+                        # The caller sends it again, so no copy may stay held.
+                        if self._runtime.storage.take_held_message(record.id):
+                            self._unpin(record)
+                        raise
         self._auto_held.add(session_id)
         self.kick(session_id)
         return record
+
+    async def _reopen(self, session_id: str) -> None:
+        """Reopen an exited session for a send queued behind what it still holds."""
+        try:
+            await self._runtime.reattach(session_id)
+        except HTTPException as exc:
+            # The send stays held for the next reconnect.
+            log.warning("could not reopen session %s: %s", session_id, exc.detail)
+
+    def _queued_behind_restore(self, session: SessionRecord) -> bool:
+        """Whether a send waits for a restore, or behind sends still held from
+        one."""
+        return self._runtime.restores.holds_sends(session.id) or (
+            self._runtime.storage.has_held_messages(session.id, HeldReason.RESTORE)
+        )
 
     def _deliverable_now(self, session: SessionRecord, wake: bool) -> bool:
         # Queue behind items waiting on a dialog so delivery keeps its order.
@@ -176,6 +220,12 @@ class HeldQueue:
             self.kick(session_id)
 
     def kick(self, session_id: str) -> None:
+        """Deliver automatic items after something changed for the session."""
+        # Each change gives a pane that takes no input its full wait again.
+        self._unready_since.pop(session_id, None)
+        self._start_drain(session_id)
+
+    def _start_drain(self, session_id: str) -> None:
         if self._stopped:
             return
         if session_id in self._draining:
@@ -203,26 +253,42 @@ class HeldQueue:
         if session is None:
             self._auto_held.discard(session_id)
             return
-        if session.focus or session.status in _UNDELIVERABLE:
+        if (
+            session.focus
+            or session.status in _UNDELIVERABLE
+            or self._runtime.restores.pauses_delivery(session_id)
+        ):
             return
-        transport = self._runtime.transport_for(session)
         async with self._send_locks[session_id]:
             for held in self._runtime.storage.list_held_messages(session_id):
                 if held.hold_reason is HeldReason.FOCUS:
                     continue
                 current = self._runtime.storage.get_session(session_id)
-                if current is None or current.focus:
+                # A restart or close can begin while an earlier item goes out.
+                if (
+                    current is None
+                    or current.focus
+                    or self._runtime.restores.pauses_delivery(session_id)
+                ):
                     break
                 session = current
-                if held.hold_reason is HeldReason.IDLE and not (
-                    self._runtime.wake_eligible(session)
+                if held.hold_reason is not HeldReason.DIALOG and not self._ready_for(
+                    held, session
                 ):
                     continue
+                # Per item: an interface switch can change it between two.
+                transport = self._runtime.transport_for(session)
                 if transport.has_pending_approval(session):
                     break  # the response or invalidation is the next edge
                 if await transport.input_blocked(session):
+                    # The wait for the input box starts once the dialog is gone.
+                    self._unready_since.pop(session_id, None)
                     self._retry_later(session_id)
                     break
+                if not await transport.ready_for_input(session):
+                    self._await_input_box(session_id)
+                    break
+                self._unready_since.pop(session_id, None)
                 record = self._runtime.storage.take_held_message(held.id)
                 if record is None:
                     continue
@@ -241,13 +307,38 @@ class HeldQueue:
         ):
             self._auto_held.discard(session_id)
 
+    def _ready_for(self, held: HeldMessageRecord, session: SessionRecord) -> bool:
+        """Whether a message waiting on the session's state may go out."""
+        if held.hold_reason is HeldReason.RESTORE:
+            # A send queued behind a restore follows an interrupted turn, as a
+            # fresh send would. A pane, after an interface switch, takes input
+            # mid-turn.
+            driver = self._runtime.registry.plugin_for(session)
+            if (
+                session.status is SessionStatus.INTERRUPTED
+                or driver.capabilities.has_terminal_pane
+            ):
+                return True
+        return self._runtime.wake_eligible(session)
+
+    def _await_input_box(self, session_id: str) -> None:
+        """Check a pane that takes no input again, but only for the restore
+        timeout. A message sent into a booting pane is lost, so past that it
+        stays held until the session's next state change."""
+        now = asyncio.get_running_loop().time()
+        since = self._unready_since.setdefault(session_id, now)
+        if now - since < self._runtime.settings.session_restore_timeout_seconds:
+            self._retry_later(session_id)
+        else:
+            log.warning("messages held for %s wait for its input box", session_id)
+
     def _retry_later(self, session_id: str) -> None:
         if self._stopped or session_id in self._retries:
             return
 
         def fire() -> None:
             self._retries.pop(session_id, None)
-            self.kick(session_id)
+            self._start_drain(session_id)
 
         self._retries[session_id] = asyncio.get_running_loop().call_later(
             DEFER_RETRY_SECONDS, fire
@@ -281,7 +372,11 @@ class HeldQueue:
                 self._put_back(record)
                 raise
             except Exception:
-                self._unpin(record)
+                if self._runtime.restores.pauses_delivery(record.session_id):
+                    # A restart or close took the process mid-send.
+                    self._put_back(record)
+                else:
+                    self._unpin(record)
                 raise
             self._unpin(record)
         finally:

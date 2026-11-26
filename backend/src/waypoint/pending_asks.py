@@ -428,8 +428,8 @@ class PendingAskFeed:
         try:
             self._entries[session.id] = self._derive(session)
         except Exception:
-            # One session's failure (an unknown plugin on a legacy row, a
-            # plugin bug) must not take the feed down; it just lists nothing.
+            # One session's failure, such as a plugin bug, must not take the
+            # feed down; it just lists nothing.
             log.exception(
                 "pending-asks derivation failed", extra={"session_id": session.id}
             )
@@ -444,7 +444,7 @@ class PendingAskFeed:
             self._walks.pop(session.id, None)
             return entry
         runtime = self._runtime
-        plugin = runtime.registry.plugin_for(session)
+        plugin = runtime.availability.driver(session)
         plan_plugin = plugin if isinstance(plugin, PlanApprovalLifecycle) else None
         entry.plan_plugin = plan_plugin
         question_ids, questions = runtime.questions.open_questions(session)
@@ -454,7 +454,7 @@ class PendingAskFeed:
             for question in questions
             if (ask := _question_ask(session, question)) is not None
         ]
-        if session.status is not SessionStatus.ERROR:
+        if plugin is not None and session.status is not SessionStatus.ERROR:
             transport = runtime.transport_for(session)
             if transport.is_structured:
                 asks += self._approval_asks(session, transport)

@@ -1,10 +1,14 @@
 import asyncio
+import signal
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from aiohttp import web
 
 from waypoint.backends.approvals import approval_request_id
 from waypoint.backends.opencode.adapter import (
@@ -13,7 +17,7 @@ from waypoint.backends.opencode.adapter import (
     OpenCodeSessionState,
     _context_usage_snapshot_from_message,
 )
-from waypoint.backends.opencode.client import OpenCodeHttpError
+from waypoint.backends.opencode.client import LocalOpenCodeClient, OpenCodeHttpError
 from waypoint.backends.opencode.transport import OpenCodeTransport
 from waypoint.questions import QuestionLiveness
 from waypoint.schemas import EventRecord
@@ -936,3 +940,106 @@ async def test_failed_reject_keeps_the_question_pending(
 
     assert await adapter.reject_question("local-1", "que_a") == outcome
     assert state.pending_question_ids == ["que_a"]
+
+
+@asynccontextmanager
+async def _server(handler: Any) -> AsyncIterator[str]:
+    app = web.Application()
+    app.router.add_get("/config", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    try:
+        yield f"http://127.0.0.1:{runner.addresses[0][1]}"
+    finally:
+        await runner.cleanup()
+
+
+async def _web_ui(_request: web.Request) -> web.Response:
+    return web.Response(text="<!doctype html>", content_type="text/html")
+
+
+async def _unauthorized(_request: web.Request) -> web.Response:
+    return web.json_response({"_tag": "UnauthorizedError"}, status=401)
+
+
+@pytest.mark.parametrize(
+    ("handler", "detail"),
+    [(_web_ui, "200 text/html instead of JSON"), (_unauthorized, "HTTP 401")],
+)
+@pytest.mark.asyncio
+async def test_incompatible_server_fails_at_once(handler: Any, detail: str) -> None:
+    adapter = _build_adapter()
+    async with _server(handler) as url:
+        client = LocalOpenCodeClient(url)
+        adapter._client = client
+        try:
+            async with asyncio.timeout(5):
+                with pytest.raises(
+                    OpenCodeError, match=f"incompatible OpenCode server: .*{detail}"
+                ):
+                    await adapter._wait_for_server()
+        finally:
+            await client.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_start_discards_the_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _build_adapter()
+    discarded: list[str] = []
+
+    class _Client:
+        async def close(self) -> None:
+            discarded.append("client")
+
+    async def hang_while_starting() -> None:
+        adapter._client = cast(Any, _Client())
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(adapter, "_start_local", hang_while_starting)
+    monkeypatch.setattr(
+        adapter, "_terminate_server_process", lambda: discarded.append("process")
+    )
+
+    start = asyncio.create_task(adapter.start())
+    await asyncio.sleep(0.01)
+    start.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await start
+
+    assert discarded == ["process", "client"]
+    assert adapter._client is None
+    assert not adapter._started
+
+
+@pytest.mark.asyncio
+async def test_discarding_a_server_that_ignores_sigterm_kills_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _build_adapter()
+    exited = asyncio.Event()
+    signals: list[int] = []
+
+    class _Process:
+        pid = 4242
+        returncode: int | None = None
+
+        async def wait(self) -> int:
+            await exited.wait()
+            return -signal.SIGKILL
+
+    def killpg(_pid: int, sent: int) -> None:
+        signals.append(sent)
+        if sent == signal.SIGKILL:
+            exited.set()
+
+    monkeypatch.setattr("waypoint.backends.opencode.adapter.os.killpg", killpg)
+    adapter._server_process = cast(Any, _Process())
+
+    await adapter._discard_server()
+
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert adapter._server_process is None

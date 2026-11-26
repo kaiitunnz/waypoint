@@ -315,6 +315,8 @@ class PendingQuestionTracker:
     ) -> dict[str, QuestionLiveness]:
         if not tool_use_ids:
             return {}
+        if self._runtime.availability.reason(session):
+            return dict.fromkeys(tool_use_ids, QuestionLiveness.UNAVAILABLE)
         plugin = self._runtime.registry.plugin_for(session)
         if not isinstance(plugin, QuestionLifecycle):
             # A driver without the protocol can never answer (e.g. a

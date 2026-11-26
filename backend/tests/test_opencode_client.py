@@ -1,9 +1,11 @@
+import asyncio
 from typing import Any
 
 import pytest
 
 from waypoint.backends.opencode.client import (
     OpenCodeHttpError,
+    OpenCodeNonJsonError,
     RemoteOpenCodeClient,
     _split_curl_status,
 )
@@ -181,3 +183,50 @@ async def test_remote_client_delete_issues_delete_and_parses_boolean(
     flat = " ".join(str(arg) for arg in captured[0])
     assert "DELETE" in flat
     assert "/session/ses_1" in flat
+
+
+@pytest.mark.asyncio
+async def test_remote_web_ui_answer_is_not_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _HtmlProcess(_FakeProcess):
+        async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+            return b"<!doctype html>\n200", b""
+
+    _make_fake_subprocess(monkeypatch, _HtmlProcess())
+    target = SshLaunchTargetConfig(
+        id="ssh-1", name="Remote", ssh_destination="user@example.com"
+    )
+    client = RemoteOpenCodeClient(target, 4096)
+
+    with pytest.raises(OpenCodeNonJsonError, match="HTTP 200 instead of JSON"):
+        await client.get("/config")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_remote_request_kills_its_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+
+    class _HangingProcess(_FakeProcess):
+        async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+            started.set()
+            await asyncio.Event().wait()
+            return b"", b""
+
+    process = _HangingProcess()
+    process.returncode = None
+    _make_fake_subprocess(monkeypatch, process)
+    target = SshLaunchTargetConfig(
+        id="ssh-1", name="Remote", ssh_destination="user@example.com"
+    )
+    client = RemoteOpenCodeClient(target, 4096)
+
+    request = asyncio.create_task(client.get("/config"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+
+    assert process.returncode == -9

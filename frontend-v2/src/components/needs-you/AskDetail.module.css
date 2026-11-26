@@ -15,6 +15,7 @@
 }
 
 .note {
+  margin-top: 8px;
   font-size: var(--f-meta);
   color: var(--muted);
 }

@@ -1,6 +1,6 @@
 .page {
   max-width: 720px;
-  padding: 0 16px 32px;
+  padding: 0 16px calc(32px + var(--safe-bottom));
 }
 
 .columns {

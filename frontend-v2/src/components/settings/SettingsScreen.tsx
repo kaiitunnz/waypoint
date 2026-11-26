@@ -115,8 +115,10 @@ function SectionList({ opened }: { opened?: string }) {
   useEffect(() => {
     if (!list.current) return;
     const scroller = scrollerOf(list.current);
-    const update = () => {
-      if (Date.now() - picked.current < 300) return;
+    // The window's scroll targets the document; any other scroller (a menu, a dialog) is not the page.
+    const source = scroller === document.scrollingElement ? document : scroller;
+    const update = (event: Event) => {
+      if (event.target !== source || Date.now() - picked.current < 300) return;
       const top = scrollerTop(scroller);
       const atEnd = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 1;
       const reached = PAGE_ORDER.filter((entry) => {

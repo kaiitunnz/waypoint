@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import { isWorkingStatus } from "@waypoint/web-core/sessionPresentation";
 import type { PendingSend } from "@waypoint/web-core/hooks/useOptimisticSends";
@@ -42,12 +42,17 @@ export function Transcript({
   pending,
   override,
 }: TranscriptProps) {
-  const { scroller, content, log, away, onScroll, jumpToEnd } = useTranscriptScroll(turns);
+  const { scroller, content, log, away, onScroll, hold, jumpToEnd } = useTranscriptScroll(turns, pending.length);
   const working = isWorkingStatus(status);
+  // Every fold control carries aria-expanded; captured here, before the fold changes.
+  const onFold = (event: MouseEvent) => {
+    const toggle = (event.target as Element).closest("[aria-expanded]");
+    if (toggle) hold(toggle, toggle.getAttribute("aria-expanded") === "true");
+  };
 
   return (
     <div className={styles.frame}>
-      <div ref={scroller} className={styles.scroller} onScroll={onScroll}>
+      <div ref={scroller} className={styles.scroller} onScroll={onScroll} onClickCapture={onFold}>
         <div ref={content} className={styles.col}>
           {override ?? (
             <>

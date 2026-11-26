@@ -13,7 +13,6 @@ import { DiffStat } from "./DiffStat";
 import { FoldedText } from "./FoldedText";
 import { Attachments } from "./Attachments";
 import { PathLabel } from "./PathLabel";
-import { useClamp } from "./useClamp";
 import { useFold } from "./useFold";
 
 function TodoItems({ todos }: { todos: TodoEntry[] }) {
@@ -44,17 +43,16 @@ function Lines({ text }: { text: string }) {
 }
 
 function Command({ text }: { text: string }) {
-  const fold = useFold(text, "start");
-  const { content, chip } = useClamp<HTMLDivElement>(fold.open || fold.hidden > 0);
+  const { open, toggle, shown, total, content, chip } = useFold<HTMLDivElement>(text, "start");
   return (
     <>
-      <div className={cx(styles.text, styles.mono, !fold.open && clamp.clamp)}>
+      <div className={cx(styles.text, styles.mono, !open && clamp.clamp)}>
         <div ref={content}>
-          <Lines text={fold.shown} />
+          <Lines text={shown} />
         </div>
       </div>
       <div ref={chip}>
-        <Disclosure open={fold.open} total={fold.hidden > 0 ? fold.total : undefined} onToggle={fold.toggle} />
+        <Disclosure open={open} total={total} onToggle={toggle} />
       </div>
     </>
   );

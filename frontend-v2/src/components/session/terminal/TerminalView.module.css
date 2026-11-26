@@ -1,0 +1,27 @@
+/* The floating session bar sits over the top, so the view starts below it. */
+.view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: calc(var(--safe-top) + var(--bar-height));
+  background: var(--ground);
+}
+
+.foot {
+  flex: none;
+  border-top: 1px solid var(--line);
+  background: var(--ground);
+}
+
+.col {
+  width: 100%;
+  max-width: var(--session-col);
+  margin: 0 auto;
+}
+
+@container (min-width: 600px) {
+  .col {
+    padding: 0 var(--session-gutter);
+  }
+}

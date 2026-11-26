@@ -1,18 +1,22 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
+import { postAction } from "@waypoint/web-core/api";
 import { liveTerminal, hasTerminalPane, fidelityFor, supportsAttachments, useBackendCatalog } from "@waypoint/web-core/backends";
 import { useOptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
 import { COMPACT_HEADER_WIDTH } from "@waypoint/web-core/layoutRules";
 import { indexAskQuestionEvidence } from "@waypoint/web-core/session/askQuestion";
-import { composerAvailability } from "@waypoint/web-core/session/send";
+import { composerAvailability, isExitedSession } from "@waypoint/web-core/session/send";
 import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
 import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
 
 import { Composer } from "@/components/composer/Composer";
+import { FocusPill } from "@/components/composer/FocusPill";
+import { TerminalCompose } from "@/components/composer/TerminalCompose";
+import { useSessionFocus } from "@/components/composer/useSessionFocus";
 import { SessionMenu } from "@/components/sessions/SessionMenu";
 import { useSessionMenuActions } from "@/components/sessions/useSessionMenuActions";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
@@ -23,8 +27,11 @@ import { cx } from "@/lib/cx";
 import { useNarrowerThan, usePointerUI } from "@/lib/layout";
 import { useLocalSetting } from "@/lib/local-setting";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
+import { useFailureToast } from "@/lib/useFailureToast";
 
 import { DensityToggle } from "./DensityToggle";
+import type { PanelControl } from "./PanelButton";
+import { screenMenus } from "./screenMenus";
 import { AskStateProvider, SessionContextProvider } from "./SessionContext";
 import { SessionBar } from "./SessionBar";
 import { SessionFooter } from "./SessionFooter";
@@ -33,6 +40,8 @@ import { SessionRail } from "./SessionRail";
 import styles from "./SessionScreen.module.css";
 import { SideDrawer } from "./SideDrawer";
 import { SidePane } from "./SidePane";
+import { TerminalView } from "./terminal/TerminalView";
+import { useTerminalPane } from "./terminal/useTerminalPane";
 import { Transcript } from "./Transcript";
 import { useSessionPanels } from "./useSessionPanels";
 import { ViewSwitch, type SessionView } from "./ViewSwitch";
@@ -50,6 +59,8 @@ export function SessionScreen({ id }: { id: string }) {
   const stream = useSessionStream(host, token, id, handleAuthFailure);
   const { session, events, connection, pendingQuestions, hasOlder, loadingOlder } = stream;
   const [filesOpen, setFilesOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const reportFailure = useFailureToast();
   // The composer portals its drop overlay here.
   const [conversationNode, setConversationNode] = useState<HTMLElement | null>(null);
 
@@ -63,6 +74,13 @@ export function SessionScreen({ id }: { id: string }) {
 
   const [density, setDensity] = useLocalSetting<TranscriptDensity>("waypoint-session-density", TRANSCRIPT_DENSITIES, "summary");
   const [view, setView] = useState<SessionView>("chat");
+  // The side pane folds away while the Terminal view shows; its toggle opens it
+  // for this visit only.
+  const [paneBesideTerminal, setPaneBesideTerminal] = useState(false);
+  const switchView = (next: SessionView) => {
+    setView(next);
+    setPaneBesideTerminal(false);
+  };
   const goHome = useCallback(() => router.replace("/"), [router]);
   const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
   // A second reattach would restart the session the first one restored.
@@ -111,8 +129,14 @@ export function SessionScreen({ id }: { id: string }) {
   const activeView: SessionView = terminalOnly ? "terminal" : hasPane ? view : "chat";
   const structured = session ? fidelityFor(session.transport, catalog) === "structured" : true;
   const full = density === "full";
-  // A terminal-only transport takes its input in the pane.
-  const composing = !loadFailed && !terminalOnly;
+  const pane = useTerminalPane({ sessionId: id, session, catalog, active: !loadFailed && activeView === "terminal" });
+  const terminalView = activeView === "terminal";
+  const exited = isExitedSession(session);
+  // A terminal-only transport takes its input in the pane, with a compose
+  // drawer where the pane is interactive.
+  const chatComposer = !loadFailed && !terminalOnly;
+  const paneComposer = !loadFailed && terminalOnly && pane.interactive;
+  const composing = chatComposer || paneComposer;
   const canOpenFiles = composing && session !== null && supportsAttachments(session.backend, catalog);
   const openFiles = useMemo(() => (canOpenFiles ? () => setFilesOpen(true) : null), [canOpenFiles]);
   const context = useMemo(
@@ -125,40 +149,80 @@ export function SessionScreen({ id }: { id: string }) {
   const othersNeedYou = feed.askSessionIds.size - (asking ? 1 : 0);
 
   const fullHeader = pointer && !narrowHeader;
-  const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={setView} variant={fullHeader ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
+  const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={switchView} variant={fullHeader ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
   const inlineDensity = fullHeader && activeView === "chat" ? <DensityToggle variant="inline" value={density} onChange={setDensity} /> : null;
   const menuDensity = !pointer || (narrowHeader && activeView === "chat") ? <DensityToggle variant="menu" value={density} onChange={setDensity} /> : null;
-  const sessionActions = [
-    { id: "refresh", label: "Refresh", run: () => window.location.reload() },
-    ...(composerAvailability(session, catalog).dormant
-      ? [
-          {
-            id: "reconnect",
-            label: reconnecting ? "Reconnecting…" : "Reconnect session",
-            disabled: reconnecting,
-            run: () => void reconnect(),
-          },
-        ]
-      : []),
-  ];
+  const focus = useSessionFocus({ host, token, sessionId: id, session, onSession: stream.setSession });
+  const dormant = composerAvailability(session, catalog).dormant;
+  const reconnectAction = dormant ? { busy: reconnecting, run: () => void reconnect() } : null;
+  const resumePane = async () => {
+    try {
+      await postAction(host, token, id, "resume");
+    } catch (failure) {
+      reportFailure(failure, "failed to resume the pane");
+    }
+  };
+  const menus = screenMenus({
+    reconnect: reconnectAction,
+    terminal: terminalView
+      ? {
+          refresh: pane.connection.refresh,
+          resume: !exited && session?.status !== "running" ? () => void resumePane() : null,
+          tools: chatComposer
+            ? null
+            : {
+                focus: { on: focus.on, busy: focus.busy, toggle: () => void focus.set(!focus.on) },
+                schedule: () => setScheduleOpen(true),
+                files: openFiles,
+              },
+        }
+      : null,
+  });
   const overflow = session ? (
     <SessionMenu
       session={session}
       subtitle={agent}
       header={menuDensity}
       onAction={onAction}
-      extra={sessionActions}
+      extra={menus.session}
     />
   ) : null;
+  const terminalMenu = session ? (
+    <SessionMenu
+      session={session}
+      subtitle={agent}
+      onAction={onAction}
+      extra={menus.terminal}
+      scope={{ label: "Terminal actions", title: "Terminal" }}
+    />
+  ) : null;
+  const terminalRef = useRef<HTMLElement>(null);
   const title = session?.title || "Session";
   const columns = panels.mode === "columns";
   const railColumn = columns && panels.rail.open;
-  const paneColumn = columns && panels.pane.open;
+  const sidePane: PanelControl =
+    columns && terminalView
+      ? { open: paneBesideTerminal, toggle: () => setPaneBesideTerminal((open) => !open) }
+      : panels.pane;
+  const paneColumn = columns && sidePane.open;
 
   const body = loadFailed ? (
     <EmptyState
       title={stream.errorStatus === 404 ? "Session not found" : "Couldn't load the session"}
       detail={stream.error ?? undefined}
+    />
+  ) : terminalView ? (
+    <TerminalView
+      ref={terminalRef}
+      pane={pane}
+      exited={exited}
+      reconnect={reconnectAction}
+      lead={
+        !chatComposer && focus.on ? (
+          <FocusPill busy={focus.busy} onTurnOff={() => focus.set(false)} returnFocusRef={terminalRef} />
+        ) : null
+      }
+      menu={terminalMenu}
     />
   ) : (
     <Transcript
@@ -171,7 +235,6 @@ export function SessionScreen({ id }: { id: string }) {
       hiddenCount={transcript.hiddenCount}
       onShowAll={() => setDensity("full")}
       pending={optimistic.pending}
-      override={activeView === "terminal" ? <EmptyState title="Not built yet" detail="Terminal" /> : undefined}
     />
   );
 
@@ -180,7 +243,7 @@ export function SessionScreen({ id }: { id: string }) {
       <AskStateProvider value={askState}>
         <div className={cx(styles.screen, railColumn && styles.railOpen, paneColumn && styles.paneOpen)}>
           {railColumn ? <SessionRail currentId={id} /> : null}
-          <section ref={conversationRef} className={styles.conv} aria-label="Conversation">
+          <section ref={conversationRef} className={cx(styles.conv, terminalView && styles.terminal)} aria-label="Conversation">
             {pointer ? (
               <SessionHeader
                 title={title}
@@ -188,7 +251,7 @@ export function SessionScreen({ id }: { id: string }) {
                 agent={agent}
                 onTitle={switcher.open}
                 rail={panels.rail}
-                pane={panels.pane}
+                pane={sidePane}
                 view={viewSwitch}
                 density={inlineDensity}
                 overflow={overflow}
@@ -201,7 +264,7 @@ export function SessionScreen({ id }: { id: string }) {
                 othersNeedYou={othersNeedYou}
                 onTitle={switcher.open}
                 rail={columns ? panels.rail : undefined}
-                pane={columns ? panels.pane : undefined}
+                pane={columns ? sidePane : undefined}
                 view={viewSwitch}
                 overflow={overflow}
               />
@@ -209,7 +272,21 @@ export function SessionScreen({ id }: { id: string }) {
             {body}
             <SessionFooter
               composer={
-                composing ? (
+                paneComposer ? (
+                  <TerminalCompose
+                    sessionId={id}
+                    session={session}
+                    catalog={catalog}
+                    connection={pane.connection.state}
+                    submit={pane.connection.submit}
+                    refocusPane={() => pane.term.current?.focus()}
+                    dropRoot={conversationNode}
+                    filesOpen={filesOpen}
+                    onFilesOpenChange={setFilesOpen}
+                    scheduleOpen={scheduleOpen}
+                    onScheduleOpenChange={setScheduleOpen}
+                  />
+                ) : chatComposer ? (
                   <Composer
                     sessionId={id}
                     session={session}
@@ -221,6 +298,8 @@ export function SessionScreen({ id }: { id: string }) {
                     dropRoot={conversationNode}
                     filesOpen={filesOpen}
                     onFilesOpenChange={setFilesOpen}
+                    scheduleOpen={scheduleOpen}
+                    onScheduleOpenChange={setScheduleOpen}
                     onPending={optimistic.add}
                   />
                 ) : null

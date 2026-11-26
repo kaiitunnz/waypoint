@@ -94,6 +94,51 @@
   --hl-symbol: #8fb3d6;
   --hl-punct: #97a2b3;
 
+  /* The terminal pane. Its ground follows the agent's own TUI theme, not the
+     app's, so both surfaces live here and the light theme leaves them alone.
+     Plain colours: xterm reads them as values. */
+  --f-term: 13px;
+  --term-dark-bg: #090b0f;
+  --term-dark-fg: #d3d9e2;
+  --term-dark-cursor: #e0bb73;
+  --term-dark-selection: #2c3745;
+  --term-dark-black: #0a0d12;
+  --term-dark-red: #ec8486;
+  --term-dark-green: #7dcb9f;
+  --term-dark-yellow: #d99a4a;
+  --term-dark-blue: #96b8dc;
+  --term-dark-magenta: #c8a3eb;
+  --term-dark-cyan: #6cc4d6;
+  --term-dark-white: #e7ecf3;
+  --term-dark-bright-black: #6f7a8c;
+  --term-dark-bright-red: #ff8a8e;
+  --term-dark-bright-green: #8ee0b3;
+  --term-dark-bright-yellow: #e0bb73;
+  --term-dark-bright-blue: #b0cfee;
+  --term-dark-bright-magenta: #dcc1f0;
+  --term-dark-bright-cyan: #9adeec;
+  --term-dark-bright-white: #f5f7fb;
+  --term-light-bg: #faf7f0;
+  --term-light-fg: #1c1914;
+  --term-light-cursor: #b8820e;
+  --term-light-selection: #ecdcb8;
+  --term-light-black: #2b2b2b;
+  --term-light-red: #c0392b;
+  --term-light-green: #2f8f4e;
+  --term-light-yellow: #a6791f;
+  --term-light-blue: #2d6bb8;
+  --term-light-magenta: #9b4dca;
+  --term-light-cyan: #1e8a9e;
+  --term-light-white: #d0cabb;
+  --term-light-bright-black: #6c665a;
+  --term-light-bright-red: #d0503f;
+  --term-light-bright-green: #3aa860;
+  --term-light-bright-yellow: #b8820e;
+  --term-light-bright-blue: #3a87ba;
+  --term-light-bright-magenta: #b56fd8;
+  --term-light-bright-cyan: #2aa5bb;
+  --term-light-bright-white: #efe9dc;
+
   /* Layout. */
   --rail-width: 64px;
   --tabbar-height: 52px;
@@ -172,6 +217,7 @@ html[data-theme="light"] {
 /* Touch body text is 16px so iOS does not zoom into form fields. */
 @media not all and (hover: hover) and (pointer: fine) {
   :root {
+    --f-term: 11px;
     --f-page: 26px;
     --f-head: 18px;
     --f-body: 16px;

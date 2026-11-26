@@ -59,6 +59,8 @@ interface ComposerProps {
   dropRoot: HTMLElement | null;
   filesOpen: boolean;
   onFilesOpenChange: (open: boolean) => void;
+  scheduleOpen: boolean;
+  onScheduleOpenChange: (open: boolean) => void;
   onPending: OptimisticSends["add"];
 }
 
@@ -73,6 +75,8 @@ export function Composer({
   dropRoot,
   filesOpen,
   onFilesOpenChange,
+  scheduleOpen,
+  onScheduleOpenChange,
   onPending,
 }: ComposerProps) {
   const { host, token } = useShellData();
@@ -80,7 +84,6 @@ export function Composer({
   const router = useRouter();
   const pointer = usePointerUI();
   const [draft, setDraft] = useState("");
-  const [scheduleOpen, setScheduleOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -220,7 +223,7 @@ export function Composer({
           { id: "files", label: "Session files", icon: "files" as const, run: () => onFilesOpenChange(true) },
         ]
       : []),
-    { id: "schedule", label: "Schedule message", icon: "clock", disabled: session === null, run: () => setScheduleOpen(true) },
+    { id: "schedule", label: "Schedule message", icon: "clock", disabled: session === null, run: () => onScheduleOpenChange(true) },
     ...(structured ? [{ id: "command", label: "Insert command", icon: "slash" as const, disabled, run: () => insert("/") }] : []),
     ...(attachmentsEnabled ? [{ id: "mention", label: "Insert mention", icon: "at" as const, disabled, run: () => insert("@") }] : []),
   ];
@@ -390,7 +393,7 @@ export function Composer({
           sessionId={sessionId}
           initialText={draft}
           canQueue={!isExitedSession(session)}
-          onClose={() => setScheduleOpen(false)}
+          onClose={() => onScheduleOpenChange(false)}
         />
       ) : null}
       {dragging && dropRoot

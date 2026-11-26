@@ -42,7 +42,9 @@ export type IconName =
   | "board"
   | "usage"
   | "tailscale"
-  | "ssh";
+  | "ssh"
+  | "lock"
+  | "unlock";
 
 const PATHS: Record<IconName, ReactNode> = {
   "chevron-right": <path d="M9 6l6 6-6 6" />,
@@ -208,6 +210,18 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <rect x="3.5" y="5" width="17" height="14" rx="2" />
       <path d="M7.5 10l2.3 2.2-2.3 2.2M12.5 14.5h4" />
+    </>
+  ),
+  lock: (
+    <>
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </>
+  ),
+  unlock: (
+    <>
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 7.7-1.5" />
     </>
   ),
 };

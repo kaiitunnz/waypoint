@@ -1,0 +1,94 @@
+/* The pane's ground is the agent's own TUI theme, set per connection. */
+.stage {
+  --term-bg: var(--term-dark-bg);
+  --term-fg: var(--term-dark-fg);
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 96px;
+  background: var(--term-bg);
+  overflow: hidden;
+}
+
+.stage[data-appearance="light"] {
+  --term-bg: var(--term-light-bg);
+  --term-fg: var(--term-light-fg);
+}
+
+.host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A resizable pane fits the stage; xterm scrolls its own scrollback. */
+.fit {
+  padding: 8px 10px;
+  overflow: hidden;
+}
+
+/* A fixed grid keeps its native size and the host scrolls it. Auto margins
+   centre it when smaller without clipping it when larger. */
+.fixed {
+  display: flex;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.fixed > :global(.xterm) {
+  flex: none;
+  margin: auto;
+  padding: 8px 10px;
+  background: var(--term-bg);
+}
+
+/* Wider than the grid on a pointer: the grid sits centred on a letterbox. */
+.letterbox {
+  background: color-mix(in srgb, var(--term-bg) 55%, var(--ground));
+}
+
+.letterbox .fixed {
+  padding: 12px;
+}
+
+.letterbox .fixed > :global(.xterm) {
+  border-radius: var(--r-sm);
+  outline: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+/* A phone pans the grid sideways from its left edge, the live row at the bottom. */
+.pan .fixed {
+  scrollbar-width: none;
+}
+
+.pan .fixed::-webkit-scrollbar {
+  display: none;
+}
+
+.pan .fixed > :global(.xterm) {
+  margin: auto 0 0;
+  padding: 6px 8px 12px;
+}
+
+.fade {
+  mask-image: linear-gradient(90deg, var(--term-bg) calc(100% - 28px), transparent);
+}
+
+.track {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  left: 8px;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+  pointer-events: none;
+}
+
+.track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--term-fg) 38%, transparent);
+}

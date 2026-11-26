@@ -1,0 +1,104 @@
+.bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ground);
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.lock {
+  composes: hit from "../../../styles/hit.module.css";
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 9px 0 7px;
+  border-radius: var(--r-sm);
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.lock svg {
+  color: var(--faint);
+}
+
+.unlocked,
+.unlocked svg {
+  color: var(--warn);
+}
+
+.unlocked {
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.dims {
+  padding: 0 8px;
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.chip {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  touch-action: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.chip:active {
+  background: var(--fill-raised);
+}
+
+.divider {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--line);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .bar {
+    min-height: 36px;
+    padding: 0 8px 0 10px;
+  }
+
+  .lock {
+    height: 28px;
+  }
+
+  .lock:hover {
+    color: var(--text-strong);
+  }
+
+  .unlocked:hover {
+    color: var(--warn);
+  }
+
+  .chip {
+    width: 32px;
+    height: 28px;
+  }
+
+  .chip:hover {
+    color: var(--text-strong);
+    background: var(--fill-quiet);
+  }
+}

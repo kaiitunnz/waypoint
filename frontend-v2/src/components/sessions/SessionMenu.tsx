@@ -8,7 +8,7 @@ import { MenuButton, type MenuButtonItem } from "@/components/ui/MenuButton";
 
 export type SessionAction = "pin" | "unpin" | "rename" | "terminate" | "delete";
 
-interface ScreenAction extends MenuButtonItem {
+export interface ScreenAction extends MenuButtonItem {
   run: () => void;
 }
 
@@ -20,21 +20,25 @@ interface SessionMenuProps {
   header?: ReactNode;
   // The screen's own actions, listed before the destructive one.
   extra?: ScreenAction[];
+  // A menu for one part of the screen lists only its own actions, under its name.
+  scope?: { label: string; title: string };
 }
 
-export function SessionMenu({ session, subtitle, onAction, header, extra = [] }: SessionMenuProps) {
-  const items: MenuButtonItem[] = [
-    { id: session.pinned_at ? "unpin" : "pin", label: session.pinned_at ? "Unpin" : "Pin" },
-    { id: "rename", label: "Rename" },
-    ...extra,
-    session.status === "exited"
-      ? { id: "delete", label: "Delete", tone: "danger" }
-      : { id: "terminate", label: "Terminate", tone: "danger" },
-  ];
+export function SessionMenu({ session, subtitle, onAction, header, extra = [], scope }: SessionMenuProps) {
+  const items: MenuButtonItem[] = scope
+    ? extra
+    : [
+        { id: session.pinned_at ? "unpin" : "pin", label: session.pinned_at ? "Unpin" : "Pin" },
+        { id: "rename", label: "Rename" },
+        ...extra,
+        session.status === "exited"
+          ? { id: "delete", label: "Delete", tone: "danger" }
+          : { id: "terminate", label: "Terminate", tone: "danger" },
+      ];
   return (
     <MenuButton
-      label={`Actions for ${session.title}`}
-      title={session.title}
+      label={scope?.label ?? `Actions for ${session.title}`}
+      title={scope?.title ?? session.title}
       subtitle={subtitle}
       items={items}
       size="sm"

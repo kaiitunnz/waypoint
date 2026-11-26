@@ -20,6 +20,11 @@
   background: var(--plane);
 }
 
+/* The Terminal view is chrome around the pane. */
+.terminal {
+  background: var(--ground);
+}
+
 @media (min-width: 900px) {
   .screen {
     display: grid;

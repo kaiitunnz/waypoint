@@ -18,10 +18,10 @@ describe("readStoredFlag and writeStoredFlag", () => {
     for (const fallback of [true, false]) {
       const storage = memoryStorage();
       expect(readStoredFlag(storage, "k", fallback)).toBe(fallback);
-      writeStoredFlag(storage, "k", !fallback, fallback);
+      expect(writeStoredFlag(storage, "k", !fallback, fallback)).toBe(true);
       expect(storage.data.get("k")).toBe(fallback ? "0" : "1");
       expect(readStoredFlag(storage, "k", fallback)).toBe(!fallback);
-      writeStoredFlag(storage, "k", fallback, fallback);
+      expect(writeStoredFlag(storage, "k", fallback, fallback)).toBe(true);
       expect(storage.data.has("k")).toBe(false);
     }
   });
@@ -97,6 +97,27 @@ describe("storedFlag", () => {
     const flag = storedFlag("d", true, () => refusing as unknown as Storage);
     flag.set(false);
     expect(flag.get()).toBe(false);
+  });
+
+  it("drops a refused choice once storage takes a later one, so other tabs are heard again", () => {
+    const storage = memoryStorage();
+    let refuse = true;
+    const flaky = {
+      getItem: (key: string) => storage.getItem(key),
+      setItem: (key: string, value: string) => {
+        if (refuse) throw new Error("full");
+        storage.setItem(key, value);
+      },
+      removeItem: (key: string) => storage.removeItem(key),
+    };
+    const flag = storedFlag("g", true, () => flaky as unknown as Storage);
+    flag.set(false);
+    expect(storage.data.has("g")).toBe(false);
+    expect(flag.get()).toBe(false);
+    refuse = false;
+    flag.set(false);
+    storage.setItem("g", "1");
+    expect(flag.get()).toBe(true);
   });
 
   it("hears a change made in another tab", () => {

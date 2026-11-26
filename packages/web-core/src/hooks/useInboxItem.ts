@@ -12,6 +12,8 @@ interface InboxItemOptions {
   itemId: string;
   // Must be stable: a new one re-reads the item and restarts its socket.
   onAuthFailure: () => void;
+  // Takes a failed delete, so the item stays on screen. Must be stable.
+  onRemoveError?: (reason: unknown) => void;
 }
 
 export interface InboxItemState {
@@ -20,12 +22,18 @@ export interface InboxItemState {
   // The item was deleted elsewhere.
   gone: boolean;
   error: string | null;
-  // Resolves true once deleted; a failure lands in `error`.
+  // Resolves true once deleted; a failure goes to `onRemoveError`, else `error`.
   remove: () => Promise<boolean>;
 }
 
 // One inbox item: read, marked read, and kept current over its own socket.
-export function useInboxItem({ host, token, itemId, onAuthFailure }: InboxItemOptions): InboxItemState {
+export function useInboxItem({
+  host,
+  token,
+  itemId,
+  onAuthFailure,
+  onRemoveError,
+}: InboxItemOptions): InboxItemState {
   const [item, setItem] = useState<InboxItem | null>(null);
   const [gone, setGone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,10 +113,11 @@ export function useInboxItem({ host, token, itemId, onAuthFailure }: InboxItemOp
         .then(() => true)
         .catch((reason) => {
           if (isAuthError(reason)) onAuthFailure();
+          else if (onRemoveError) onRemoveError(reason);
           else setError(reason instanceof Error ? reason.message : "failed to delete");
           return false;
         }),
-    [host, token, itemId, onAuthFailure],
+    [host, token, itemId, onAuthFailure, onRemoveError],
   );
 
   return { item, gone, error, remove };

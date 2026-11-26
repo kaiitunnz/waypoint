@@ -136,11 +136,13 @@ export function useInboxList({
         setCursor(page.cursor);
         setHasMore(page.hasMore);
         setError(null);
+        // This may be the first read of the filter to succeed.
+        setLoadedFor(inboxListKey(status, query));
       })
       .catch((reason) => {
         if (isAuthError(reason)) onAuthFailure();
       });
-  }, [host, token, params, onAuthFailure]);
+  }, [host, token, status, query, params, onAuthFailure]);
   const refreshRef = useRef(refresh);
   useEffect(() => {
     refreshRef.current = refresh;
@@ -210,7 +212,9 @@ export function useInboxList({
       .catch((reason) => {
         if (isAuthError(reason)) onAuthFailure();
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (started === generation.current) setLoading(false);
+      });
   }, [cursor, loading, host, token, params, onAuthFailure]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);

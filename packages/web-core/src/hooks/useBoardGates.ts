@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ApiError, fetchInboxItem, fetchManagers, fetchManagerState, isAuthError } from "../api";
 import { managerGates, type BoardGate } from "../board";
@@ -42,6 +42,8 @@ export function useBoardGates(
 ): BoardGate[] | null {
   const [gates, setGates] = useState<BoardGate[] | null>(null);
   const [tick, setTick] = useState(0);
+  const read = useRef<(() => void) | null>(null);
+  const queued = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const bump = () => {
@@ -51,41 +53,53 @@ export function useBoardGates(
     return () => document.removeEventListener("visibilitychange", bump);
   }, []);
 
-  const watching = (gates?.length ?? 0) > 0;
+  // Until a first read lands, try again sooner.
+  const interval = gates === null ? SETTLE_MS : gates.length > 0 ? POLL_MS : null;
   useEffect(() => {
-    if (!watching) return;
+    if (interval === null) return;
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") setTick((value) => value + 1);
-    }, POLL_MS);
+    }, interval);
     return () => clearInterval(timer);
-  }, [watching]);
+  }, [interval]);
 
+  // One reader per server. Reads may overlap: each that finishes is shown unless a
+  // later one already is, so a busy board cannot keep every read from landing.
   useEffect(() => {
     setGates(null);
-  }, [host, token]);
-
-  useEffect(() => {
     if (!host || !token) return;
     let active = true;
-    // The latest read wins when a slow one resolves late.
-    let latest = 0;
-    const read = () => {
-      const mine = ++latest;
+    let started = 0;
+    let shown = 0;
+    read.current = () => {
+      const mine = ++started;
       loadGates(host, token)
         .then((next) => {
-          if (active && mine === latest) setGates(next);
+          if (!active || mine < shown) return;
+          shown = mine;
+          setGates(next);
         })
         .catch((error) => {
           if (active && isAuthError(error)) onAuthFailure?.();
         });
     };
-    const soon = setTimeout(read, DEBOUNCE_MS);
-    const settled = setTimeout(read, SETTLE_MS);
     return () => {
       active = false;
-      clearTimeout(soon);
-      clearTimeout(settled);
+      read.current = null;
+      if (queued.current !== null) clearTimeout(queued.current);
+      queued.current = null;
     };
+  }, [host, token, onAuthFailure]);
+
+  useEffect(() => {
+    // A change while a read is queued rides along with it, so changes that keep
+    // coming cannot put it off.
+    queued.current ??= setTimeout(() => {
+      queued.current = null;
+      read.current?.();
+    }, DEBOUNCE_MS);
+    const settled = setTimeout(() => read.current?.(), SETTLE_MS);
+    return () => clearTimeout(settled);
   }, [host, token, revision, tick, onAuthFailure]);
 
   return gates;

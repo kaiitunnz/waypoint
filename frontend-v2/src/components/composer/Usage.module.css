@@ -1,0 +1,209 @@
+.ring {
+  composes: hit from "../../styles/hit.module.css";
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.ring svg {
+  fill: none;
+  stroke-width: 2.5;
+}
+
+.track {
+  stroke: color-mix(in srgb, var(--text) 18%, transparent);
+}
+
+.ring .fill {
+  stroke: var(--working);
+}
+
+.ring.warn .fill {
+  stroke: var(--warn);
+}
+
+.ring.danger .fill {
+  stroke: var(--error);
+}
+
+/* A rate limit under pressure with an unknown context still reads. */
+.ring.warn .track {
+  stroke: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+.ring.danger .track {
+  stroke: color-mix(in srgb, var(--error) 45%, transparent);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 8px;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 12px;
+}
+
+.block + .block {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.head h3 {
+  font-size: var(--f-body);
+  color: var(--text-strong);
+}
+
+.windows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+}
+
+.reset {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.percent {
+  margin-left: auto;
+  color: var(--text-strong);
+}
+
+.percent.warn {
+  color: var(--warn);
+}
+
+.percent.danger {
+  color: var(--error);
+}
+
+.panel .meter {
+  width: 100%;
+  margin-top: 5px;
+}
+
+.muted {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.partial {
+  color: var(--warn);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: var(--f-meta);
+}
+
+.meta div {
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.meta dt {
+  color: var(--faint);
+}
+
+.meta dd {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.total {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chips li {
+  display: flex;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  background: var(--fill-quiet);
+  font-size: var(--f-meta);
+}
+
+.chips span {
+  color: var(--muted);
+}
+
+.chips strong {
+  color: var(--text-strong);
+}
+
+@media not all and (hover: hover) and (pointer: fine) {
+  /* The ring alone is narrower than a tap target. */
+  .ring {
+    justify-content: flex-end;
+    min-width: 44px;
+  }
+
+  /* Room for the tap targets of the compact controls in a section heading. */
+  .head {
+    min-height: 44px;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ring {
+    height: 32px;
+  }
+
+  .ring:hover {
+    background: var(--fill-quiet);
+  }
+
+  .panel {
+    padding: 14px 14px 4px;
+  }
+}

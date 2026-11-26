@@ -11,13 +11,9 @@ import {
   useState,
 } from "react";
 
-import {
-  AttachmentTray,
-  filesFromDataTransfer,
-  FilesIcon,
-  PaperclipIcon,
-  useAttachments,
-} from "@/components/AttachmentTray";
+import { AttachmentTray, FilesIcon, PaperclipIcon } from "@/components/AttachmentTray";
+import { filesFromDataTransfer } from "@waypoint/web-core/fileDrop";
+import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { useFileDropTarget } from "@/components/FileDrop";
 import { FileMentions } from "@/components/FileMentions";

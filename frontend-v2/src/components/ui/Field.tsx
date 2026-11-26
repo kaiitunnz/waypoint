@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type InputHTMLAttributes, type ReactNode, type Ref } from "react";
+import { useState, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes } from "react";
 
 import { cx } from "@/lib/cx";
 
@@ -32,6 +32,10 @@ interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
 
 export function TextInput({ mono, className, ref, ...rest }: TextInputProps) {
   return <input {...rest} ref={ref} className={cx(styles.input, mono && styles.mono, className)} />;
+}
+
+export function TextArea(props: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "className">) {
+  return <textarea {...props} className={cx(styles.input, styles.area)} />;
 }
 
 export function SearchInput({ className, ref, ...rest }: TextInputProps) {

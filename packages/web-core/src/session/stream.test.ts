@@ -101,6 +101,7 @@ describe("streamReducer", () => {
     expect(state.events.map((event) => event.text)).toEqual(["Hi there", "red"]);
     expect(state.hasOlder).toBe(true);
     expect(state.oldestSequence).toBe(5);
+    expect(state.latestTodo?.sequence).toBe(2);
     expect(state.loaded).toBe(true);
     expect(state.error).toBeNull();
   });

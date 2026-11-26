@@ -24,6 +24,7 @@ export interface SessionActions {
   setPinned: (sessionId: string, pinned: boolean, onUpdated?: (session: SessionRecord) => void) => Promise<void>;
   rename: (session: SessionRecord, title: string, onUpdated?: (session: SessionRecord) => void) => Promise<void>;
   terminate: (sessionId: string) => Promise<void>;
+  reattach: (sessionId: string) => Promise<void>;
   // `onRemoved` runs once the server has deleted the session.
   remove: (sessionId: string, onRemoved?: () => void) => Promise<void>;
   removeExited: () => Promise<void>;
@@ -31,7 +32,7 @@ export interface SessionActions {
 
 type FeedMutations = Pick<SessionsFeed, "upsertSession" | "removeSessions" | "patchSession">;
 
-// Row actions on the session list. A failure goes to `onError` as a message; an
+// Actions on a session. A failure goes to `onError` as a message; an
 // expired token goes to `onAuthFailure`. Each action updates the live list and
 // the history cache right away, ahead of the server's next list frame.
 export function useSessionActions(
@@ -78,6 +79,8 @@ export function useSessionActions(
       },
       terminate: (sessionId) =>
         attempt(() => postAction(host, token, sessionId, "terminate"), "failed to terminate"),
+      reattach: (sessionId) =>
+        attempt(() => postAction(host, token, sessionId, "reattach"), "failed to reconnect"),
       remove: (sessionId, onRemoved) =>
         attempt(async () => {
           await deleteSession(host, token, sessionId);

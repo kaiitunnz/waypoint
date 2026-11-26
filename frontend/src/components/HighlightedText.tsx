@@ -2,6 +2,8 @@
 
 import { Fragment } from "react";
 
+import { highlightRuns } from "@waypoint/web-core/fuzzy";
+
 interface HighlightedTextProps {
   text: string;
   positions: ReadonlyArray<number>;
@@ -28,17 +30,7 @@ export function HighlightedText({
   breakAfterSlash = false,
 }: HighlightedTextProps) {
   if (positions.length === 0) return <>{withSlashBreaks(text, breakAfterSlash)}</>;
-  const hits = new Set(positions);
-  const runs: Array<{ hit: boolean; value: string }> = [];
-  for (let index = 0; index < text.length; index++) {
-    const hit = hits.has(index);
-    const last = runs[runs.length - 1];
-    if (last && last.hit === hit) {
-      last.value += text[index];
-    } else {
-      runs.push({ hit, value: text[index] });
-    }
-  }
+  const runs = highlightRuns(text, positions);
   return (
     <>
       {runs.map((run, index) =>

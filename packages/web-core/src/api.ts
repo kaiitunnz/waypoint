@@ -1791,12 +1791,15 @@ export async function deleteAttachment(
   token: string,
   sessionId: string,
   attachmentId: string,
+  // Lets the request outlive a page that is going away.
+  { keepalive }: { keepalive?: boolean } = {},
 ): Promise<void> {
   const response = await fetch(
     `${host}/api/sessions/${sessionId}/attachments/${attachmentId}`,
     {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
+      keepalive,
     },
   );
   // A 404 means it's already gone — fine for a best-effort cleanup.

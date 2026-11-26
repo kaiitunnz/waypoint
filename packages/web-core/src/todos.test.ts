@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ev } from "./test-helpers";
 import {
+  currentTodoEvent,
   isTodoListEvent,
   isTodoToolEvent,
   readTodoEntries,
@@ -123,5 +124,21 @@ describe("summarizeTodos", () => {
     const done = summarizeTodos([entry("a", "completed")])!;
     expect(done.current).toBeNull();
     expect(done.allComplete).toBe(true);
+  });
+});
+
+describe("currentTodoEvent", () => {
+  const todo = (sequence: number) => ev(sequence, "tool_result", "todos", { item_type: "todo_list" });
+
+  it("takes the latest in the window unless the loaded one is newer", () => {
+    const events = [todo(2), ev(3, "agent_output", "x"), todo(4), ev(5, "agent_output", "y")];
+    expect(currentTodoEvent(events, null)?.sequence).toBe(4);
+    expect(currentTodoEvent(events, todo(3))?.sequence).toBe(4);
+    expect(currentTodoEvent(events, todo(9))?.sequence).toBe(9);
+  });
+
+  it("falls back to the loaded one", () => {
+    expect(currentTodoEvent([], todo(1))?.sequence).toBe(1);
+    expect(currentTodoEvent([ev(1, "agent_output", "x")], null)).toBeNull();
   });
 });

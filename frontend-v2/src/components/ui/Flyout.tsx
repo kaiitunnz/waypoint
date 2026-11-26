@@ -1,0 +1,68 @@
+"use client";
+
+import type { ReactNode, RefObject } from "react";
+
+import { usePointerUI } from "@/lib/layout";
+
+import { Sheet } from "./Dialog";
+import { Popover } from "./Popover";
+
+interface FlyoutProps {
+  open: boolean;
+  onClose: () => void;
+  triggerRef: RefObject<HTMLElement | null>;
+  // The sheet's heading, and the popover's spoken name unless `label` is given.
+  title: string;
+  label?: string;
+  subtitle?: ReactNode;
+  width?: number;
+  align?: "left" | "right";
+  side?: "bottom" | "top";
+  // Lets a pointer client resize the popover; a sheet has one size.
+  resizeKey?: string;
+  // False keeps the focus out of the popover. A sheet is modal and always takes it.
+  autoFocus?: boolean;
+  // No padding around the sheet's body, for lists and menus.
+  flush?: boolean;
+  children: ReactNode;
+}
+
+// A popover from its trigger on a pointer client, a sheet on touch.
+export function Flyout({
+  open,
+  onClose,
+  triggerRef,
+  title,
+  label,
+  subtitle,
+  width,
+  align,
+  side,
+  resizeKey,
+  autoFocus,
+  flush,
+  children,
+}: FlyoutProps) {
+  const pointer = usePointerUI();
+  return pointer ? (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      triggerRef={triggerRef}
+      label={label ?? title}
+      width={width}
+      align={align}
+      side={side}
+      resizeKey={resizeKey}
+      autoFocus={autoFocus}
+    >
+      {children}
+    </Popover>
+  ) : (
+    <Sheet open={open} onClose={onClose} title={title} subtitle={subtitle} flush={flush}>
+      {children}
+    </Sheet>
+  );
+}

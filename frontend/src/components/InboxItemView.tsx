@@ -3,12 +3,9 @@
 import Link from "next/link";
 import { useRef, useState, type ClipboardEvent } from "react";
 
-import {
-  AttachmentTray,
-  filesFromDataTransfer,
-  PaperclipIcon,
-  useAttachments,
-} from "@/components/AttachmentTray";
+import { AttachmentTray, PaperclipIcon } from "@/components/AttachmentTray";
+import { filesFromDataTransfer } from "@waypoint/web-core/fileDrop";
+import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import { useElementFileDrop } from "@/components/FileDrop";
 import { InboxAttachment, InboxAttachments } from "@/components/InboxAttachment";
 import { InboxQuestionCard } from "@/components/InboxQuestionCard";

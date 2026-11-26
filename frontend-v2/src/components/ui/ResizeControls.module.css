@@ -1,0 +1,106 @@
+.seam {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+  outline: none;
+}
+
+.seam::after {
+  position: absolute;
+  border-radius: 1px;
+  content: "";
+}
+
+.seam:hover::after,
+.seam:focus-visible::after,
+.seam:active::after {
+  background: color-mix(in srgb, var(--text-strong) 55%, transparent);
+}
+
+.width {
+  top: 16px;
+  bottom: 16px;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.width::after {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+}
+
+.height {
+  right: 16px;
+  left: 16px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.height::after {
+  right: 0;
+  left: 0;
+  height: 2px;
+}
+
+.width.left {
+  left: 0;
+}
+
+.width.left::after {
+  left: 3px;
+}
+
+.width.right {
+  right: 0;
+}
+
+.width.right::after {
+  right: 3px;
+}
+
+.height.top {
+  top: 0;
+}
+
+.height.top::after {
+  top: 3px;
+}
+
+.height.bottom {
+  bottom: 0;
+}
+
+.height.bottom::after {
+  bottom: 3px;
+}
+
+.reset {
+  position: absolute;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.reset:hover {
+  color: var(--text-strong);
+}
+
+.reset.left {
+  left: 1px;
+}
+
+.reset.right {
+  right: 1px;
+}
+
+.reset.top {
+  top: 1px;
+}
+
+.reset.bottom {
+  bottom: 1px;
+}

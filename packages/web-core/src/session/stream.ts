@@ -12,6 +12,8 @@ export interface StreamState {
   oldestSequence: number | null;
   // Whether the tail page has loaded; the session record alone can arrive first, over the socket.
   loaded: boolean;
+  // The newest task snapshot as of the tail page, which may predate the loaded events.
+  latestTodo: EventRecord | null;
   pendingQuestions: PendingQuestionsSnapshot | null;
   connection: ConnectionState;
   error: string | null;
@@ -27,6 +29,7 @@ export const INITIAL_STREAM_STATE: StreamState = {
   hasOlder: false,
   oldestSequence: null,
   loaded: false,
+  latestTodo: null,
   pendingQuestions: null,
   connection: "connecting",
   error: null,
@@ -79,6 +82,7 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
         hasOlder: action.page.has_more,
         oldestSequence: minRawSequence(sanitized),
         loaded: true,
+        latestTodo: action.page.latest_todo ? sanitizeEvent(action.page.latest_todo) : null,
         pendingQuestions: action.page.pending_questions
           ? mergePendingQuestionSnapshot(state.pendingQuestions, action.page.pending_questions, false)
           : state.pendingQuestions,

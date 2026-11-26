@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { installFileDropGuard, isExternalFileDrag } from "./fileDrop";
+import { filesFromDataTransfer, installFileDropGuard, isExternalFileDrag, pasteAttaches } from "./fileDrop";
 
 function dragEvent(type: string, types: string[] = ["Files"]) {
   const event = new Event(type, { cancelable: true }) as Event & { dataTransfer: unknown };
@@ -62,5 +62,63 @@ describe("installFileDropGuard", () => {
     const over = dragEvent("dragover");
     target.dispatchEvent(over);
     expect(over.defaultPrevented).toBe(false);
+  });
+});
+
+describe("filesFromDataTransfer", () => {
+  const file = { name: "a.txt" } as File;
+  it("reads the items' files, skipping text", () => {
+    const data = {
+      items: [
+        { kind: "string", getAsFile: () => null },
+        { kind: "file", getAsFile: () => file },
+      ],
+      files: [],
+    } as unknown as DataTransfer;
+    expect(filesFromDataTransfer(data)).toEqual([file]);
+  });
+  it("falls back to the file list and ignores nothing to read", () => {
+    expect(filesFromDataTransfer({ items: [], files: [file] } as unknown as DataTransfer)).toEqual([file]);
+    expect(filesFromDataTransfer(null)).toEqual([]);
+  });
+});
+
+describe("pasteAttaches", () => {
+  const files = (...names: string[]) => names.map((name) => ({ name }) as File);
+
+  it("attaches a plain image paste, which carries no text", () => {
+    expect(pasteAttaches(files("image.png"), "")).toBe(true);
+    expect(pasteAttaches(files("image.png"), "\n")).toBe(true);
+  });
+
+  it("attaches files copied in Finder, named one per line", () => {
+    expect(pasteAttaches(files("report.pdf"), "report.pdf")).toBe(true);
+    expect(pasteAttaches(files("a.txt", "b 2.txt"), "a.txt\rb 2.txt")).toBe(true);
+    // A decomposed name in the text, a composed one on the file.
+    expect(pasteAttaches(files("\u00e9.txt"), "e\u0301.txt")).toBe(true);
+    expect(pasteAttaches(files("100%.txt"), "100%.txt")).toBe(true);
+  });
+
+  it("attaches files copied in Nautilus or Dolphin, given as paths or URIs", () => {
+    expect(pasteAttaches(files("a.txt"), "/home/me/docs/a.txt\n")).toBe(true);
+    expect(pasteAttaches(files("a b.txt", "c.png"), "file:///home/me/a%20b.txt\r\nfile:///home/me/c.png")).toBe(true);
+    expect(pasteAttaches(files("50%.txt"), "file:///home/me/50%.txt")).toBe(true);
+    // Only a URI is encoded.
+    expect(pasteAttaches(files("a%20b.txt"), "/home/me/a%20b.txt")).toBe(true);
+  });
+
+  it("lets an office app's text paste, picture and all", () => {
+    expect(pasteAttaches(files("image.png"), "Q1\tQ2\n10\t12")).toBe(false);
+    expect(pasteAttaches(files("image.png"), "A heading")).toBe(false);
+    // Text that only ends like the picture's name.
+    expect(pasteAttaches(files("image.png"), "assets/icons/image.png")).toBe(false);
+    expect(pasteAttaches(files("image.png"), "https://example.com/image.png")).toBe(false);
+    expect(pasteAttaches(files("image.png"), "see https://example.com/image.png")).toBe(false);
+  });
+
+  it("lets text paste when a line names no file, or there is none", () => {
+    expect(pasteAttaches(files("a.txt"), "a.txt\nand a note")).toBe(false);
+    expect(pasteAttaches([], "a.txt")).toBe(false);
+    expect(pasteAttaches([], "")).toBe(false);
   });
 });

@@ -2,11 +2,10 @@
 
 import { attachmentSpecsFor } from "@waypoint/web-core/attachments";
 import { sendUserFileInput } from "@waypoint/web-core/session/cardText";
-import { sessionFilesHref } from "@waypoint/web-core/shellNav";
 import type { EventRecord } from "@waypoint/web-core/types";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
-import { ActionChipLink } from "@/components/ui/ActionChip";
+import { ActionChip } from "@/components/ui/ActionChip";
 
 import { useSessionContext } from "../SessionContext";
 import { Attachments } from "./Attachments";
@@ -14,7 +13,7 @@ import { EventTime } from "./EventTime";
 import styles from "./SentFiles.module.css";
 
 export function SentFiles({ event }: { event: EventRecord }) {
-  const { sessionId } = useSessionContext();
+  const { openFiles } = useSessionContext();
   const specs = attachmentSpecsFor(event);
   const { files, caption } = sendUserFileInput(event);
   const count = specs.length || files.length;
@@ -39,11 +38,13 @@ export function SentFiles({ event }: { event: EventRecord }) {
           ))}
         </ul>
       )}
-      <div className={styles.open}>
-        <ActionChipLink href={sessionFilesHref(sessionId)} icon="chevron-right">
-          Open files
-        </ActionChipLink>
-      </div>
+      {openFiles ? (
+        <div className={styles.open}>
+          <ActionChip icon="files" onClick={openFiles}>
+            Open files
+          </ActionChip>
+        </div>
+      ) : null}
     </div>
   );
 }

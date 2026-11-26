@@ -1,12 +1,11 @@
 "use client";
 
-import { ReactNode, useEffect, useId, useState } from "react";
+import { ReactNode, useId, useState } from "react";
 
-import { previewSchedule } from "@waypoint/web-core/api";
+import { useRecurrencePreview } from "@waypoint/web-core/hooks/useRecurrencePreview";
 import {
-  Cadence,
+  CADENCE_LABELS,
   CADENCES,
-  cronFromState,
   formatInZone,
   RecurrenceState,
   supportedTimezones,
@@ -14,14 +13,6 @@ import {
   TimingMode,
   WEEKDAY_LABELS,
 } from "@waypoint/web-core/recurrence";
-
-const CADENCE_LABELS: Record<Cadence, string> = {
-  daily: "Daily",
-  weekdays: "Weekdays",
-  weekly: "Weekly",
-  monthly: "Monthly",
-  custom: "Custom",
-};
 
 interface RecurrenceControlProps {
   host: string;
@@ -50,60 +41,13 @@ export function RecurrenceControl({
 }: RecurrenceControlProps) {
   const uid = useId();
   const tzListId = `${uid}-tz`;
-  const [occurrences, setOccurrences] = useState<string[]>([]);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewing, setPreviewing] = useState(false);
   const [zones] = useState<string[]>(() => supportedTimezones());
-
-  const cron = timing === "repeat" ? cronFromState(state) : null;
   const custom = state.cadence === "custom";
-
-  // Debounced server preview of the next occurrences.
-  useEffect(() => {
-    if (timing !== "repeat") {
-      onValidChange(true);
-      setPreviewError(null);
-      setOccurrences([]);
-      return;
-    }
-    if (!cron) {
-      onValidChange(false);
-      setPreviewError(null);
-      setOccurrences([]);
-      return;
-    }
-    let cancelled = false;
-    setPreviewing(true);
-    const handle = window.setTimeout(async () => {
-      try {
-        const next = await previewSchedule(
-          host,
-          token,
-          cron,
-          state.timezone,
-          state.startAt || null,
-          3,
-        );
-        if (cancelled) return;
-        setOccurrences(next);
-        setPreviewError(null);
-        onValidChange(true);
-      } catch (error) {
-        if (cancelled) return;
-        setOccurrences([]);
-        setPreviewError(
-          error instanceof Error ? error.message : "invalid recurrence",
-        );
-        onValidChange(false);
-      } finally {
-        if (!cancelled) setPreviewing(false);
-      }
-    }, 350);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [timing, cron, state.timezone, state.startAt, host, token, onValidChange]);
+  const {
+    occurrences,
+    error: previewError,
+    previewing,
+  } = useRecurrencePreview(host, token, timing, state, onValidChange);
 
   function update(patch: Partial<RecurrenceState>) {
     onStateChange({ ...state, ...patch });

@@ -26,6 +26,10 @@
   transition: transform 120ms ease;
 }
 
+.toggle:disabled {
+  opacity: 0.55;
+}
+
 .on {
   background: color-mix(in srgb, var(--done) 72%, var(--plane));
 }

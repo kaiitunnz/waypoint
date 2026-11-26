@@ -724,3 +724,13 @@ function mergeLocalFallback(
   }
   return merged;
 }
+
+// The draft with a `/` or `@` completion trigger typed at `caret`, as a word of
+// its own, and where the caret goes.
+export function insertTrigger(draft: string, caret: number, trigger: "/" | "@"): { draft: string; caret: number } {
+  const at = Math.max(0, Math.min(caret, draft.length));
+  const before = draft.slice(0, at);
+  const after = draft.slice(at);
+  const inserted = `${before && !/\s$/.test(before) ? " " : ""}${trigger}`;
+  return { draft: before + inserted + (after && !/^\s/.test(after) ? " " : "") + after, caret: at + inserted.length };
+}

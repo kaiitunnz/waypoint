@@ -17,6 +17,10 @@
   background: var(--bubble-user);
 }
 
+.pending {
+  opacity: 0.6;
+}
+
 .first:not(.user) {
   border-top-left-radius: 4px;
 }

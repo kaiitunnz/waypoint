@@ -13,14 +13,12 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  width: 100%;
   min-height: 46px;
   font-size: var(--f-body);
   color: var(--text);
-  text-align: left;
 }
 
-.link {
+.pressable {
   cursor: pointer;
   user-select: none;
 }

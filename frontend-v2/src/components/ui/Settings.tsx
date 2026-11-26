@@ -8,10 +8,9 @@ import { SegmentedControl, type Segment } from "./SegmentedControl";
 import { Toggle } from "./Toggle";
 import styles from "./Settings.module.css";
 
-// A group of settings rows, with hairlines between rows and none around the group.
 export function SettingsSection({ title, children }: { title?: ReactNode; children: ReactNode }) {
   return (
-    <section className={styles.section}>
+    <section>
       {title ? <h3 className={styles.heading}>{title}</h3> : null}
       <div className={styles.rows}>{children}</div>
     </section>
@@ -20,15 +19,13 @@ export function SettingsSection({ title, children }: { title?: ReactNode; childr
 
 interface SettingsRowProps {
   label: ReactNode;
-  // The current value, read-only, before the chevron or the control.
+  // The current value, read-only.
   detail?: ReactNode;
   control?: ReactNode;
-  // A row that opens something ends in a chevron.
   href?: string;
   onNavigate?: () => void;
 }
 
-// The one row every setting uses: a label, then a value, a control or a chevron.
 export function SettingsRow({ label, detail, control, href, onNavigate }: SettingsRowProps) {
   const content = (
     <>
@@ -43,7 +40,7 @@ export function SettingsRow({ label, detail, control, href, onNavigate }: Settin
     </>
   );
   return href ? (
-    <Link href={href} className={cx(styles.row, styles.link)} onClick={onNavigate}>
+    <Link href={href} className={cx(styles.row, styles.pressable)} onNavigate={onNavigate}>
       {content}
     </Link>
   ) : (
@@ -51,11 +48,10 @@ export function SettingsRow({ label, detail, control, href, onNavigate }: Settin
   );
 }
 
-// A whole row that turns a setting on or off.
 export function SwitchRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    // The label activates its switch, so a press anywhere on the row toggles it once.
-    <label className={cx(styles.row, styles.link)}>
+    // A label, so a press anywhere on the row toggles the switch once.
+    <label className={cx(styles.row, styles.pressable)}>
       <span className={styles.label}>{label}</span>
       <Toggle label={label} checked={checked} onChange={onChange} />
     </label>

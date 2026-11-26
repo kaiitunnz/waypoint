@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import { SETTINGS_HREF, settingsSectionHref } from "@waypoint/web-core/shellNav";
 
 import { PageHeader } from "@/components/ui/PageHeader";
-import { SectionHeading } from "@/components/ui/SectionHeading";
 import { LinkRow, SettingsSection } from "@/components/ui/Settings";
 import { cx } from "@/lib/cx";
 import { useMultiColumn, usePhoneLayout } from "@/lib/layout";
@@ -66,7 +65,7 @@ export function SettingsScreen({ sectionId }: { sectionId?: string }) {
         <div>
           {SETTINGS_SECTIONS.map((entry) => (
             <section key={entry.id} id={entry.id} className={styles.section}>
-              <SectionHeading title={entry.title} />
+              <h2 className={styles.title}>{entry.title}</h2>
               <entry.Component />
             </section>
           ))}

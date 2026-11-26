@@ -22,6 +22,7 @@
 
 .link {
   cursor: pointer;
+  user-select: none;
 }
 
 .label {

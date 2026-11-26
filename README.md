@@ -43,7 +43,7 @@ Waypoint speaks to Claude Code, Codex, and OpenCode through wire formats that ch
 | Claude Code | `2.1.178` | `claude -p --input-format=stream-json --output-format=stream-json --permission-prompt-tool stdio` | Approvals ride the `can_use_tool` control protocol; `CLAUDE_CODE_WORKFLOWS=1` enables the Workflow tool. Also relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
 | Codex CLI   | `0.139.0` | `codex app-server --listen stdio://`                                 | Driven via the `openai-codex` Python SDK (`thread_*` / `turn_*` RPCs). Managed local sessions run the bundled `openai-codex-cli-bin` binary, currently `0.136.0` — the PyPI cli-bin channel lags the npm `@openai/codex` channel, so it trails the tested `0.139.0`. |
 | Codex SDK   | `0.171.0` | `openai-codex` on PyPI                                              | Pinned in `backend/pyproject.toml`; `backend/pyproject.toml` overrides the bundled `openai-codex-cli-bin` to the latest stable (`0.136.0`). |
-| OpenCode   | `1.17.4`        | `opencode serve` with REST + SSE API                             | HTTP-based; discovers models from `/provider`. |
+| OpenCode   | `2.4.1`        | `opencode serve` with the 2.x server API (REST + SSE)            | Requires OpenCode 2.x; discovers models from `/api/model`. |
 
 To extend this matrix:
 
@@ -51,7 +51,7 @@ To extend this matrix:
 2. Re-run the integration paths that touch the wire format:
    - Claude: `backend/src/waypoint/backends/claude_code/normalize.py` (status / compact / rate-limit / approval / content-block helpers) and `adapter.py`'s `_handle_*` stream handlers, plus `_handle_can_use_tool` for tool approval over the control protocol; remote launch in `backends/claude_code/remote.py::_build_remote_claude_command`.
    - Codex: `backend/src/waypoint/backends/codex/normalize.py::map_notification` and the SDK calls in `backends/codex/adapter.py::CodexAppServerAdapter`.
-   - OpenCode: `backend/src/waypoint/backends/opencode/normalize.py::map_event` and the HTTP/SSE adapter in `backends/opencode/adapter.py::OpenCodeAdapter`.
+   - OpenCode: the event and history converters in `backend/src/waypoint/backends/opencode/normalize.py` and the HTTP/SSE adapter in `backends/opencode/adapter.py::OpenCodeAdapter`.
 3. If a bump breaks an event shape, prefer adding a branch in the relevant `normalize.py` over hard-pinning.
 
 Adding a brand-new coding agent (Aider, …) is its own flow — the runtime, API, and frontend dispatch by plugin id, so a new agent is "implement an agent plugin that satisfies the [`BackendPlugin`](backend/src/waypoint/backends/base.py) protocol, declare its supported transports, and register it." See [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the contract, capability descriptor, and a step-by-step recipe.
@@ -76,7 +76,7 @@ Bring the stack up with `waypointctl start`. Use `waypointctl update` to upgrade
 
 To remove Waypoint, run `waypointctl uninstall` (add `--purge` to also delete the state and data directories). It stops the stack, strips the `WAYPOINT_HOME` shell-profile entry, removes the managed checkout, and uninstalls `waypointctl`; `curl`-based installs can instead run `scripts/uninstall.sh` directly.
 
-**OpenCode** — the `opencode` CLI must be installed separately and present on your PATH; Waypoint does not bundle it.
+**OpenCode** — the `opencode` CLI, version 2.x, must be installed separately and present on your PATH; Waypoint does not bundle it. A 1.x server is refused with an upgrade message. OpenCode 2.x migrates a 1.x history when it first runs, and sessions keep their ids.
 
 ### Install from source / development
 

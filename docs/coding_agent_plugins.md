@@ -64,9 +64,12 @@ backend/src/waypoint/
     │   └── permission_modes.py
     ├── opencode/
     │   ├── plugin.py
-    │   ├── adapter.py        ← REST + SSE driver
+    │   ├── adapter.py        ← server lifecycle, session calls, event stream
+    │   ├── sessions.py       ← live state of a session and its subagents
     │   ├── transport.py
-    │   ├── normalize.py      ← SSE event → EventEnvelope helpers
+    │   ├── normalize.py      ← events and history → Waypoint events
+    │   ├── forms.py          ← questions
+    │   ├── catalog.py        ← models
     │   ├── client.py         ← HTTP wrapper
     │   └── remote.py         ← SSH launcher
     └── tmux/                 ← generic pane wrapper; drives any agent
@@ -188,7 +191,7 @@ mechanisms behind it:
 | `claude_code` | Claude | stream-json subprocess | Static catalogue; swaps via CLI control protocol | `low`/`medium`/`high`/`xhigh`; restart-with-resume while idle | Claude catalogue; swaps via control protocol | Discovers/imports Claude transcripts | Yes, on decline |
 | `claude_tty` | Claude | fullscreen TUI in tmux, tailed from transcript JSONL | Static catalogue; restart-with-resume, interrupting any running turn | `low`/`medium`/`high`/`xhigh`; restart-with-resume, interrupting any running turn | Claude catalogue; restart-with-resume, interrupting any running turn | Discovers/imports Claude transcripts | No |
 | `codex` | Codex | App Server SDK | Live `model/list` RPC | Per-turn flag from live model metadata | Codex catalogue; applied inline | Discovers/imports Codex threads | No |
-| `opencode` | OpenCode | REST + SSE | Live OpenCode metadata | Backend-native setting | OpenCode catalogue; applied inline | Discovers/imports OpenCode sessions | Yes, on decline |
+| `opencode` | OpenCode | 2.x server API (REST + SSE) | Live OpenCode metadata | Model variant, applied inline | OpenCode catalogue; applied inline | Discovers/imports OpenCode sessions | Yes, on decline |
 | `tmux` | (wraps any) | generic tmux pane | None | None | None | None | No |
 
 ### The agent launch contract
@@ -226,9 +229,9 @@ async def capture_thread_id(self, runtime, session_id, cwd, since, launch_target
 
 Agents satisfy the contract by mixing in `DefaultLaunchContract` and
 overriding the methods their CLI actually supports. The defaults are correct
-for an agent with no pane-wrapper launch knobs and no resumable thread
-(OpenCode today): no extra flags, no pregenerated id, verbatim resume args,
-no on-disk thread to find. The generic transport calls
+for an agent with no pane-wrapper launch knobs and no resumable thread: no
+extra flags, no pregenerated id, verbatim resume args, no on-disk thread to
+find. OpenCode overrides only `launch_flags`. The generic transport calls
 `registry.get(session.backend)` and dispatches through these methods, so
 `tmux/plugin.py` holds no agent literals: it decides whether to spawn the
 post-launch id watcher by asking `pregenerate_thread_id() is None`, and
@@ -253,7 +256,7 @@ package's `__init__`.
 with its on-disk host path). A backend that sets
 `capabilities.supports_attachments` maps these to its native input form:
 Claude embeds images as base64 content blocks, Codex sends `localImage`
-items, OpenCode adds data-url file parts, and tmux (the universal fallback)
+items, OpenCode sends data-URL files, and tmux (the universal fallback)
 appends the host paths to the text via
 `waypoint.attachments.append_attachment_paths` so the wrapped CLI reads them.
 Non-image files on image-only protocols degrade to the same path append.
@@ -470,7 +473,7 @@ session. When the import request's `import_history` flag is set (it defaults to
 thread's prior conversation into the new session's transcript** so an imported
 thread reads as continuous rather than starting empty. The plugin does this by
 reading the native history (Claude's `~/.claude/projects` transcript JSONL,
-Codex's `thread_read(include_turns=True)`, OpenCode's `GET /session/{id}/message`)
+Codex's `thread_read(include_turns=True)`, OpenCode's `GET /api/session/{id}/message`)
 and converting each record into `EventRecord`s, then calling
 `runtime.seed_thread_history(session_id, reader, enabled=request.import_history)`
 after `create_session` and before the "Imported…" system note. Two caveats make
@@ -533,15 +536,15 @@ page and websocket) and asks the plugin how live each one is:
   `ask_user_question_closed` note.
 
 `decline_question` declines exactly one request with the provider and reports
-the outcome: `TURN_RESUMES` (the asking turn continues), `AGENT_IDLE` (nothing
-was sent; the agent no longer waits on it), `MISSING`, or `FAILED`. The tracker
+the outcome: `TURN_RESUMES` (the asking turn continues), `TURN_ENDS` (the
+asking turn ends, and its events set the status), `AGENT_IDLE` (nothing was
+sent; the agent no longer waits on it), `MISSING`, or `FAILED`. The tracker
 serializes the cancel, records the cancellation or closure, and settles the
 session status; on `FAILED` it records nothing. `answer_question` holds
 `runtime.questions.operation(session_id, tool_use_id)` from provider delivery
 until the answer event is persisted; a concurrent operation on the same request
 gets a 409. Provider-originated endings must carry the request id (OpenCode's
-`question.replied` / `question.rejected` normalize to correlated closure
-notes). Without the protocol the tracker closes the session's open questions
+`form.replied` / `form.cancelled` normalize to correlated closure notes). Without the protocol the tracker closes the session's open questions
 and rejects cancels.
 
 An agent that keeps working after it asks gets a stand-in card instead of a
@@ -775,6 +778,27 @@ id, so the durable selection is the sole source of the `[1m]` entitlement. Codex
 and OpenCode take their window from the provider directly (Codex's `token_count`
 `model_context_window`, OpenCode's per-model lookup), so they neither implement
 the protocol nor need it.
+
+## The OpenCode server API
+
+OpenCode is driven over its 2.x server API: one `opencode serve` process per
+launch target, working directory, CLI args and environment, each behind a
+password Waypoint generates. A 1.x server is refused with an upgrade message.
+Servers of a launch target start one at a time until the first has migrated a
+1.x history.
+
+- A Waypoint session covers its OpenCode session and that session's subagents:
+  their approvals and questions appear in it, and it stays running until all of
+  them finish. Their transcripts are not shown.
+- Permission modes are the session's permission ruleset, rewritten on restore.
+  "Approve for session" adds allow rules to that ruleset, which a mode change,
+  restore or fork resets. OpenCode's own `always` reply allows for the whole
+  project and is not used.
+- Model, effort (a model variant) and agent are selected on the session when
+  they change.
+- A skill runs as a prompt, a slash command through the command endpoint.
+- The tmux transport passes `--standalone`, so the TUI's tools see the session's
+  environment. A custom `--server` argument conflicts with it.
 
 ## The claude_tty composition
 

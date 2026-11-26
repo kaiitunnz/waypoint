@@ -26,6 +26,7 @@ from waypoint.backends.opencode.catalog import Model
 from waypoint.backends.opencode.health import AdapterHealth
 from waypoint.backends.opencode.normalize import (
     APPROVAL_DECISIONS,
+    STATUS_NOTES,
     historical_events_from_messages,
 )
 from waypoint.backends.opencode.pane import composer_ready, composer_submitted
@@ -144,13 +145,6 @@ def _sorted_efforts(efforts: tuple[str, ...]) -> list[str]:
             return (2, 0, effort.lower())
 
     return sorted(efforts, key=key)
-
-
-_STATUS_NOTES = {
-    SessionStatus.IDLE: "Session idle",
-    SessionStatus.INTERRUPTED: "Turn interrupted",
-    SessionStatus.WAITING_INPUT: "Waiting for your input",
-}
 
 
 def _agent_process_env(
@@ -989,7 +983,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             if command in seen:
                 continue
             description = item.get("description")
-            source = "skill" if item.get("source") == "skill" else "command"
+            source = item["source"]
             completions.append(
                 CommandCompletion(
                     id=f"{self.id}:{source}:{name}",
@@ -1270,7 +1264,9 @@ class OpenCodePlugin(DefaultLaunchContract):
         if actual is None or actual == runtime.get_session(session.id).status:
             return
         await runtime._record_system_event(
-            session.id, _STATUS_NOTES.get(actual, "Session busy"), status=actual
+            session.id,
+            STATUS_NOTES.get(actual, STATUS_NOTES[SessionStatus.RUNNING]),
+            status=actual,
         )
 
     async def restore_session(

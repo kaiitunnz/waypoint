@@ -394,16 +394,21 @@ class OpenCodeAdapter:
         tasks, self._output_tasks = self._output_tasks, []
         await cancel_and_wait(*tasks)
 
-    async def _discard_server(self) -> None:
+    async def _discard_server(self, timeout: float = 2.0) -> None:
         self._terminate_server_process()
         with suppress(Exception):
-            await self._await_server_process_exit(timeout=2.0)
+            await self._await_server_process_exit(timeout=timeout)
         self._server_process = None
         await self._stop_draining_output()
+        await self._close_client()
+
+    async def _close_client(self) -> None:
         if self._client is not None:
             client, self._client = self._client, None
-            with suppress(Exception):
+            try:
                 await client.close()
+            except Exception:
+                log.exception("error closing the opencode http client")
 
     def _terminate_server_process(self) -> None:
         """Kill the OpenCode subprocess and any of its descendants."""
@@ -555,13 +560,7 @@ class OpenCodeAdapter:
         self._sessions.clear()
         self._routes.clear()
 
-        if self._client is not None:
-            try:
-                await self._client.close()
-            except Exception:
-                log.exception("error closing opencode http client on server death")
-            self._client = None
-
+        await self._close_client()
         self._terminate_server_process()
         self._server_process = None
         await self._stop_draining_output()
@@ -581,14 +580,7 @@ class OpenCodeAdapter:
         self._ask_seed_tasks.clear()
         self._tasks.clear()
         await self._stop_events()
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
-        if self._server_process is not None:
-            self._terminate_server_process()
-            await self._await_server_process_exit()
-            self._server_process = None
-        await self._stop_draining_output()
+        await self._discard_server(timeout=5.0)
         self._sessions.clear()
         self._routes.clear()
         self._started = False
@@ -716,7 +708,9 @@ class OpenCodeAdapter:
             case "session.execution.started":
                 state.execution_started(origin)
                 if root:
-                    await self._emit(state, normalize.note("Session busy", kind))
+                    await self._emit(
+                        state, normalize.status_note(SessionStatus.RUNNING, kind)
+                    )
             case (
                 "session.execution.succeeded"
                 | "session.execution.failed"
@@ -840,11 +834,11 @@ class OpenCodeAdapter:
     async def _emit_resting(self, state: SessionState, method: str) -> None:
         """Report a session at rest. Nothing is said of one still running or
         waiting."""
-        match state.status():
-            case SessionStatus.IDLE:
-                await self._emit(state, normalize.note("Session idle", method))
-            case SessionStatus.INTERRUPTED:
-                await self._emit(state, normalize.note("Turn interrupted", method))
+        if (status := state.status()) in (
+            SessionStatus.IDLE,
+            SessionStatus.INTERRUPTED,
+        ):
+            await self._emit(state, normalize.status_note(status, method))
 
     async def _settle_after_subagent(self, state: SessionState, mark: int) -> None:
         """A finished subagent hands its result to the parent, which runs again.
@@ -941,7 +935,7 @@ class OpenCodeAdapter:
         # A subagent has a context of its own.
         if not root or model is None:
             return
-        entry = next((item for item in self._models if item.id == model), None)
+        entry = self._cached_model(model)
         if entry is not None:
             await self._publish_context_usage(
                 state, tokens, entry.context_window, publish=False
@@ -1368,7 +1362,10 @@ class OpenCodeAdapter:
         # The restore recorded a status without these.
         if not emitted and state.status() == SessionStatus.WAITING_INPUT:
             await self._emit(
-                state, normalize.note("Waiting for your input", "session.asks.listed")
+                state,
+                normalize.status_note(
+                    SessionStatus.WAITING_INPUT, "session.asks.listed"
+                ),
             )
         if self._on_questions_changed is not None:
             self._on_questions_changed(state.session_id)
@@ -1878,8 +1875,11 @@ class OpenCodeAdapter:
                 return default
         return models[0].id if models else None
 
+    def _cached_model(self, model: str) -> Model | None:
+        return next((item for item in self._models if item.id == model), None)
+
     async def _model(self, model: str) -> Model | None:
-        entry = next((item for item in self._models if item.id == model), None)
+        entry = self._cached_model(model)
         if entry is not None:
             return entry
         failed_at = self._models_failed_at
@@ -1889,7 +1889,7 @@ class OpenCodeAdapter:
             await self.list_models()
         except Exception as exc:  # noqa: BLE001
             log.debug("failed to list opencode models: %s", exc)
-        entry = next((item for item in self._models if item.id == model), None)
+        entry = self._cached_model(model)
         self._models_failed_at = None if entry else time.monotonic()
         return entry
 

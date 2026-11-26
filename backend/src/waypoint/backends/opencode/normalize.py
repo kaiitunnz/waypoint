@@ -43,7 +43,7 @@ def tool_name(name: str) -> str:
     return _TOOL_NAMES.get(name, name)
 
 
-def tool_input(name: str, raw: Any) -> dict[str, Any]:
+def _tool_input(name: str, raw: Any) -> dict[str, Any]:
     values = dict(raw) if isinstance(raw, dict) else {}
     if name in _FILE_TOOLS and isinstance(path := values.get("path"), str):
         values["file_path"] = path
@@ -52,6 +52,18 @@ def tool_input(name: str, raw: Any) -> dict[str, Any]:
 
 def note(text: str, method: str, **metadata: Any) -> Emission:
     return (EventKind.SYSTEM_NOTE, text, {"method": method, **metadata})
+
+
+STATUS_NOTES = {
+    SessionStatus.RUNNING: "Session busy",
+    SessionStatus.WAITING_INPUT: "Waiting for your input",
+    SessionStatus.INTERRUPTED: "Turn interrupted",
+    SessionStatus.IDLE: "Session idle",
+}
+
+
+def status_note(status: SessionStatus, method: str) -> Emission:
+    return note(STATUS_NOTES[status], method)
 
 
 def part_id(message_id: str, ordinal: int, *, reasoning: bool) -> str:
@@ -73,7 +85,7 @@ def text_delta(
 
 
 def tool_call(call_id: str, name: str, raw_input: Any) -> Emission:
-    shown, values = tool_name(name), tool_input(name, raw_input)
+    shown, values = tool_name(name), _tool_input(name, raw_input)
     return (
         EventKind.TOOL_CALL,
         f"{shown}({json.dumps(values, indent=2)})",
@@ -117,7 +129,7 @@ def tool_result(
             "call_id": call_id,
             "tool_use_id": call_id,
             "tool_name": shown,
-            "tool_input": tool_input(name, raw_input),
+            "tool_input": _tool_input(name, raw_input),
             "is_error": failed,
             **({} if failed else _diff_metadata("applied", files)),
         },
@@ -136,7 +148,7 @@ def approval_request(
     resources = list(permission.resources)
 
     shown = tool_name(name) if name else action.replace("_", " ").title()
-    values = tool_input(name or "", raw_input) or {
+    values = _tool_input(name or "", raw_input) or {
         "action": action,
         "resources": resources,
     }

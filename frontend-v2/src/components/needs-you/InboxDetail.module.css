@@ -42,9 +42,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 2px 8px;
   margin-top: 12px;
-  padding: 4px 12px;
+  padding: 10px 12px 2px;
   border-radius: var(--r);
   background: var(--plane-raised);
   font-size: var(--f-meta);
@@ -56,8 +56,9 @@
   color: var(--text);
 }
 
+/* Its own line, so a long title leaves the glyph and links level with their text. */
 .gateTitle {
-  flex: 1 1 120px;
+  flex-basis: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
 }

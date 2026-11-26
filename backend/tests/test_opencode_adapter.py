@@ -681,6 +681,31 @@ async def test_subagents_share_asks_and_status_but_not_the_transcript(
     assert ("POST", "/api/session/ses_child/permission/per_1/reply") in fake.writes()
 
 
+@pytest.mark.asyncio
+async def test_a_parent_that_takes_the_result_reports_idle_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "SUBAGENT_SETTLE_SECONDS", 0.05)
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            event(
+                "session.tool.progress",
+                id="call_0",
+                metadata={"sessionID": "ses_child"},
+            ),
+            event("session.execution.started", "ses_child"),
+            event("session.execution.succeeded", "ses_child"),
+            event("session.execution.started"),
+            event("session.execution.succeeded"),
+        )
+        await asyncio.gather(*adapter._tasks)
+
+    assert emitted.texts().count("Session idle") == 1
+
+
 # ── Questions ───────────────────────────────────────────────────────────
 
 

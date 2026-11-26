@@ -825,9 +825,10 @@ class OpenCodeAdapter:
             return
         state.execution_ended(origin, by_human=reason == "user")
         if origin != state.root_id:
+            mark = state.mark()
             await self._reconcile(state)
             if not state.running:
-                self._spawn(self._settle_after_subagent(state))
+                self._spawn(self._settle_after_subagent(state, mark))
             return
 
         if state.changed_files:
@@ -843,13 +844,15 @@ class OpenCodeAdapter:
         elif state.status() == SessionStatus.IDLE:
             await self._emit(state, normalize.note("Session idle", kind))
 
-    async def _settle_after_subagent(self, state: SessionState) -> None:
+    async def _settle_after_subagent(self, state: SessionState, mark: int) -> None:
         """A finished subagent hands its result to the parent, which runs again.
         When it does not, report that the session is idle."""
         await asyncio.sleep(SUBAGENT_SETTLE_SECONDS)
         if (
             self._sessions.get(state.session_id) is state
             and not state.closing
+            # A parent that ran since has reported its own ending.
+            and not state.touched_since(state.root_id, mark)
             and state.status() == SessionStatus.IDLE
         ):
             await self._emit(

@@ -1,13 +1,13 @@
 "use client";
 
-import { useContext, useState, type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 
 import { useLongPress } from "@waypoint/web-core/hooks/useLongPress";
 import { splitFileName, textColumns } from "@waypoint/web-core/workspacePaths";
 
 import { cx } from "@/lib/cx";
 
-import { TranscriptHoldContext } from "../TranscriptHold";
+import { useTranscriptHold } from "../SessionContext";
 import styles from "./PathLabel.module.css";
 
 interface PathLabelProps {
@@ -21,7 +21,7 @@ interface PathLabelProps {
 // One line: the folder gives way first, from its left, then the middle of the name.
 export function PathLabel({ dir, base, full, className }: PathLabelProps) {
   const [open, setOpen] = useState(false);
-  const hold = useContext(TranscriptHoldContext);
+  const hold = useTranscriptHold();
   const press = useLongPress((element) => {
     hold(element, open);
     setOpen(!open);

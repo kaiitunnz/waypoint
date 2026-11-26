@@ -12,8 +12,8 @@ import { Icon } from "@/components/ui/Icon";
 
 import { EmptyTranscript } from "./EmptyTranscript";
 import { PendingTurn } from "./PendingTurn";
+import { TranscriptHoldProvider } from "./SessionContext";
 import styles from "./Transcript.module.css";
-import { TranscriptHoldContext } from "./TranscriptHold";
 import { TurnView } from "./TurnView";
 import { useTranscriptScroll } from "./useTranscriptScroll";
 
@@ -56,7 +56,7 @@ export function Transcript({
       <div ref={scroller} className={styles.scroller} onScroll={onScroll} onClickCapture={onFold}>
         <div ref={content} className={styles.col}>
           {override ?? (
-            <TranscriptHoldContext.Provider value={hold}>
+            <TranscriptHoldProvider value={hold}>
               {hasOlder ? (
                 <div className={styles.older}>
                   <ActionChip icon="chevron-up" onClick={onLoadOlder} aria-disabled={loadingOlder}>
@@ -75,7 +75,7 @@ export function Transcript({
                   <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
                 ) : null}
               </div>
-            </TranscriptHoldContext.Provider>
+            </TranscriptHoldProvider>
           )}
         </div>
       </div>

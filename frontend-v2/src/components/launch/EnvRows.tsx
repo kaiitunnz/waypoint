@@ -26,6 +26,9 @@ interface EnvRowsProps {
   disabled?: boolean;
 }
 
+// A password field invites the browser's saved sign-in, but this one holds an agent's secret.
+const SECRET_INPUT = { type: "password", autoComplete: "new-password", "data-1p-ignore": "", "data-lpignore": "true" } as const;
+
 // Replacing or removing a value is staged on the row until undone. A secret is
 // replaced from empty and typed masked, so its value never shows.
 export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
@@ -64,9 +67,8 @@ export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
                 ) : (
                   <TextInput
                     mono
-                    autoComplete="off"
                     aria-label={`Value of ${label}`}
-                    type={secret ? "password" : "text"}
+                    {...(secret ? SECRET_INPUT : { autoComplete: "off" })}
                     placeholder="value"
                     autoFocus={state === "edit"}
                     disabled={disabled}

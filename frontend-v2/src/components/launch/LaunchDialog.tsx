@@ -97,7 +97,7 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
   const activeTarget = launchTargets.targets.find((target) => target.id === targetId) ?? null;
   const [mode, setMode] = useState<LaunchMode>(request.mode);
 
-  const [opening] = useState(() => openingPreset(launch.presets, launch.defaultPresetId, request.preset));
+  const [opening] = useState(() => openingPreset(launch.presets, launch.defaultPresetId, request.preset, defaults.launchableBackends));
   const form = useLaunchForm({
     host,
     token,
@@ -210,7 +210,7 @@ function LaunchSurface({ request, launch, onClose }: { request: LaunchRequest; l
           await createSchedule(host, token, payload);
           pushRecentCwd(host, targetId, payload.cwd);
           toast({ message: payload.cron ? "Recurring launch scheduled" : "Launch scheduled" });
-          onClose();
+          if (mounted.current) onClose();
         },
         "failed to schedule",
         { cwd: payload.cwd, field: true },

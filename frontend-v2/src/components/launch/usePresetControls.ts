@@ -3,9 +3,10 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { isAuthError } from "@waypoint/web-core/api";
+import { humaniseBackend } from "@waypoint/web-core/backends";
 import type { LaunchContext } from "@waypoint/web-core/hooks/useLaunchContext";
 import type { LaunchForm } from "@waypoint/web-core/hooks/useLaunchForm";
-import { loadPresetSpec, presetNeedsFullSpec } from "@waypoint/web-core/launch/presets";
+import { loadPresetSpec, presetBackendUnsupported, presetNeedsFullSpec } from "@waypoint/web-core/launch/presets";
 import type { SessionPresetSummary, SessionPresetWriteRequest } from "@waypoint/web-core/types";
 
 import { useToast } from "@/components/ui/Toast";
@@ -107,6 +108,12 @@ export function usePresetControls(
     selected: presets.find((preset) => preset.id === selectedId) ?? null,
     busy,
     select: (id) => {
+      const summary = presets.find((preset) => preset.id === id);
+      const unsupported = presetBackendUnsupported(summary ?? null, launch.defaults.launchableBackends);
+      if (summary && unsupported) {
+        toast({ message: `${summary.name} uses ${humaniseBackend(unsupported, launch.catalog)}, which this target can't launch`, tone: "error" });
+        return;
+      }
       const request = ++latest.current;
       setSelectedId(id);
       if (id) void apply(id, request, launchTargetId);

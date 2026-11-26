@@ -69,10 +69,13 @@ export function pasteAttaches(files: readonly File[], text: string): boolean {
   return text.split(/[\r\n]+/).every((line) => !line.trim() || names.has(namedBy(line.trim()).normalize("NFC")));
 }
 
-// The file name a clipboard line ends in.
+// The file name a clipboard line stands for: its own, or the last part of an
+// absolute path or file URI. A web address or relative path is just text.
 function namedBy(line: string): string {
+  const uri = line.startsWith("file://");
+  if (!uri && !line.startsWith("/")) return line;
   const name = line.slice(line.lastIndexOf("/") + 1);
-  if (!line.startsWith("file://")) return name;
+  if (!uri) return name;
   try {
     return decodeURIComponent(name);
   } catch {

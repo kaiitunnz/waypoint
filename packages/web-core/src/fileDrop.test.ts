@@ -110,6 +110,10 @@ describe("pasteAttaches", () => {
   it("lets an office app's text paste, picture and all", () => {
     expect(pasteAttaches(files("image.png"), "Q1\tQ2\n10\t12")).toBe(false);
     expect(pasteAttaches(files("image.png"), "A heading")).toBe(false);
+    // Text that only ends like the picture's name.
+    expect(pasteAttaches(files("image.png"), "assets/icons/image.png")).toBe(false);
+    expect(pasteAttaches(files("image.png"), "https://example.com/image.png")).toBe(false);
+    expect(pasteAttaches(files("image.png"), "see https://example.com/image.png")).toBe(false);
   });
 
   it("lets text paste when a line names no file, or there is none", () => {

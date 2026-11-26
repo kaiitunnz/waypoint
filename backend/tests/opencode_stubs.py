@@ -34,13 +34,15 @@ def script(path: Path, body: str) -> str:
     return str(path)
 
 
-def fake_opencode(directory: Path, port: int) -> tuple[str, Path]:
-    """A binary that announces ``port`` and records the server variables it got."""
+def fake_opencode(directory: Path, port: int, then: str = "") -> tuple[str, Path]:
+    """A binary that records the server variables it got, announces ``port``,
+    runs the shell lines in ``then`` and stays up."""
     seen = directory / "server.env"
     binary = script(
         directory / "opencode",
         f"env | grep '^OPENCODE_' | sort > '{seen}'\n"
         f'echo "server listening on http://127.0.0.1:{port}"\n'
+        f"{then}"
         "exec sleep 30\n",
     )
     return binary, seen

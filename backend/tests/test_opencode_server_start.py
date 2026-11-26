@@ -88,6 +88,29 @@ async def test_the_configured_local_binary_is_the_one_started(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_a_chatty_local_server_is_never_blocked_on_its_output(
+    tmp_path: Path,
+) -> None:
+    seen = tmp_path / "server.env"
+    written = tmp_path / "written"
+    flood = (
+        "head -c 3000000 /dev/zero\n"
+        "head -c 3000000 /dev/zero >&2\n"
+        f"touch '{written}'\n"
+    )
+    async with serving(_locked_v1(seen)) as url:
+        binary, _ = fake_opencode(tmp_path, int(url.rsplit(":", 1)[1]), flood)
+        adapter = _adapter(binary=binary, workdir=str(tmp_path))
+        await adapter.start()
+        try:
+            async with asyncio.timeout(10):
+                while not written.exists():
+                    await asyncio.sleep(0.05)
+        finally:
+            await adapter.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_remote_server_password_travels_on_stdin(tmp_path: Path) -> None:
     seen = tmp_path / "server.env"
     async with serving(_locked_v1(seen)) as url:

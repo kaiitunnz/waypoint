@@ -90,6 +90,13 @@ class OpenCodeError(RuntimeError):
 
 
 _LISTENING_LINE = re.compile(r"listening on http://[^:\s]+:(\d+)")
+_OUTPUT_CHUNK_BYTES = 64 * 1024
+
+
+async def _drain_output(reader: asyncio.StreamReader) -> None:
+    """Read a server's output to its end: an unread pipe blocks the server."""
+    while chunk := await reader.read(_OUTPUT_CHUNK_BYTES):
+        log.debug("opencode server: %s", chunk.decode(errors="replace").rstrip())
 
 
 @dataclass
@@ -171,6 +178,7 @@ class OpenCodeAdapter:
         self._question_seed_tasks: dict[str, asyncio.Task[None]] = {}
 
         self._server_process: asyncio.subprocess.Process | None = None
+        self._output_tasks: list[asyncio.Task[None]] = []
         self._sse_task: asyncio.Task[None] | None = None
         self._client: OpenCodeHttpClient | None = None
         self.server_info: ServerInfo | None = None
@@ -238,6 +246,7 @@ class OpenCodeAdapter:
             )
 
         self._port = bound_port
+        self._drain_server_output()
         self._client = LocalOpenCodeClient(f"http://{self._host}:{self._port}", auth)
         try:
             await self._wait_for_server()
@@ -331,6 +340,7 @@ class OpenCodeAdapter:
             raise OpenCodeError("timeout waiting for remote opencode server port")
 
         log.info("remote opencode bound to port %d", remote_port)
+        self._drain_server_output()
         self._client = RemoteOpenCodeClient(
             self._launch_target, remote_port, auth, self._workdir
         )
@@ -342,11 +352,25 @@ class OpenCodeAdapter:
                 f"failed to start remote opencode server: {exc}"
             ) from exc
 
+    def _drain_server_output(self) -> None:
+        proc = self._server_process
+        assert proc is not None
+        self._output_tasks = [
+            asyncio.create_task(_drain_output(reader))
+            for reader in (proc.stdout, proc.stderr)
+            if reader is not None
+        ]
+
+    async def _stop_draining_output(self) -> None:
+        tasks, self._output_tasks = self._output_tasks, []
+        await cancel_and_wait(*tasks)
+
     async def _discard_server(self) -> None:
         self._terminate_server_process()
         with suppress(Exception):
             await self._await_server_process_exit(timeout=2.0)
         self._server_process = None
+        await self._stop_draining_output()
         if self._client is not None:
             client, self._client = self._client, None
             with suppress(Exception):
@@ -460,6 +484,7 @@ class OpenCodeAdapter:
 
         self._terminate_server_process()
         self._server_process = None
+        await self._stop_draining_output()
         self._started = False
         log.info("opencode adapter reset after server death; ready for restart")
 
@@ -1519,6 +1544,7 @@ class OpenCodeAdapter:
             self._terminate_server_process()
             await self._await_server_process_exit()
             self._server_process = None
+        await self._stop_draining_output()
         for state in self._sessions.values():
             state.context_usage_pending_tokens.clear()
             state.context_window_lookup_pending.clear()

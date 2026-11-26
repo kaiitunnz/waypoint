@@ -395,6 +395,26 @@ async def test_approval_for_the_session_grants_it_and_never_replies_always() -> 
 
 
 @pytest.mark.asyncio
+async def test_grants_made_at_once_all_land() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, _emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            _asked(fake, _permission("per_1", save=("ls *",))),
+            _asked(fake, _permission("per_2", save=("cat *",), call_id="call_2")),
+        )
+        # Each grant rewrites the whole ruleset.
+        await asyncio.gather(
+            adapter.respond_to_permission("local", "always", approval_id="per_1"),
+            adapter.respond_to_permission("local", "always", approval_id="per_2"),
+        )
+
+    granted = {rule["resource"] for rule in fake.sessions["ses_root"]["permissions"]}
+    assert granted == {"*", "ls *", "cat *"}
+
+
+@pytest.mark.asyncio
 async def test_a_failed_grant_leaves_the_request_unanswered() -> None:
     fake = _fake()
     fake.failures[("PATCH", "/api/session/ses_root")] = 500
@@ -503,6 +523,65 @@ async def test_interrupting_stops_subagents_first_and_stays_interrupted() -> Non
     # No status from here on reads as idle, which would release queued messages.
     assert SessionStatus.IDLE not in emitted.statuses[invalidated:]
     assert emitted.statuses[-1] == SessionStatus.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_interrupting_a_subagent_the_turn_left_running_stays_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "SUBAGENT_SETTLE_SECONDS", 0.0)
+    fake = _fake()
+    fake.add_session("ses_child", parentID="ses_root")
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            {
+                "type": "session.created",
+                "data": {"sessionID": "ses_child", "parentID": "ses_root"},
+            },
+            event("session.execution.started", "ses_child"),
+        )
+        # The root has no execution of its own to report as interrupted.
+        await adapter.interrupt("local")
+        await _deliver(
+            adapter,
+            event("session.execution.interrupted", "ses_child", reason="user"),
+        )
+        await asyncio.gather(*adapter._tasks)
+
+        assert adapter.session_status("local") == SessionStatus.INTERRUPTED
+    assert SessionStatus.IDLE not in emitted.statuses
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_execution_does_not_end_the_turn() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        _register(adapter)
+        await _deliver(
+            adapter,
+            event("session.execution.started"),
+            event("session.execution.interrupted", reason="superseded"),
+        )
+
+        assert adapter.session_status("local") == SessionStatus.RUNNING
+    assert emitted.texts() == ["Session busy"]
+
+
+@pytest.mark.asyncio
+async def test_a_request_being_replied_to_is_not_dropped_as_unlisted() -> None:
+    fake = _fake()
+    async with driving(fake) as (adapter, emitted):
+        state = _register(adapter)
+        await _deliver(adapter, _asked(fake, _permission()))
+        # The server has taken the reply; the post has not returned.
+        state.replying.add("per_1")
+        fake.permissions.clear()
+        await _deliver(adapter, event("session.execution.succeeded"))
+
+        assert adapter.pending_approval_ids("local") == ("per_1",)
+    assert "approval.invalidated" not in emitted.methods()
 
 
 @pytest.mark.asyncio
@@ -812,23 +891,38 @@ async def test_restore_fails_without_the_session_or_its_rules(
         assert adapter._sessions == {} and adapter._routes == {}
 
 
+@pytest.mark.parametrize("ask_id", ["per_1", "frm_1"])
 @pytest.mark.asyncio
-async def test_an_ask_answered_during_the_listing_is_not_brought_back() -> None:
+async def test_an_ask_answered_during_the_listing_is_not_brought_back(
+    ask_id: str,
+) -> None:
     fake = _fake()
     fake.permissions = [_permission()]
+    fake.forms = [_form()]
     async with driving(fake) as (adapter, _emitted):
         state = _register(adapter)
         listing = adapter._list_asks
 
         async def answered_meanwhile() -> Any:
             result = await listing()
-            state.forget_ask("per_1")
+            state.forget_ask(ask_id)
             return result
 
         adapter._list_asks = answered_meanwhile  # type: ignore[method-assign]
         await adapter._seed_asks(state)
 
-        assert state.permissions == {}
+        assert {*state.permissions, *state.forms} == {"per_1", "frm_1"} - {ask_id}
+
+
+def test_executions_reported_during_the_listing_win_over_it() -> None:
+    state = SessionState("local", WORKDIR, "ses_root", children={"ses_child"})
+    mark = state.mark()
+    state.execution_ended("ses_root")
+    state.execution_started("ses_child")
+
+    state.seed_running({"ses_root"}, mark)
+
+    assert state.running == {"ses_child"}
 
 
 # ── Model, agent, permissions ───────────────────────────────────────────

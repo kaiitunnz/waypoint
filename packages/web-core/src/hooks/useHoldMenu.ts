@@ -35,19 +35,9 @@ export interface HoldMenu {
   menuProps: { onKeyDown: (event: KeyboardEvent) => void };
 }
 
-export interface HoldMenuOptions {
-  // A tap also closes the menu and disarms the hover until the mouse leaves, so
-  // it does not appear after the person has already acted.
-  dismissOnActivate?: boolean;
-}
-
 // A button that acts on a tap and offers a menu on hover (mouse), a held touch,
 // ArrowDown or Space.
-export function useHoldMenu(
-  disabled: boolean,
-  onActivate: () => void,
-  { dismissOnActivate = false }: HoldMenuOptions = {},
-): HoldMenu {
+export function useHoldMenu(disabled: boolean, onActivate: () => void): HoldMenu {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -72,7 +62,7 @@ export function useHoldMenu(
   }
 
   const close = useCallback((refocusTrigger = false) => {
-    // Or a pending hover reopens the menu that was just closed.
+    // A pending hover would reopen the menu.
     clearTimer();
     setOpen(false);
     if (refocusTrigger) triggerRef.current?.focus();
@@ -106,8 +96,7 @@ export function useHoldMenu(
       onPointerLeave: (event) => {
         if (event.pointerType !== "mouse") return;
         hoverSpent.current = false;
-        clearTimer();
-        setOpen(false);
+        close();
       },
     },
     triggerProps: {
@@ -117,12 +106,10 @@ export function useHoldMenu(
           longPressed.current = false;
           return;
         }
-        if (dismissOnActivate) {
-          // `detail` is 0 for a keyboard click, which has no mouse to disarm.
-          hoverSpent.current = event.detail > 0;
-          clearTimer();
-          setOpen(false);
-        }
+        // Disarm the hover so the menu does not appear after the person has acted.
+        // `detail` is 0 for a keyboard click, which has no mouse to disarm.
+        hoverSpent.current = event.detail > 0;
+        close();
         onActivate();
       },
       onPointerDown: (event) => {

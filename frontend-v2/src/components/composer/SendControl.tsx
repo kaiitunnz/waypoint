@@ -26,7 +26,6 @@ export function SendControl({ canSend, sending, dormant, onSend, keepFocus }: Se
       keepFocus();
       onSend("now");
     },
-    { dismissOnActivate: true },
   );
   return (
     <div ref={wrapRef} className={styles.wrap} {...wrapProps}>

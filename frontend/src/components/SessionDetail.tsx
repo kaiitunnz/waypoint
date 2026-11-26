@@ -2855,7 +2855,7 @@ const ReplyComposer = memo(function ReplyComposer({
     wrapProps: sendWrapProps,
     triggerProps: sendTriggerProps,
     menuProps: sendMenuProps,
-  } = useHoldMenu(sendDisabled, () => void handleSend(), { dismissOnActivate: true });
+  } = useHoldMenu(sendDisabled, () => void handleSend());
 
   const addFilesFromInput = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files ? Array.from(event.target.files) : [];

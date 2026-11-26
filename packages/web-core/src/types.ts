@@ -357,6 +357,10 @@ export interface AgentCapabilities {
   supports_custom_cli_args: boolean;
   supports_config_overrides: boolean;
   supports_slash_compact: boolean;
+  // Whether a terminal (tmux) launch carries the model / the effort. Absent
+  // from older backends, which the launch form reads as true.
+  supports_terminal_launch_model?: boolean;
+  supports_terminal_launch_effort?: boolean;
   cli_binary?: string | null;
   target_aliases: string[];
   badges: Record<string, string>;

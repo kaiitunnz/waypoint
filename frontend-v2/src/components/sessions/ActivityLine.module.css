@@ -1,5 +1,6 @@
 .line,
-.bright {
+.bright,
+.loading {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -17,6 +18,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.loading {
+  flex: 1 1 auto;
 }
 
 .placeholder {

@@ -19,7 +19,7 @@ interface ActivityLineProps {
 export function ActivityLine({ fallback, activity, bright, progressStyle = "short" }: ActivityLineProps) {
   if (activity === undefined) {
     return (
-      <span className={styles.line}>
+      <span className={styles.loading}>
         <span className={styles.placeholder} aria-hidden="true" />
       </span>
     );

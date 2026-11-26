@@ -315,11 +315,7 @@ async def test_live_approval_ids_match_the_emitted_request() -> None:
         metadata=metadata,
         sequence=1,
     )
-    plugin = SimpleNamespace(
-        _adapters={"key": adapter},
-        _adapter_key=lambda *_: "key",
-        _effective_args=lambda *_: (),
-    )
+    plugin = SimpleNamespace(existing_session_adapter=lambda *_: adapter)
     transport = OpenCodeTransport(None, plugin)  # type: ignore[arg-type]
     session: Any = SimpleNamespace(
         id="local-1", launch_target_id=None, cwd="/tmp", args=[]

@@ -3,7 +3,8 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from aiohttp import web
@@ -11,6 +12,7 @@ from aiohttp import web
 from opencode_stubs import fake_opencode, loopback_ssh, server_env, serving
 from waypoint.backends.opencode.adapter import OpenCodeAdapter, OpenCodeError
 from waypoint.backends.opencode.client import RemoteOpenCodeClient
+from waypoint.backends.opencode.plugin import OpenCodePlugin, OpenCodePluginConfig
 from waypoint.backends.opencode.server_auth import USERNAME, ServerAuth
 
 
@@ -63,6 +65,26 @@ async def test_local_server_gets_a_password_and_the_client_sends_it(
             finally:
                 await adapter.shutdown()
     assert len(passwords) == 2
+
+
+@pytest.mark.asyncio
+async def test_the_configured_local_binary_is_the_one_started(tmp_path: Path) -> None:
+    seen = tmp_path / "server.env"
+    async with serving(_locked_v1(seen)) as url:
+        binary, _ = fake_opencode(tmp_path, int(url.rsplit(":", 1)[1]))
+        config = OpenCodePluginConfig(local_bin=binary)
+        runtime = SimpleNamespace(
+            settings=SimpleNamespace(plugin_config=lambda _id: config),
+            _emit_adapter_event=None,
+        )
+        adapter = await OpenCodePlugin()._get_or_create_adapter(
+            cast(Any, runtime), None, str(tmp_path)
+        )
+        await adapter.start()
+        try:
+            assert seen.exists()
+        finally:
+            await adapter.shutdown()
 
 
 @pytest.mark.asyncio

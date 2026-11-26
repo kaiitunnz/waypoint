@@ -693,6 +693,7 @@ async def test_get_or_create_adapter_keys_by_cwd(
             self,
             emit_event,
             on_session_update=None,
+            binary=None,
             on_token_usage=None,
             launch_target=None,
             on_agent_changed=None,
@@ -705,7 +706,9 @@ async def test_get_or_create_adapter_keys_by_cwd(
             self.workdir = workdir
 
     runtime: Any = SimpleNamespace(
-        settings=SimpleNamespace(default_cwd="~/"),
+        settings=SimpleNamespace(
+            default_cwd="~/", plugin_config=lambda _id: OpenCodePluginConfig()
+        ),
         _find_launch_target=lambda _launch_target_id: SimpleNamespace(
             default_cwd="~/project"
         ),
@@ -742,6 +745,7 @@ async def test_get_or_create_adapter_normalizes_equivalent_cwds(
             self,
             emit_event,
             on_session_update=None,
+            binary=None,
             on_token_usage=None,
             launch_target=None,
             on_agent_changed=None,
@@ -754,7 +758,9 @@ async def test_get_or_create_adapter_normalizes_equivalent_cwds(
             self.workdir = workdir
 
     runtime: Any = SimpleNamespace(
-        settings=SimpleNamespace(default_cwd="~/"),
+        settings=SimpleNamespace(
+            default_cwd="~/", plugin_config=lambda _id: OpenCodePluginConfig()
+        ),
         _find_launch_target=lambda _launch_target_id: None,
         _emit_adapter_event=lambda *args, **kwargs: None,
     )
@@ -1541,7 +1547,9 @@ async def test_a_questions_change_reaches_the_tracker_and_the_asks_feed(
             callbacks.append(on_questions_changed)
 
     runtime: Any = SimpleNamespace(
-        settings=SimpleNamespace(default_cwd="~/"),
+        settings=SimpleNamespace(
+            default_cwd="~/", plugin_config=lambda _id: OpenCodePluginConfig()
+        ),
         _find_launch_target=lambda _launch_target_id: None,
         _emit_adapter_event=lambda *args, **kwargs: None,
         questions=MagicMock(),

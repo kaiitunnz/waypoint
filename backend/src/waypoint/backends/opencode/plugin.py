@@ -426,6 +426,12 @@ class OpenCodePlugin(DefaultLaunchContract):
                 on_token_usage=(
                     token_usage_callback() if callable(token_usage_callback) else None
                 ),
+                # A launch target names its own binary (``remote_bin``).
+                binary=(
+                    runtime.settings.plugin_config(self.id).local_bin
+                    if launch_target is None
+                    else None
+                ),
                 launch_target=launch_target,
                 on_agent_changed=_on_agent_changed,
                 on_server_died=_on_server_died,

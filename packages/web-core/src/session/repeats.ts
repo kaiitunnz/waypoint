@@ -40,7 +40,7 @@ function collapse<T extends TranscriptItem>(items: readonly T[]): T[] {
   return out;
 }
 
-// Folds identical notes that follow one another, at the top level and inside tool runs.
+// Folds identical notes that follow one another, at the top level and inside runs.
 export function collapseRepeats(items: readonly TranscriptItem[]): TranscriptItem[] {
-  return collapse(items).map((item) => (item.kind === "tool_run" ? { ...item, items: collapse(item.items) } : item));
+  return collapse(items).map((item) => ("items" in item ? { ...item, items: collapse(item.items) } : item));
 }

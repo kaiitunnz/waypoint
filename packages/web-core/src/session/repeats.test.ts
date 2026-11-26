@@ -15,7 +15,7 @@ const collapse = (...events: ReturnType<typeof ev>[]) => collapseRepeats(buildTr
 
 const summarize = (items: TranscriptItem[]): unknown[] =>
   items.map((item) => {
-    if (item.kind === "tool_run") return summarize(item.items);
+    if (item.kind === "tool_run" || item.kind === "notification_run") return summarize(item.items);
     if (item.kind !== "single") return item.kind;
     return item.repeat ? `${item.event.sequence}x${item.repeat.count}` : item.event.sequence;
   });
@@ -42,5 +42,10 @@ describe("collapseRepeats", () => {
 
   it("folds notes inside a tool run, where a call separates them", () => {
     expect(summarize(collapse(call(1, "a"), changes(2, 2), changes(3, 2), call(4, "b"), changes(5, 2)))).toEqual([["pair", 2, "pair", 5]]);
+  });
+
+  it("folds notes that follow a task notification inside its run", () => {
+    const task = ev(1, "system_note", "task", { method: "task_notification" });
+    expect(summarize(collapse(task, restored(2), restored(3), restored(4)))).toEqual([[1, "2x3"]]);
   });
 });

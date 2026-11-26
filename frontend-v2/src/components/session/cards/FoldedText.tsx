@@ -18,10 +18,11 @@ interface FoldedTextProps {
 export function FoldedText({ text, keep, className }: FoldedTextProps) {
   const fold = useFold(text, keep);
   const { content, chip } = useClamp<HTMLSpanElement>(fold.open || fold.hidden > 0);
+  const folded = keep === "end" ? clamp.keepEnd : clamp.clamp;
   return (
     <>
       <pre className={cx(className, fold.open && styles.open)}>
-        <span className={cx(clamp.content, !fold.open && (keep === "end" ? clamp.keepEnd : clamp.clamp))}>
+        <span className={fold.open ? clamp.content : folded}>
           <span ref={content} className={clamp.content}>
             {fold.shown}
           </span>

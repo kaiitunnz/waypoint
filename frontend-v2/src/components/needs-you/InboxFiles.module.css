@@ -47,8 +47,11 @@
   min-width: 0;
 }
 
+/* The name comes first in the markup so its text is the chip's baseline; the
+   thumbnail still shows ahead of it. */
 .chip {
   display: inline-flex;
+  flex-direction: row-reverse;
   align-items: center;
   gap: 8px;
   max-width: 100%;
@@ -61,7 +64,8 @@
   color: var(--text);
 }
 
-.chip > :last-child {
+.chipName {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

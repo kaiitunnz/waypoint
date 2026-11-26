@@ -23,7 +23,7 @@ export function FileTile({ attachment }: { attachment: InboxAttachmentRef }) {
   const { url, name, preview, image } = useFile(attachment);
   return (
     <a className={styles.tile} href={url} target="_blank" rel="noreferrer" title={name}>
-      <FileThumb className={styles.thumb} src={preview} alt={name} />
+      <FileThumb className={styles.thumb} src={preview} />
       <span className={styles.text}>
         <span className={styles.name}>{name}</span>
         <span className={styles.type}>{typeTag(name, image)}</span>
@@ -39,8 +39,8 @@ function FileChip({ attachment }: { attachment: InboxAttachmentRef }) {
   const { url, name, preview } = useFile(attachment);
   return (
     <a className={styles.chip} href={url} target="_blank" rel="noreferrer" title={name}>
-      <FileThumb className={styles.small} src={preview} alt={name} />
-      <span>{name}</span>
+      <span className={styles.chipName}>{name}</span>
+      <FileThumb className={styles.small} src={preview} />
     </a>
   );
 }

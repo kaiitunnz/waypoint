@@ -11,11 +11,14 @@
 
 /* Inline blocks, so a selection copies as one unbroken path; flex items would copy as
    separate lines. `--name` and `--tail` are the file name's and its kept tail's widths
-   in monospace columns, each 1ch less the letter-spacing. */
+   in monospace columns, each 1ch less the letter-spacing. Top-aligned because WebKit
+   puts a clipped inline block's baseline at its bottom edge, which lifts the clipped
+   parts above the tail. */
 .dir,
 .head,
 .tail {
   display: inline-block;
+  vertical-align: top;
 }
 
 .dir,

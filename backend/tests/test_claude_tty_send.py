@@ -1,6 +1,7 @@
 """A claude_tty session takes keystrokes only into a drawn composer."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -70,7 +71,7 @@ async def test_no_enter_into_a_popup_that_opens_after_the_first() -> None:
     ready = (FIXTURES / "ready.txt").read_text()
     transport, tmux, session = _transport(ready)
 
-    async def open_popup(*_: object) -> None:
+    async def open_popup(*_: Any) -> None:
         tmux.capture_snapshot.return_value = UNKNOWN_POPUPS[1]
 
     tmux.submit.side_effect = open_popup

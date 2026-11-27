@@ -86,7 +86,7 @@ class Pane:
 
     async def poll(self, times: int = 2) -> None:
         for _ in range(times):
-            await self.tailer._poll_dialog()
+            await self.tailer.dialogs.poll()
 
     @property
     def asks(self) -> list[dict[str, Any]]:
@@ -127,9 +127,7 @@ async def test_subagent_dialog_names_the_subagents_call_not_the_decoy(
     assert ask["interaction"]["body"].endswith(SUB_BASH["command"])
 
 
-async def test_subagent_dialog_without_its_record_is_unverified(
-    tmp_path: Path,
-) -> None:
+async def test_subagent_dialog_without_its_record_is_unverified(tmp_path: Path) -> None:
     pane = Pane(tmp_path, "approval_subagent_bash_decoy.txt")
     # The main thread runs the very same command.
     append(pane.main, use("main", "Bash", SUB_BASH))
@@ -164,9 +162,7 @@ async def test_wrapped_command_carries_the_full_input(tmp_path: Path) -> None:
     assert ask["tool_input"] == tool_input
 
 
-async def test_calls_that_cannot_be_told_apart_stay_unverified(
-    tmp_path: Path,
-) -> None:
+async def test_calls_that_cannot_be_told_apart_stay_unverified(tmp_path: Path) -> None:
     pane = Pane(tmp_path, "approval_subagent_bash_decoy.txt")
     write_subagent(
         pane.main, "a1", "general-purpose", jsonl(use("one", "Bash", SUB_BASH))
@@ -266,9 +262,7 @@ async def test_reply_is_refused_once_the_named_call_resolved(tmp_path: Path) -> 
     assert pane.asks[-1]["tool_input"] == unsandboxed
 
 
-async def test_redrawn_options_move_the_keys_a_reply_presses(
-    tmp_path: Path,
-) -> None:
+async def test_redrawn_options_move_the_keys_a_reply_presses(tmp_path: Path) -> None:
     pane = Pane(tmp_path, "approval_bash_boxed.txt")
     append(pane.main, use("first", "Bash", BASH))
     full = pane.screen
@@ -288,12 +282,12 @@ async def test_redrawn_options_move_the_keys_a_reply_presses(
 
 
 async def test_reply_is_refused_when_the_pane_moves_during_its_reads(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pane = Pane(tmp_path, "approval_bash_boxed.txt")
     append(pane.main, use("first", "Bash", BASH))
     await pane.poll()
-    reads = pane.tailer._calls
+    reads = pane.tailer.dialogs._calls
     candidates = reads.candidates
 
     def move_on(agent: str | None) -> list[PendingCall]:
@@ -301,19 +295,19 @@ async def test_reply_is_refused_when_the_pane_moves_during_its_reads(
         pane.screen = _screen("approval_subagent_bash_decoy.txt")
         return found
 
-    reads.candidates = move_on  # type: ignore[method-assign]
+    monkeypatch.setattr(reads, "candidates", move_on)
 
     assert await pane.reply() is False
     pane.assert_no_keys()
 
 
 async def test_refusal_leaves_a_card_raised_during_the_reply_alone(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pane = Pane(tmp_path, "approval_bash_boxed.txt")
     append(pane.main, use("first", "Bash", BASH))
     await pane.poll()
-    reads = pane.tailer._calls
+    reads = pane.tailer.dialogs._calls
     candidates = reads.candidates
     newer = replace(pane.plugin._pending_approvals["s1"], approval_id="newer")
 
@@ -322,7 +316,7 @@ async def test_refusal_leaves_a_card_raised_during_the_reply_alone(
         pane.screen = _screen("ready.txt")
         return candidates(agent)
 
-    reads.candidates = replaced  # type: ignore[method-assign]
+    monkeypatch.setattr(reads, "candidates", replaced)
 
     assert await pane.reply() is False
     pane.assert_no_keys()

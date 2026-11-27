@@ -87,13 +87,16 @@ from waypoint.backends.claude_code.threads import (
     local_claude_thread_artifacts,
 )
 from waypoint.backends.claude_tty import pane_dialog
-from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
     ClaudeTranscriptSource,
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
     find_local_transcript,
     resolve_remote_config_root,
+)
+from waypoint.backends.claude_tty.dialog_watch import (
+    STALE_REPLY_NOTE,
+    PendingTtyApproval,
 )
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
@@ -704,12 +707,15 @@ class ClaudeTtyPlugin:
     async def still_shows(self, session_id: str, pending: PendingTtyApproval) -> bool:
         """Whether the pane still shows what ``pending``'s ask was raised for."""
         run = self._tailers.get(session_id)
-        return run is not None and await run.tailer.still_shows(pending)
+        return run is not None and await run.tailer.dialogs.still_shows(pending)
 
-    def forget_dialog(self, session_id: str) -> None:
-        """Have the tailer raise whatever dialog is on screen afresh."""
+    async def refuse_reply(self, runtime: "SessionRuntime", session_id: str) -> None:
+        """Close the card of a reply that was not sent."""
+        # Forgotten before the entry goes, so the next poll raises what is on
+        # screen as a new request.
         if run := self._tailers.get(session_id):
-            run.tailer.forget_dialog()
+            run.tailer.dialogs.forget()
+        await self.drop_pending_approval(runtime, session_id, STALE_REPLY_NOTE)
 
     async def drop_pending_approval(
         self, runtime: "SessionRuntime", session_id: str, note: str

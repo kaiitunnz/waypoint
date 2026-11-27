@@ -6,15 +6,14 @@ import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
 import { formatDuration } from "./cardText";
 import {
   callArgumentsForEvent,
-  collabPromptForEvent,
-  collabReportForEvent,
   commandForEvent,
   commandOutputForEvent,
-  contentItemsForEvent,
+  delegationForEvent,
+  filledText,
   isAgentToolName,
-  isCollabEvent,
   isFileEditToolName,
   previewForToolEvent,
+  resultContentForEvent,
   toolBadgeFor,
   toolInputForEvent,
   toolNameParts,
@@ -277,8 +276,6 @@ function cleanOutput(text: string): string | null {
   return text.replace(/\r\n?/g, "\n").replace(/^(?:[ \t]*\n)+/, "").trimEnd() || null;
 }
 
-const textOf = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
-
 // Under half a second the two timestamps say when the events were recorded, not how long the call ran.
 const MIN_DURATION_MS = 500;
 
@@ -327,15 +324,14 @@ function replyOf(call: EventRecord | null, result: EventRecord, tool: string | n
   if (tool === "Bash" || result.metadata?.is_error === true) {
     return { output: cleanOutput(commandOutputForEvent(result)), result: null };
   }
-  if (isCollabEvent(result)) {
-    // Closing a subagent repeats the report the wait gave.
-    return { output: null, result: tool === "closeAgent" ? null : collabReportForEvent(result) };
-  }
+  const delegation = delegationForEvent(result);
+  if (delegation) return { output: null, result: delegation.report };
   const text = cleanOutput(commandOutputForEvent(result));
   // Only a call that carried a prompt answers with a report.
   if (category === "agent") return { output: null, result: prompted ? text : null };
-  if (category !== "other") return { output: null, result: null };
-  const returned = contentItemsForEvent(result) ?? text;
+  // A result whose call is not loaded may carry no name to say what kind of tool ran.
+  if (tool === null || category !== "other") return { output: null, result: null };
+  const returned = resultContentForEvent(result) ?? text;
   // Some results only repeat what the call said.
   const repeats = returned === call?.text.trim() || returned === tool;
   return { output: repeats ? null : returned, result: null };
@@ -373,30 +369,35 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
     : (shownPath ?? relativizeInText(preview, cwd));
   const stats = diff && isFileEditToolName(tool) ? diff : null;
 
-  const description = category === "agent" ? textOf(args?.description) : null;
+  const description = category === "agent" ? filledText(args?.description) : null;
+  const delegation = delegationForEvent(event);
+  const inputPrompt = category === "agent" ? filledText(input?.prompt) : null;
+
+  // A deferred result only acknowledges the launch. The task notification about such a call,
+  // or about any subagent call, carries its outcome in the result's place.
+  const deferred = result?.metadata?.result_deferred === true;
+  const report = child.kind === "pair" && (deferred || category === "agent") ? (child.pair.report ?? null) : null;
+  const note = report ? parseTaskNotification(report) : null;
+  const replaced = deferred || note !== null;
+  const reply = result && !replaced ? replyOf(call, result, tool, inputPrompt !== null) : null;
+  const reported = note?.resultPreview ? cleanOutput(note.resultPreview) : null;
+  const prose = category === "agent" || delegation !== null;
+
   // A result alone, such as a spawned subagent's notice, is labelled by its text.
   const named =
     tool !== null && !todo && (NAMED_CATEGORIES.has(category) || (category === "agent" && call !== null && !description));
-  // With nothing but its name to show, a named row's preview says the name again.
-  const bare = args !== null || isCollabEvent(event) || preview === "No output" || preview === tool;
-  const inputPrompt = category === "agent" ? textOf(input?.prompt) : null;
-
-  // A deferred result only acknowledges the launch; the report is the call's outcome.
-  const deferred = result?.metadata?.result_deferred === true;
-  const report = deferred && child.kind === "pair" ? (child.pair.report ?? null) : null;
-  const note = report ? parseTaskNotification(report) : null;
-  const reply = result && !deferred ? replyOf(call, result, tool, inputPrompt !== null) : null;
-  const reported = note?.resultPreview ? cleanOutput(note.resultPreview) : null;
-  const prose = category === "agent" || isCollabEvent(event);
-  const answered = result !== null && (!deferred || note !== null);
-  const failed = deferred ? Boolean(note?.status && note.status !== "completed") : result?.metadata?.is_error === true;
+  // A named row's preview says only its name again, or the output a result alone shows below.
+  const repeated =
+    args !== null || delegation !== null || preview === "No output" || preview === tool || (!call && Boolean(reply?.output));
+  const answered = note !== null || (result !== null && !deferred);
+  const failed = replaced ? Boolean(note?.status && note.status !== "completed") : result?.metadata?.is_error === true;
 
   return {
     key: itemKey(child),
     glyph: badge.glyph,
     toolLabel: badge.label,
     name: named ? toolNameParts(tool) : null,
-    label: subject ?? (named && bare ? "" : label),
+    label: subject ?? (named && repeated ? "" : label),
     todos,
     path: shownPath ? splitPath(shownPath) : null,
     title: named ? tool : (filePath ?? preview),
@@ -404,11 +405,11 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
     additions: stats ? stats.totalAdditions : null,
     deletions: stats ? stats.totalDeletions : null,
     status: !answered ? "pending" : failed ? "failed" : "done",
-    durationMs: durationBetween(call, deferred ? report : result),
-    output: deferred ? (prose ? null : reported) : (reply?.output ?? null),
-    agentType: category === "agent" ? (textOf(input?.subagent_type) ?? textOf(input?.agent)) : null,
-    prompt: inputPrompt ?? collabPromptForEvent(event),
-    result: deferred ? (prose ? reported : null) : (reply?.result ?? null),
+    durationMs: durationBetween(call, replaced ? report : result),
+    output: replaced ? (prose ? null : reported) : (reply?.output ?? null),
+    agentType: category === "agent" ? (filledText(input?.subagent_type) ?? filledText(input?.agent)) : null,
+    prompt: inputPrompt ?? delegation?.prompt ?? null,
+    result: replaced ? (prose ? reported : null) : (reply?.result ?? null),
     cut: reported !== null && note?.resultTruncated === true,
     diff,
     attachments: child.kind === "pair" ? toolPairAttachments(child.pair) : attachmentSpecsFor(child.event),

@@ -19,8 +19,8 @@ export interface TranscriptView {
 // A reasoning step whose text is not shared leaves only a marker note.
 const isReasoningMarker = (event: EventRecord) => event.kind === "system_note" && event.metadata.item_type === "reasoning";
 
-// Gives each call whose result was deferred the latest notification about it, whatever
-// the density shows of the notification itself.
+// Gives each call the latest task notification about it, whatever the density shows of
+// the notification itself.
 function withReports(items: TranscriptItem[], events: EventRecord[]): TranscriptItem[] {
   const reports = new Map<string, EventRecord>();
   // A task may notify again naming only itself, not the call that started it.
@@ -34,7 +34,7 @@ function withReports(items: TranscriptItem[], events: EventRecord[]): Transcript
     reports.set(callId, event);
   }
   const attach = (item: LeafItem): LeafItem => {
-    if (item.kind !== "pair" || item.pair.result?.metadata.result_deferred !== true) return item;
+    if (item.kind !== "pair") return item;
     const report = reports.get(item.pair.itemId);
     return report ? { ...item, pair: { ...item.pair, report } } : item;
   };

@@ -68,7 +68,7 @@ describe("deferred reports", () => {
     return reports;
   };
 
-  it("gives a deferred call the latest notification about it, at either density", () => {
+  it("gives a call the latest notification about it, at either density", () => {
     const events = [
       ...launch(1, "a"),
       ...launch(3, "b"),
@@ -78,7 +78,7 @@ describe("deferred reports", () => {
       notification(9, "c", "stray"),
     ];
     for (const density of ["summary", "full"] as const) {
-      expect(reportsOf(events, density)).toEqual({ a: "second", b: undefined, c: undefined });
+      expect(reportsOf(events, density)).toEqual({ a: "second", b: undefined, c: "stray" });
     }
   });
 
@@ -93,5 +93,16 @@ describe("deferred reports", () => {
       notification(9, null, "no task"),
     ];
     expect(reportsOf(events, "summary")).toEqual({ a: "final", b: "other" });
+  });
+
+  it("leaves a follow-up's reports to the call that asked for them", () => {
+    const events = [
+      ...launch(1, "a"),
+      notification(3, "a", "first", "t1"),
+      ...launch(4, "send", {}),
+      notification(6, "send", "second", "t1"),
+      notification(7, null, "third", "t1"),
+    ];
+    expect(reportsOf(events, "summary")).toEqual({ a: "first", send: "third" });
   });
 });

@@ -14,7 +14,7 @@ import { stripAnsi } from "./terminalText";
 export interface ToolPair {
   call: EventRecord | null;
   result: EventRecord | null;
-  // The task notification that carries a deferred result.
+  // The latest task notification about the call.
   report?: EventRecord;
   itemId: string;
   ts: string;

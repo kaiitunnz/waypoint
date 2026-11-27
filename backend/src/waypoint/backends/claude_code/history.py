@@ -11,8 +11,9 @@ tool_call/tool_result cards.
 
 Each event carries the status the live claude_tty path records for it (a user
 message imports as ``running``), and an interrupt marker becomes the same note.
-The live path's other turn-end notes (turn complete, compaction, command output)
-are not imported.
+Not imported: the live path's other turn-end notes (turn complete, compaction,
+command output) and the statuses it sets without an event, such as the one a
+dismissed question's marker sets.
 
 Unlike the live normalizers (``adapter.py``'s ``_handle_user`` and
 ``claude_tty/normalize.py``'s ``_process_user``), which intentionally skip

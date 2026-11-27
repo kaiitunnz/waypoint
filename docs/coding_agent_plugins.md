@@ -856,10 +856,11 @@ session changes its working folder (`EnterWorktree`, `ExitWorktree`, `/cd`) and
 notes the new folder in a `relocated` record. The transport's byte source finds
 a transcript by thread id when the file at its last path is missing or
 replaced, and the session's `cwd` and `branch` follow the `relocated` folder, so
-relaunches and forks start there. When a folder the session moved into has been
-removed, reattach, restart and fork use the folder it was launched in. The
-`cwd` field on the other transcript records also tracks a shell `cd`, which
-moves nothing.
+relaunches, forks and side questions start there. When a folder the session
+moved into has been removed, they use the folder the session was created in. An
+SSH session's branch is cleared on a move, since its git state is on the remote
+host, and the assistant session keeps its workspace folder. The `cwd` field on
+the other transcript records also tracks a shell `cd`, which moves nothing.
 
 `AskUserQuestion` needs special handling because the TUI withholds the
 tool_use record from the transcript until the popup is resolved, so the

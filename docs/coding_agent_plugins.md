@@ -856,8 +856,8 @@ session changes its working folder (`EnterWorktree`, `ExitWorktree`, `/cd`) and
 writes a `relocated` record. The transport finds the moved transcript by thread
 id, and the session's `cwd`, repo name and branch follow the recorded folder, so
 relaunches, forks and side questions start there, or in the folder the session
-was created in if that one has been removed. An SSH session's branch is cleared
-on a move. The assistant session keeps its workspace folder.
+was created in if that one has been removed. An SSH session keeps its repo name,
+and its branch is cleared on a move. The assistant session keeps its workspace folder.
 
 `AskUserQuestion` needs special handling because the TUI withholds the
 tool_use record from the transcript until the popup is resolved, so the

@@ -3,7 +3,7 @@
 import { useStoredFlag } from "./useStoredFlag";
 
 export const CONVERSATION_PREVIEWS_KEY = "waypoint.conversation-previews";
-export const CONVERSATION_PREVIEWS_DEFAULT = true;
+export const CONVERSATION_PREVIEWS_DEFAULT = false;
 
 // Whether session lists show each conversation's latest line.
 export function useConversationPreviews(): [boolean, (show: boolean) => void] {

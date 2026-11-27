@@ -936,10 +936,17 @@ inside that agent's `normalize.py`; the frontend reader stays put.
 ### Deferred results
 
 A `tool_result` with `metadata.result_deferred: true` only acknowledges that the
-call was launched. The call's outcome arrives later as a task notification whose
-`tool_use_id` is the call's, and frontends show that report as the call's result.
-A plugin sets the flag from the agent's own structured record of the result, never
-from its text.
+call was launched. A plugin sets the flag from the agent's own structured record
+of the result, never from its text, and only where it also records the task
+notification that brings the outcome.
+
+The v2 frontend gives a call the latest task notification whose `tool_use_id` is
+the call's `item_id`. A later notification that names only the same `task_id`
+belongs to the last call that named that task. The notification stands in for
+the result of a deferred call, and of any subagent call whether or not its
+result is flagged: its report preview is the call's result, and a `status` other
+than `completed` marks the call failed. A deferred call with no notification
+shows as running.
 
 ### Capture seams
 

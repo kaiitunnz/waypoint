@@ -59,6 +59,20 @@ def format_rate_limit(info: dict[str, Any]) -> str:
     return f"Rate limit ({rl_type}): {status}".strip()
 
 
+# Tools whose ``description`` input is the agent's description of the call. On
+# any other tool the key is an argument the call carries (an event's body, a
+# page's subtitle), so it never describes the call.
+_DESCRIBED_TOOLS = frozenset({"Bash", "Agent", "Task", "Monitor", "PowerShell"})
+
+
+def call_summary(tool_name: Any, tool_input: Any) -> str | None:
+    """The agent's description of a call, or ``None`` when it gave none."""
+    if tool_name not in _DESCRIBED_TOOLS or not isinstance(tool_input, dict):
+        return None
+    description = tool_input.get("description")
+    return description if isinstance(description, str) else None
+
+
 def format_approval_text(payload: dict[str, Any]) -> str:
     tool_name = payload.get("tool_name") or "tool"
     tool_input = payload.get("tool_input") or {}

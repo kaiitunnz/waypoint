@@ -12,12 +12,14 @@ class ItemPayload(BaseModel):
     tool_input: dict[str, Any] | None = None
     tool_use_id: str | None = None
     payload: dict[str, Any] | None = None
+    summary: str | None = None
 
 
 class ApprovalPayload(BaseModel):
     approval_id: str
     tool_name: str | None = None
     tool_input: dict[str, Any] | None = None
+    summary: str | None = None
     decisions: list[str] = Field(default_factory=lambda: ["approve", "decline"])
 
 
@@ -133,4 +135,16 @@ def mark_detail(metadata: dict[str, Any]) -> dict[str, Any]:
 
 def mark_important(metadata: dict[str, Any]) -> dict[str, Any]:
     metadata[VISIBILITY_METADATA_KEY] = IMPORTANT_VISIBILITY
+    return metadata
+
+
+# The agent's short description of a tool call, on its tool_call and
+# approval_request events. Backticks mark the machine strings in it.
+SUMMARY_METADATA_KEY = "summary"
+
+
+def set_summary(metadata: dict[str, Any], summary: Any) -> dict[str, Any]:
+    """Attach a call's summary; the key stays absent when the agent gave none."""
+    if isinstance(summary, str) and (text := summary.strip()):
+        metadata[SUMMARY_METADATA_KEY] = text
     return metadata

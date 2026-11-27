@@ -280,6 +280,8 @@ async def test_cut_off_dialog_is_unverified() -> None:
     meta = runtime._emit_adapter_event.call_args.args[3]
     assert meta["tool_name"] == "Unknown"
     assert meta["tool_input"] == {"description": ""}
+    # The screen's reading is not the agent's description.
+    assert "summary" not in meta
     assert meta["call_verified"] is False
     assert "tool_use_id" not in meta
     assert plugin._pending_approvals["sess-1"].approve_number == 1
@@ -325,6 +327,9 @@ async def test_auto_hint_dialog_surfaces_command_not_tip(recorded: bool) -> None
     assert meta["call_verified"] is recorded
     assert meta.get("tool_use_id") == ("tu-2" if recorded else None)
     assert ("timeout" in meta["tool_input"]) is recorded
+    assert meta.get("summary") == (
+        "List section keys in the payload beyond the first page" if recorded else None
+    )
     assert meta["interaction"]["body"] == f"Approve Bash command:\n{_HINTED_COMMAND}"
 
 

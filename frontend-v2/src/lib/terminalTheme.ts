@@ -54,7 +54,7 @@ export function terminalThemeFor(appearance: TerminalAppearance): ITheme {
 
 // The pane's font size in px, from the token for this input.
 export function terminalFontSize(): number {
-  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--f-term")) || 13;
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--f-term")) || 12;
 }
 
 // The app's mono face; next/font registers it under its own family name.

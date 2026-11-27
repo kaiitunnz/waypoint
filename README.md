@@ -49,7 +49,7 @@ To extend this matrix:
 
 1. Update the row above with the new tested version.
 2. Re-run the integration paths that touch the wire format:
-   - Claude: `backend/src/waypoint/backends/claude_code/normalize.py` (status / compact / rate-limit / approval / content-block helpers) and `adapter.py`'s `_handle_*` stream handlers, plus `_handle_can_use_tool` for tool approval over the control protocol; the turn-boundary shapes (`result.terminal_reason`, the interrupt markers, and the transcript's `promptSource`, `queueTranscriptOnly` and `toolDenialBeforeRun` fields) in `normalize.py` and `claude_tty/normalize.py`; remote launch in `backends/claude_code/remote.py::_build_remote_claude_command`.
+   - Claude: `backend/src/waypoint/backends/claude_code/normalize.py` (status / compact / rate-limit / approval / content-block helpers) and `adapter.py`'s `_handle_*` stream handlers, plus `_handle_can_use_tool` for tool approval over the control protocol; the turn-boundary shapes (`result.terminal_reason`, `result.stopped_by_permission_check`, the interrupt markers, and the transcript's `promptSource`, `queueTranscriptOnly` and `toolDenialBeforeRun` fields) in `normalize.py`, `adapter.py` and `claude_tty/normalize.py`; remote launch in `backends/claude_code/remote.py::_build_remote_claude_command`.
    - Codex: `backend/src/waypoint/backends/codex/normalize.py::map_notification` and the SDK calls in `backends/codex/adapter.py::CodexAppServerAdapter`.
    - OpenCode: the event and history converters in `backend/src/waypoint/backends/opencode/normalize.py` and the HTTP/SSE adapter in `backends/opencode/adapter.py::OpenCodeAdapter`.
 3. If a bump breaks an event shape, prefer adding a branch in the relevant `normalize.py` over hard-pinning.

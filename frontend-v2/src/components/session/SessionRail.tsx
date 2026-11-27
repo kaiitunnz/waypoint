@@ -8,29 +8,18 @@ import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useLongPress } from "@waypoint/web-core/hooks/useLongPress";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
-import {
-  agentModelLabel,
-  brightPreview,
-  formatSessionTime,
-  lampWord,
-  sessionLamp,
-  showsUnread,
-  spokenStatus,
-  type SessionLamp,
-} from "@waypoint/web-core/sessionPresentation";
+import { agentModelLabel, sessionLamp, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import { rankSessionsForSwitcher, SWITCHER_SECTION_LABELS, type SwitcherSection } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
-import { ActivityLine } from "@/components/sessions/ActivityLine";
 import { ExitedGroup } from "@/components/sessions/ExitedGroup";
-import { PinMark } from "@/components/sessions/PinMark";
+import { RailItem, railItemClass, railSubLine } from "@/components/sessions/RailItem";
 import { SessionMenu, type SessionAction } from "@/components/sessions/SessionMenu";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
 import { useExitedSessions } from "@/components/sessions/useExitedSessions";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
-import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { useShowExited } from "@/lib/show-exited";
@@ -50,10 +39,9 @@ interface RailRowProps {
   current: boolean;
   now: number;
   lamp: SessionLamp;
+  section: SwitcherSection;
   // The second line, or null for a one-line row.
   sub: ReactNode;
-  // Under a heading that does not say it is pinned.
-  pinMark: boolean;
   menuOpen: boolean;
   onMenuOpen: (open: boolean) => void;
   menuSubtitle: string;
@@ -66,8 +54,8 @@ function RailRow({
   current,
   now,
   lamp,
+  section,
   sub,
-  pinMark,
   menuOpen,
   onMenuOpen,
   menuSubtitle,
@@ -76,7 +64,6 @@ function RailRow({
 }: RailRowProps) {
   const pointer = usePointerUI();
   const press = useLongPress(() => onMenuOpen(true));
-  const unread = showsUnread(session);
   const single = sub === null;
   const onContextMenu = (event: MouseEvent) => {
     press.onContextMenu(event);
@@ -94,20 +81,9 @@ function RailRow({
         href={sessionHref(session.id)}
         onNavigate={onNavigate}
         aria-current={current ? "page" : undefined}
-        className={cx(
-          styles.item,
-          unread && styles.unread,
-          current && styles.on,
-          lamp === "exited" && styles.exited,
-        )}
+        className={cx(railItemClass(session, lamp, single), styles.item, current && styles.on)}
       >
-        <StatusLamp state={lamp} size="sm" label={spokenStatus(lampWord(lamp, session.status), unread)} />
-        <span className={styles.name}>{session.title}</span>
-        <span className={styles.time}>
-          {pinMark ? <PinMark /> : null}
-          {formatSessionTime(session.last_event_at, now)}
-        </span>
-        {single ? null : <span className={styles.sub}>{sub}</span>}
+        <RailItem session={session} lamp={lamp} section={section} now={now} sub={sub} timeClassName={styles.time} />
       </Link>
       <span className={styles.actions}>
         <SessionMenu
@@ -177,18 +153,14 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
 
   const row = (session: SessionRecord, section: SwitcherSection) => {
     const lamp = sessionLamp(session, feed.askSessionIds.has(session.id));
-    const ask = asks.find((item) => item.session_id === session.id);
-    // Needs-you rows keep their ask line.
-    const single = section === "exited" || (!previews && section !== "needs");
-    const sub = single ? null : section === "needs" && ask ? (
-      ask.title
-    ) : (
-      <ActivityLine
-        fallback={lampWord(lamp, session.status)}
-        activity={activities.get(session.id)}
-        bright={brightPreview(session, lamp)}
-      />
-    );
+    const sub = railSubLine({
+      session,
+      lamp,
+      section,
+      ask: asks.find((item) => item.session_id === session.id),
+      previews,
+      activity: activities.get(session.id),
+    });
     return (
       <RailRow
         key={session.id}
@@ -196,8 +168,8 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
         current={session.id === currentId}
         now={now}
         lamp={lamp}
+        section={section}
         sub={sub}
-        pinMark={section !== "pinned" && Boolean(session.pinned_at)}
         menuOpen={menuFor === session.id}
         onMenuOpen={(open) => setMenuFor(open ? session.id : null)}
         menuSubtitle={agentModelLabel(session, catalog)}

@@ -23,18 +23,36 @@ interface ExitedGroupProps {
   paging: ExitedPaging;
 }
 
+interface ExitedToggleProps {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  className?: string;
+}
+
+// The Exited group's heading, which shows or hides every exited session.
+export function ExitedToggle({ label, open, onToggle, className }: ExitedToggleProps) {
+  return (
+    <button type="button" className={cx(styles.toggle, className)} aria-expanded={open} onClick={onToggle}>
+      <StatusLamp state="exited" />
+      <span className={styles.label}>{label}</span>
+      <span className={open ? styles.open : undefined}>
+        <Icon name="chevron-right" size={16} strokeWidth={2} />
+      </span>
+    </button>
+  );
+}
+
 // "Delete exited" lives in the menu, never as a loud button.
 export function ExitedGroup({ count, short, divided, open, onToggle, onDeleteExited, children, paging }: ExitedGroupProps) {
   return (
     <section className={cx(styles.group, divided && styles.divided)}>
       <div className={styles.line}>
-        <button type="button" className={styles.toggle} aria-expanded={open} onClick={onToggle}>
-          <StatusLamp state="exited" />
-          <span className={styles.label}>{short ? `${count} exited` : `${count} exited sessions`}</span>
-          <span className={open ? styles.open : undefined}>
-            <Icon name="chevron-right" size={16} strokeWidth={2} />
-          </span>
-        </button>
+        <ExitedToggle
+          label={short ? `${count} exited` : `${count} exited sessions`}
+          open={open}
+          onToggle={onToggle}
+        />
         {onDeleteExited ? (
           <MenuButton
             label="Exited sessions actions"

@@ -1,0 +1,21 @@
+/* Top-aligned in a line of text, with the time's baseline as its own, so the
+   glyph and dot never lift the time off its line. */
+.when {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  vertical-align: top;
+}
+
+.time {
+  align-self: baseline;
+}
+
+/* Unread, beside the time and never in the lamp column. */
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-strong);
+}

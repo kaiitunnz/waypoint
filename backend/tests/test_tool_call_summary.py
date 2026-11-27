@@ -301,6 +301,7 @@ def _command_item(actions: list[dict[str, Any]]) -> dict[str, Any]:
         "command": "/bin/bash -lc 'cat SKILL.md'",
         "cwd": "/work",
         "status": "completed",
+        "source": "agent",
         "commandActions": actions,
         "aggregatedOutput": "text",
         "exitCode": 0,

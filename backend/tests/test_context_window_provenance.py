@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from claude_tty_transcripts import NoTranscriptTree
 from waypoint.backends.claude_code.adapter import (
     _context_usage_snapshot_from_message,
     rebase_claude_context_usage,
@@ -215,7 +216,7 @@ def test_seed_no_usage_returns_none(tmp_path) -> None:
 # ── Emulated tailer uses the durable model as the denominator ─────────────
 
 
-class _FeedOnceSource:
+class _FeedOnceSource(NoTranscriptTree):
     def __init__(self, data: bytes) -> None:
         self._data = data
         self._size = len(data)

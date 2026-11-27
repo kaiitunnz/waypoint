@@ -3,6 +3,7 @@
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,6 +23,7 @@ from waypoint.transports import InputBlockedError
 PANES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
 EMPTY_COMPOSER = (PANES / "ready.txt").read_text()
 APPROVAL_DIALOG = (PANES / "approval_bash.txt").read_text()
+UNKNOWN_POPUP = "❯ earlier prompt\n\n" + "─" * 100 + "\n Pick one\n\n ❯ This\n   That\n"
 PENDING_MESSAGE = "\n".join(
     [
         "● ready",
@@ -112,14 +114,23 @@ async def test_resume_that_submits_nothing_keeps_status(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("transport", ["claude_tty", "tmux"])
+@pytest.mark.parametrize(
+    "pending",
+    [
+        PENDING_MESSAGE,
+        (PANES / "composer_labelled.txt").read_text(),
+        (PANES / "composer_shell.txt").read_text(),
+    ],
+    ids=["message", "labelled", "shell"],
+)
 async def test_resume_that_submits_input_marks_running(
-    tmp_path, monkeypatch, transport: str
+    tmp_path, monkeypatch, transport: str, pending: str
 ) -> None:
     runtime = make_runtime(tmp_path)
     runtime.storage.create_session(
         make_session(runtime.settings, transport, SessionStatus.IDLE)
     )
-    enters = stub_pane(runtime, monkeypatch, PENDING_MESSAGE)
+    enters = stub_pane(runtime, monkeypatch, pending)
 
     updated = await runtime.resume("sess")
 
@@ -208,6 +219,30 @@ async def test_resume_keeps_awaiting_answer(tmp_path, monkeypatch) -> None:
     assert updated.status == SessionStatus.WAITING_INPUT
     assert updated.awaiting_answer
     assert AWAITING_ANSWER_KEY not in resume_note(runtime).metadata
+
+
+@pytest.mark.asyncio
+async def test_claude_tty_resume_needs_the_composer_when_it_presses_enter(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    session = make_session(runtime.settings, "claude_tty", SessionStatus.IDLE)
+    runtime.storage.create_session(session)
+    enters = stub_pane(runtime, monkeypatch, EMPTY_COMPOSER)
+    adapter = runtime.transport_for(session)
+    assert isinstance(adapter, TmuxTransport)
+
+    async with adapter._input_lock(session):
+        task = asyncio.create_task(runtime.resume("sess"))
+        await asyncio.sleep(0.05)
+        # A popup nothing recognizes opens while the resume waits its turn.
+        monkeypatch.setattr(
+            runtime.tmux, "capture_snapshot", AsyncMock(return_value=UNKNOWN_POPUP)
+        )
+    with pytest.raises(InputBlockedError):
+        await task
+
+    assert enters == []
 
 
 @pytest.mark.asyncio

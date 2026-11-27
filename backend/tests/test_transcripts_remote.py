@@ -360,6 +360,33 @@ def test_remote_probe_dir_tells_unreachable_from_missing(
     assert fs.probe_dir(str(tmp_path)) is None
 
 
+def test_remote_glob_stat_tells_unreachable_from_no_match(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    assert fs.glob_stat(str(tmp_path), "*.jsonl") == []
+    fake_remote.force_error("glob_stat", "transport failure")
+    assert fs.glob_stat(str(tmp_path), "*.jsonl") is None
+
+
+def test_remote_glob_stat_gives_each_matchs_size_and_mtime(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    (tmp_path / "b.jsonl").write_bytes(b"12345")
+    (tmp_path / "a.jsonl").write_bytes(b"")
+    (tmp_path / "gone.jsonl").symlink_to(tmp_path / "missing")
+    (tmp_path / "other.txt").write_bytes(b"x")
+    fs = RemoteTranscriptFilesystem(_launch_target())
+
+    found = fs.glob_stat(str(tmp_path), "*.jsonl")
+
+    assert found is not None
+    assert [(f.path, f.size, f.mtime_ns) for f in found] == [
+        (str(tmp_path / name), size, (tmp_path / name).stat().st_mtime_ns)
+        for name, size in (("a.jsonl", 0), ("b.jsonl", 5))
+    ]
+
+
 def test_remote_expanduser_resolves_against_remote_home(
     tmp_path: Path, fake_remote: _FakeRemote, monkeypatch: pytest.MonkeyPatch
 ) -> None:

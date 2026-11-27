@@ -1,0 +1,24 @@
+──────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you —
+ choose "switch to auto mode" below
+ Probe run from the general-purpose agent
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ touch probe_a.txt
+ │
+ │ if true; then
+ │     echo "indented body"
+ │ fi
+ │ echo one two three four five six seven eight
+ │ nine ten eleven twelve thirteen fourteen
+ │ fifteen sixteen seventeen eighteen nineteen
+ │ twenty twentyone twentytwo > probe_out.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for touch
+      probe_a.txt and echo one commands in
+      /tmp/probe/repo
+   3. No
+
+ Esc to cancel · Tab to amend

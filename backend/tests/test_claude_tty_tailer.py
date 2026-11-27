@@ -6,12 +6,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from claude_tty_transcripts import NoTranscriptTree
 from waypoint.backends.claude_tty.byte_source import TranscriptRead, transcript_path
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
 
 
-class _FakeSource:
+class _FakeSource(NoTranscriptTree):
     """A byte source that hands over fed bytes once, modeling a growing file."""
 
     def __init__(self) -> None:
@@ -235,7 +236,7 @@ async def test_drain_publishes_again_when_usage_changes() -> None:
     assert second_used > first_used
 
 
-class _ScriptedSource:
+class _ScriptedSource(NoTranscriptTree):
     """Returns a queued list of reads, then unobserved."""
 
     def __init__(self, reads: list[TranscriptRead]) -> None:

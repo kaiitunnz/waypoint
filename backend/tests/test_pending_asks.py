@@ -459,6 +459,50 @@ async def test_plan_approval_event_becomes_a_plan_item_with_whole_text(
     assert item.plan.decisions == ["approve", "decline"]
 
 
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [
+        (
+            {"call_verified": True, "tool_use_id": "toolu_1", "subagent": "web"},
+            (True, "toolu_1", "web"),
+        ),
+        ({"call_verified": False}, (False, None, None)),
+        # A transport that names its calls natively sets no verification.
+        ({"tool_use_id": "toolu_1"}, (None, None, None)),
+    ],
+)
+async def test_approval_item_carries_the_request_verification(
+    env: Env, extra: dict[str, Any], expected: tuple[Any, ...]
+) -> None:
+    env.transport.ids = ("a1",)
+    await approval(env.runtime, "a1", extra=extra)
+
+    got = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk).approval
+
+    assert (got.call_verified, got.tool_use_id, got.subagent) == expected
+
+
+async def test_plan_item_carries_the_request_verification(env: Env) -> None:
+    env.transport.ids = ("plan-1",)
+    await approval(
+        env.runtime,
+        "plan-1",
+        tool_name="ExitPlanMode",
+        tool_input={"plan": "# Plan"},
+        interaction={
+            "kind": "plan_approval",
+            "request_id": "plan-1",
+            "title": "Approve plan",
+            "body": "# Plan",
+        },
+        extra={"call_verified": True},
+    )
+
+    plan = only((await env.runtime.asks.snapshot()).items, PendingPlanAsk).plan
+
+    assert (plan.call_verified, plan.tool_use_id) == (True, None)
+
+
 async def test_plan_approval_without_plan_text_degrades_to_an_approval(
     env: Env,
 ) -> None:

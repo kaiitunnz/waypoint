@@ -74,6 +74,15 @@ class RemoteMissing:
     """The host answered, and there is no file at the path."""
 
 
+@dataclass(frozen=True)
+class RemoteStat:
+    """A file's size and modification time at the time it was listed."""
+
+    path: str
+    size: int
+    mtime_ns: int
+
+
 _SCRIPT_BYTES: bytes | None = None
 
 
@@ -123,6 +132,21 @@ class RemoteTranscriptFilesystem:
     def glob(self, root: str, pattern: str) -> list[str]:
         paths = self._run("glob", root, pattern).get("paths", [])
         return paths if isinstance(paths, list) else []
+
+    def glob_stat(self, root: str, pattern: str) -> list[RemoteStat] | None:
+        """The files ``pattern`` matches with their size and modification time,
+        or ``None`` when the host could not be asked."""
+        files = self._run("glob_stat", root, pattern).get("files")
+        if not isinstance(files, list):
+            return None
+        found = []
+        for entry in files:
+            match entry:
+                case [str(path), int(size), int(mtime_ns)]:
+                    found.append(RemoteStat(path, size, mtime_ns))
+                case _:
+                    return None
+        return found
 
     def glob_artifacts(
         self, session: SessionRecord, plugin: Any, config_dir: str

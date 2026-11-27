@@ -110,6 +110,17 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _call_identity(event: EventRecord) -> dict[str, Any]:
+    """The call verification fields, empty when the event does not set them."""
+    verified = event.metadata.get("call_verified")
+    if not isinstance(verified, bool):
+        return {}
+    return {
+        "call_verified": verified,
+        "tool_use_id": _text(event.metadata.get("tool_use_id")),
+    }
+
+
 def _distinct_body(title: str, text: str | None) -> str | None:
     """``text`` cut for the wire, or ``None`` when it is empty or repeats the
     already cut ``title``."""
@@ -164,6 +175,8 @@ def _approval_ask(
             tool_input_truncated=tool_input is not None and tool_input != raw_input,
             decisions=capabilities.approval_decisions,
             supports_note=capabilities.supports_approval_note,
+            subagent=_text(event.metadata.get("subagent")),
+            **_call_identity(event),
         ),
     )
 
@@ -187,6 +200,7 @@ def _plan_request_ask(
             decisions=capabilities.approval_decisions,
             supports_note=capabilities.supports_approval_note,
             resolve_via="approve",
+            **_call_identity(event),
         ),
     )
 

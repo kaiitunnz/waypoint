@@ -1,0 +1,16 @@
+──────────────────────────────────────────────────────────────────────
+ Overwrite file
+ o.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 -old
+  1 +total = [aaaa, bbbb, cccc, dddd, eeee, ffff, gggg, hhhh, iiii, j
+    +jjj, kkkk, llll, mmmm, nnnn, oooo, pppp, qqqq, rrrr, ssss, tttt,
+    + uuuu, vvvv]
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to overwrite o.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and
+      common file commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

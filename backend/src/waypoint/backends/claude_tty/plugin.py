@@ -87,13 +87,16 @@ from waypoint.backends.claude_code.threads import (
     local_claude_thread_artifacts,
 )
 from waypoint.backends.claude_tty import pane_dialog
-from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
     ClaudeTranscriptSource,
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
     find_local_transcript,
     resolve_remote_config_root,
+)
+from waypoint.backends.claude_tty.dialog_watch import (
+    UNCONFIRMED_REPLY_NOTE,
+    PendingTtyApproval,
 )
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
@@ -603,7 +606,6 @@ class ClaudeTtyPlugin:
             runtime=runtime,
             plugin=self,
             start_at_end=start_at_end,
-            config_dir=config_dir,
             context_window_resolver=self._context_window_resolver_for(
                 runtime, backend_id
             ),
@@ -701,6 +703,29 @@ class ClaudeTtyPlugin:
             extra={"session_id": session_id, "thread_id": successor},
         )
         return True
+
+    async def reply_refusal(
+        self, session_id: str, pending: PendingTtyApproval
+    ) -> str | None:
+        """Why a reply to ``pending`` must not be sent, or None when it may be."""
+        if (run := self._tailers.get(session_id)) is None:
+            return UNCONFIRMED_REPLY_NOTE
+        return await run.tailer.dialogs.reply_refusal(pending)
+
+    def mark_replied(self, session_id: str, pending: PendingTtyApproval) -> None:
+        """Note that ``pending``'s key was pressed."""
+        if run := self._tailers.get(session_id):
+            run.tailer.dialogs.mark_answered(pending)
+
+    async def refuse_reply(
+        self, runtime: "SessionRuntime", session_id: str, note: str
+    ) -> None:
+        """Close the card of a reply that was not sent, with ``note`` on why."""
+        # Forgotten before the entry goes, so the next poll raises what is on
+        # screen as a new request.
+        if run := self._tailers.get(session_id):
+            run.tailer.dialogs.forget()
+        await self.drop_pending_approval(runtime, session_id, note)
 
     async def drop_pending_approval(
         self, runtime: "SessionRuntime", session_id: str, note: str

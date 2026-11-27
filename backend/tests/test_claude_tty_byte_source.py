@@ -4,12 +4,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
+from claude_tty_transcripts import jsonl, prompt, use
 from waypoint.backends.claude_tty import byte_source as bs
+from waypoint.backends.claude_tty import pending_calls as pending_calls_mod
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
 )
-from waypoint.backends.transcript_fs_remote import RemoteMissing, RemoteRead
+from waypoint.backends.claude_tty.pending_calls import TranscriptCalls
+from waypoint.backends.transcript_fs_remote import (
+    RemoteMissing,
+    RemoteRead,
+    RemoteStat,
+)
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
@@ -254,17 +263,46 @@ class _FakeFs:
         self.glob_calls = 0
         self.read_calls: list[tuple[str, int, int]] = []
         self.expand: dict[str, str] = {}
+        # When set, a host's files: reads are cut to the range asked for, and
+        # globs are answered per pattern.
+        self.files: dict[str, bytes] | None = None
+        self.globs: dict[str, list[str]] = {}
+        # Glob patterns the host cannot be asked about.
+        self.unreachable: set[str] = set()
+        # Modification times by path; 0 when not set.
+        self.mtimes: dict[str, int] = {}
+        # The most bytes a read can carry before it fails, as a slow link does.
+        self.max_read: int | None = None
 
     def glob(self, root: str, pattern: str) -> list[str]:
         self.glob_calls += 1
         self.last_config_dir = root
         self.last_pattern = pattern
+        if self.files is not None:
+            return list(self.globs.get(pattern, []))
         return list(self.glob_result)
+
+    def glob_stat(self, root: str, pattern: str) -> list[RemoteStat] | None:
+        if pattern in self.unreachable:
+            return None
+        assert self.files is not None
+        return [
+            RemoteStat(path, len(self.files[path]), self.mtimes.get(path, 0))
+            for path in self.glob(root, pattern)
+            if path in self.files
+        ]
 
     def read_range(
         self, path: str, offset: int, limit: int
     ) -> RemoteRead | RemoteMissing | None:
         self.read_calls.append((path, offset, limit))
+        if self.files is not None:
+            if (data := self.files.get(path)) is None:
+                return RemoteMissing()
+            window = data[offset : offset + limit]
+            if self.max_read is not None and len(window) > self.max_read:
+                return None
+            return RemoteRead(data=window, size=len(data), device=1, inode=1)
         if self.by_path is not None:
             return self.by_path.get(path, RemoteMissing())
         return self.read_result
@@ -552,3 +590,113 @@ def test_start_tailer_builds_remote_source_with_target(monkeypatch) -> None:
     assert isinstance(source, bs.RemoteClaudeTranscriptByteSource)
     assert source._config_dir == "/home/u/.claude-work"
     assert source._launch_target_id == "remote-1"
+
+
+def test_local_read_tail_marks_a_cut_window(tmp_path: Path) -> None:
+    path = tmp_path / "file"
+    path.write_bytes(b"0123456789")
+    source = LocalTranscriptByteSource(CWD, TID, None)
+    assert source.read_tail(str(path), 4) == bs.Tail(b"6789", truncated=True)
+    assert source.read_tail(str(path), 40) == bs.Tail(b"0123456789")
+
+
+def test_remote_reads_the_files_around_the_transcript() -> None:
+    base = f"/home/u/.claude/projects/p/{TID}"
+    subagent = f"{base}/subagents/agent-a1.jsonl"
+    fs = _FakeFs()
+    fs.files = {
+        f"{base}.jsonl": jsonl(use("main-1", "Bash", {"command": "ls"})),
+        subagent: jsonl(use("sub-1", "Bash", {"command": "pwd"})),
+        f"{base}/subagents/agent-a1.meta.json": b'{"agentType": "general-purpose"}',
+        "/home/u/.claude/plans/p.md": b"0123456789",
+    }
+    fs.globs = {
+        f"projects/*/{TID}.jsonl": [f"{base}.jsonl"],
+        "agent-*": [subagent, f"{base}/subagents/agent-a1.meta.json"],
+    }
+    fs.expand = {"~": "/home/u"}
+    source = _remote_source(fs, _session())
+    calls = TranscriptCalls(source)
+
+    assert [(c.tool_use_id, c.home) for c in calls.candidates(None)] == [
+        ("main-1", "/home/u")
+    ]
+    assert [c.tool_use_id for c in calls.candidates("general-purpose")] == ["sub-1"]
+    plan = "/home/u/.claude/plans/p.md"
+    assert source.read_tail(plan, 4) == bs.Tail(b"6789", truncated=True)
+    assert source.read_tail("/home/u/.claude/plans/missing.md", 4) is None
+
+    # One of the two listings fails: what the other found is not the whole set.
+    fs.unreachable = {"workflows/*/agent-*"}
+    assert source.list_subagents() is None
+    assert calls.candidates("general-purpose") == []
+
+
+def test_a_remote_look_reads_only_what_changed() -> None:
+    base = f"/home/u/.claude/projects/p/{TID}"
+    main = f"{base}.jsonl"
+    live, done = (f"{base}/subagents/agent-{n}" for n in ("live", "done"))
+    fs = _FakeFs()
+    fs.files = {
+        main: jsonl(use("main-1", "Bash", {"command": "ls"})),
+        f"{live}.jsonl": jsonl(use("sub-1", "Bash", {"command": "pwd"})),
+        f"{live}.meta.json": b'{"agentType": "general-purpose"}',
+        f"{done}.jsonl": jsonl(use("old", "Bash", {"command": "id"})),
+        f"{done}.meta.json": b'{"agentType": "general-purpose", "finished": true}',
+    }
+    fs.globs = {
+        f"projects/*/{TID}.jsonl": [main],
+        "agent-*": [path for path in fs.files if "/subagents/" in path],
+    }
+    calls = TranscriptCalls(_remote_source(fs, _session()))
+
+    def found(agent: str | None) -> list[str]:
+        return [c.tool_use_id for c in calls.candidates(agent)]
+
+    assert found(None) == ["main-1"]
+    assert found("general-purpose") == ["sub-1"]
+
+    # Nothing changed: no meta or subagent transcript is read again, and the
+    # main transcript is asked only for what follows what was read.
+    fs.read_calls.clear()
+    assert found("general-purpose") == ["sub-1"]
+    assert fs.read_calls == []
+    assert found(None) == ["main-1"]
+    assert [(path, offset) for path, offset, _ in fs.read_calls] == [
+        (main, len(fs.files[main]))
+    ]
+
+    # A resumed agent's meta is rewritten and its transcript grows.
+    fs.files[f"{done}.meta.json"] = b'{"agentType": "general-purpose"}'
+    seen = len(fs.files[f"{done}.jsonl"])
+    fs.files[f"{done}.jsonl"] += jsonl(use("new", "Bash", {"command": "w"}, "msg-2"))
+    fs.read_calls.clear()
+    assert sorted(found("general-purpose")) == ["new", "sub-1"]
+    assert {path for path, _, _ in fs.read_calls} == {
+        f"{done}.meta.json",
+        f"{done}.jsonl",
+    }
+    assert seen < len(fs.files[f"{done}.jsonl"])
+
+
+def test_a_catch_up_the_link_cannot_carry_starts_from_the_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_calls_mod, "_FIRST_WINDOW", 4096)
+    main = f"/home/u/.claude/projects/p/{TID}.jsonl"
+    fs = _FakeFs()
+    fs.files = {main: jsonl(use("a", "Bash", {"command": "ls"}))}
+    fs.globs = {f"projects/*/{TID}.jsonl": [main]}
+    calls = TranscriptCalls(_remote_source(fs, _session()))
+    assert [c.tool_use_id for c in calls.candidates(None)] == ["a"]
+
+    fs.max_read = 8192
+    fs.files[main] += jsonl(
+        prompt("p" * 20000), use("b", "Bash", {"command": "ls"}, msg="msg-2")
+    )
+    assert [c.tool_use_id for c in calls.candidates(None)] == ["b"]
+
+    # Caught up: only what follows is asked for again.
+    fs.read_calls.clear()
+    assert [c.tool_use_id for c in calls.candidates(None)] == ["b"]
+    assert [offset for _, offset, _ in fs.read_calls] == [len(fs.files[main])]

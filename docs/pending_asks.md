@@ -50,17 +50,44 @@ with "(Recommended)", ignoring case and surrounding whitespace. Answer with
 `POST /api/sessions/{id}/answer-question` (`tool_use_id`, `answer`, `answers`) or
 decline with `.../cancel-question`.
 
-**`approval`** — `{approval_id, tool_name, tool_input, tool_input_truncated, decisions, supports_note}`.
+**`approval`** — `{approval_id, tool_name, tool_input, tool_input_truncated, decisions, supports_note, call_verified, tool_use_id, subagent}`.
 `decisions` is the agent's approval vocabulary and `supports_note` says whether
 a note may accompany the decision. Answer with
-`POST /api/sessions/{id}/approve` (`decision`, `text`, `approval_id`).
+`POST /api/sessions/{id}/approve` (`decision`, `text`, `approval_id`). The last
+three fields are [call verification](#call-verification).
 
-**`plan`** (on `plan_approval` items) — `{plan_id, text, decisions, supports_note, resolve_via}`.
+**`plan`** (on `plan_approval` items) — `{plan_id, text, decisions, supports_note, resolve_via, call_verified, tool_use_id}`.
 `resolve_via` names the endpoint: `approve` answers through
 `POST /api/sessions/{id}/approve` with `approval_id` set to `plan_id`;
 `approve_plan` answers through `POST /api/sessions/{id}/approve-plan` with
 `plan_item_id` set to `plan_id`. An approval request whose plan text is empty is
 listed as a plain `approval`.
+
+## Call verification
+
+Approval and plan items from a transport that reads dialogs off a screen say
+whether they name the call a reply answers:
+
+| Field | Meaning |
+| --- | --- |
+| `call_verified` | `true`: `tool_name` and `tool_input` are a pending call consistent with what the screen shows, or the plan `text` is the content of the plan file the screen names. `false`: they are the screen's reading, which may be partial or wrong |
+| `tool_use_id` | The matched call, when one was matched |
+| `subagent` | The type or name of the Claude subagent asking, when the request is one's |
+
+These fields are `null` on items from a transport that names its calls natively,
+so a client gates only screen-read transports on `call_verified`.
+
+For `claude_tty`
+([matching rules](coding_agent_plugins.md#the-claude_tty-composition)):
+
+- A verified tool approval names a pending call that is consistent with
+  everything the dialog draws. Inputs the dialog does not draw, such as a Bash
+  `timeout` or an `Agent` prompt, are not compared
+  ([#646](https://github.com/kaiitunnz/waypoint/issues/646)).
+- Calls of the main thread are often unverified.
+- A reply is refused with `400` when the terminal no longer shows the request or
+  it cannot be confirmed there, and the request on screen is raised as a new
+  item.
 
 ## Bounded payloads
 

@@ -1629,125 +1629,6 @@ def test_non_task_tool_use_in_same_record_still_emits_tool_call() -> None:
     assert tool_call_events[0].metadata["tool_name"] == "Bash"
 
 
-def test_plan_file_write_captures_body_and_still_surfaces_tool_call() -> None:
-    # In plan mode Claude writes the plan to ~/.claude/plans/<slug>.md before the
-    # (withheld) ExitPlanMode dialog. The normalizer stashes the body for the
-    # tailer's plan-approval card, while still surfacing the Write as a tool card
-    # exactly as Chat does.
-    norm = TranscriptNormalizer()
-    plan = "# Plan\n\nAdd hello.py"
-    path = "/home/u/.claude/plans/make-a-plan-to-witty-hippo.md"
-    events = norm.process_record(
-        _assistant_record(
-            "msg1",
-            [_tool_use_block("w1", "Write", {"file_path": path, "content": plan})],
-            stop_reason="tool_use",
-        )
-    )
-    assert norm.last_plan_path == path
-    assert norm.last_plan_content == plan
-    tool_calls = [e for e in events if e.kind == EventKind.TOOL_CALL]
-    assert len(tool_calls) == 1 and tool_calls[0].metadata["tool_name"] == "Write"
-
-
-def test_plan_file_capture_honors_profile_config_dir() -> None:
-    # A profile-scoped session writes its plan under the profile's config dir;
-    # the normalizer must recognize it there, not only under the default ~/.claude.
-    path = "/home/u/.claude-work/plans/make-a-plan.md"
-    plan = "# Plan"
-    record = _assistant_record(
-        "msg1",
-        [_tool_use_block("w1", "Write", {"file_path": path, "content": plan})],
-        stop_reason="tool_use",
-    )
-    # Default normalizer (no config dir) does not recognize the profile path.
-    assert TranscriptNormalizer().process_record(record) is not None
-    default_norm = TranscriptNormalizer()
-    default_norm.process_record(record)
-    assert default_norm.last_plan_path is None
-    # Scoped to the profile config dir, it captures the plan.
-    scoped = TranscriptNormalizer("/home/u/.claude-work")
-    scoped.process_record(record)
-    assert scoped.last_plan_path == path
-    assert scoped.last_plan_content == plan
-
-
-def test_non_plan_file_write_does_not_capture_plan() -> None:
-    norm = TranscriptNormalizer()
-    norm.process_record(
-        _assistant_record(
-            "msg1",
-            [
-                _tool_use_block(
-                    "w1", "Write", {"file_path": "/repo/hello.py", "content": "x"}
-                )
-            ],
-            stop_reason="tool_use",
-        )
-    )
-    assert norm.last_plan_path is None
-    assert norm.last_plan_content is None
-
-
-# ── pending tool_use tracking (approval recovery for overflowing dialogs) ──────
-
-
-def test_pending_tool_use_tracks_bash_until_result() -> None:
-    # A tall Bash approval drops its label off the pane, so the tailer recovers
-    # the tool + full command from the pending (unresolved) transcript tool_use.
-    norm = TranscriptNormalizer()
-    norm.process_record(
-        _assistant_record(
-            "m1",
-            [_tool_use_block("tu-1", "Bash", {"command": "echo hi"})],
-            stop_reason="tool_use",
-        )
-    )
-    assert norm.pending_tool_use == ("Bash", {"command": "echo hi"})
-
-    norm.process_record(_user_record([_tool_result_block("tu-1", "hi")]))
-    assert norm.pending_tool_use is None
-
-
-def test_pending_tool_use_is_fifo_oldest_first() -> None:
-    # Batched tool calls are prompted in submission order, so the oldest
-    # unresolved tool_use is the one the current dialog is asking about.
-    norm = TranscriptNormalizer()
-    norm.process_record(
-        _assistant_record(
-            "m1",
-            [
-                _tool_use_block("tu-1", "Bash", {"command": "first"}),
-                _tool_use_block("tu-2", "Bash", {"command": "second"}),
-            ],
-            stop_reason="tool_use",
-        )
-    )
-    assert norm.pending_tool_use == ("Bash", {"command": "first"})
-
-    norm.process_record(_user_record([_tool_result_block("tu-1", "ok")]))
-    assert norm.pending_tool_use == ("Bash", {"command": "second"})
-
-
-def test_pending_tool_use_cleared_on_turn_complete() -> None:
-    # A pending tool_use that never got a matching result must not leak into the
-    # next turn's approval recovery once the turn resolves.
-    norm = TranscriptNormalizer()
-    norm.process_record(
-        _assistant_record(
-            "m1",
-            [_tool_use_block("tu-1", "Bash", {"command": "echo hi"})],
-            stop_reason="tool_use",
-        )
-    )
-    assert norm.pending_tool_use is not None
-
-    norm.process_record(
-        _assistant_record("m2", [_text_block("done")], stop_reason="end_turn")
-    )
-    assert norm.pending_tool_use is None
-
-
 def test_send_user_file_tags_capture_and_suppresses_result() -> None:
     norm = TranscriptNormalizer()
     block = _tool_use_block(
@@ -1763,8 +1644,6 @@ def test_send_user_file_tags_capture_and_suppresses_result() -> None:
     ev = calls[0]
     assert ev.metadata["tool_name"] == "SendUserFile"
     assert ev.metadata["capture_host_files"] == ["out/report.md", "chart.png"]
-    # Result is suppressed; the tool_use is not registered as pending.
-    assert norm.pending_tool_use is None
 
     result_events = norm.process_record(
         _user_record([_tool_result_block("tu-suf", "sent")])

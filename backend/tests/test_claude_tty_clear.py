@@ -213,7 +213,7 @@ def test_remote_successor_searches_config_root() -> None:
     [("clear", "Context cleared"), ("status", "Command complete")],
 )
 def test_local_command_note(command: str, expected: str) -> None:
-    events = TranscriptNormalizer(None).process_record(
+    events = TranscriptNormalizer().process_record(
         {
             "type": "system",
             "subtype": "local_command",
@@ -383,7 +383,7 @@ async def test_stopped_tailer_drains_once_and_keeps_dialog_state(
     source.read_from.return_value = TranscriptRead(observed=False)
     tailer = TranscriptTailer("s1", source, runtime, MagicMock())
     close = AsyncMock()
-    monkeypatch.setattr(tailer, "_close_dialog_state", close)
+    monkeypatch.setattr(tailer.dialogs, "close", close)
     tailer.stop()
 
     await tailer.run()

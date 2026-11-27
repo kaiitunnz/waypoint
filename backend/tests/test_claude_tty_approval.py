@@ -4,8 +4,8 @@ Uses captured pane fixtures and a fake runtime/tmux so no live TUI is needed.
 Verifies:
   - stable dialog (>=2 ticks) emits exactly ONE APPROVAL_REQUEST
   - single-tick dialog emits nothing (debounce)
-  - respond_to_approval('decline') sends the No-option digit + Enter
-  - respond_to_approval('approve') sends '1' + Enter
+  - respond_to_approval('decline') sends only the No-option digit
+  - respond_to_approval('approve') sends only '1'
   - respond_to_approval with no pending returns False
   - wrong approval_id returns False without clearing pending
   - auto-mode session never calls capture_snapshot
@@ -20,15 +20,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from claude_tty_transcripts import NoTranscriptTree
 from waypoint.backends.approvals import approval_request_id
 from waypoint.backends.claude_tty import transport as transport_mod
-from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     TranscriptRead,
 )
+from waypoint.backends.claude_tty.dialog_watch import PendingTtyApproval
 from waypoint.backends.claude_tty.pane_dialog import PaneScreen
-from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
+from waypoint.backends.claude_tty.pending_calls import CallSource, PendingCall
+from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin, _TailerRun
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
 from waypoint.backends.tmux.adapter import TmuxError
@@ -84,7 +86,7 @@ def _make_session(
     )
 
 
-class _ScriptedSource:
+class _ScriptedSource(NoTranscriptTree):
     """Hands over queued reads, then reports nothing observed."""
 
     def __init__(self, chunks: list[bytes]) -> None:
@@ -101,17 +103,42 @@ class _ScriptedSource:
         return TranscriptRead(observed=False)
 
 
+class _Calls:
+    """A call source holding the main thread's pending calls."""
+
+    def __init__(self, *calls: PendingCall) -> None:
+        self.calls = list(calls)
+
+    def candidates(self, agent: str | None) -> list[PendingCall]:
+        return list(self.calls) if agent is None else []
+
+    def is_resolved(self, call: PendingCall) -> bool:
+        return call not in self.calls
+
+
 def _make_tailer(
     plugin: ClaudeTtyPlugin,
     runtime: MagicMock,
     session_id: str = "sess-1",
+    calls: CallSource | None = None,
 ) -> TranscriptTailer:
     return TranscriptTailer(
         session_id=session_id,
         source=LocalTranscriptByteSource("/nonexistent", "thread-1", None),
         runtime=runtime,
         plugin=plugin,
+        calls=calls,
     )
+
+
+@pytest.fixture
+def plan_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The plan file ``plan_approval.txt`` names, under a scratch home."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = tmp_path / ".claude" / "plans" / "make-a-plan-to-linear-hennessy.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("# Plan\n\nAdd hello.py")
+    return path
 
 
 def _make_runtime(session: SessionRecord, snapshot: str) -> MagicMock:
@@ -138,7 +165,7 @@ async def test_single_tick_emits_nothing() -> None:
     runtime = _make_runtime(session, _load("approval_write.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
 
     runtime._emit_adapter_event.assert_not_called()
     assert "sess-1" not in plugin._pending_approvals
@@ -150,10 +177,10 @@ async def test_stable_write_dialog_emits_approval_request() -> None:
     runtime = _make_runtime(session, _load("approval_write.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()  # tick 1: debounce
+    await tailer.dialogs.poll()  # tick 1: debounce
     runtime._emit_adapter_event.assert_not_called()
 
-    await tailer._poll_dialog()  # tick 2: stable → emit
+    await tailer.dialogs.poll()  # tick 2: stable → emit
     runtime._emit_adapter_event.assert_called_once()
 
     call = runtime._emit_adapter_event.call_args
@@ -178,8 +205,8 @@ async def test_live_approval_ids_match_the_emitted_request() -> None:
     runtime = _make_runtime(session, _load("approval_write.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
 
     call = runtime._emit_adapter_event.call_args
     request = EventRecord(
@@ -197,19 +224,22 @@ async def test_live_approval_ids_match_the_emitted_request() -> None:
     assert transport.pending_approval_ids(session) == ()
 
 
-async def test_stable_plan_dialog_emits_exit_plan_approval() -> None:
+async def test_stable_plan_dialog_emits_exit_plan_approval(plan_file: Path) -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session(permission_mode="plan")
     runtime = _make_runtime(session, _load("plan_approval.txt"))
-    tailer = _make_tailer(plugin, runtime)
-    # The plan-file Write the normalizer would have captured before the dialog.
-    tailer._normalizer.last_plan_content = "# Plan\n\nAdd hello.py"
-    tailer._normalizer.last_plan_path = "/home/u/.claude/plans/slug.md"
+    call = PendingCall(
+        "toolu_plan",
+        "ExitPlanMode",
+        {"planFilePath": str(plan_file)},
+        home=str(plan_file.parents[2]),
+    )
+    tailer = _make_tailer(plugin, runtime, calls=_Calls(call))
 
-    await tailer._poll_dialog()  # tick 1: debounce
+    await tailer.dialogs.poll()  # tick 1: debounce
     runtime._emit_adapter_event.assert_not_called()
 
-    await tailer._poll_dialog()  # tick 2: stable → emit
+    await tailer.dialogs.poll()  # tick 2: stable → emit
     runtime._emit_adapter_event.assert_called_once()
 
     call = runtime._emit_adapter_event.call_args
@@ -218,7 +248,10 @@ async def test_stable_plan_dialog_emits_exit_plan_approval() -> None:
     meta = call.args[3]
     assert meta["tool_name"] == "ExitPlanMode"
     assert meta["tool_input"]["plan"] == "# Plan\n\nAdd hello.py"
-    assert meta["tool_input"]["planFilePath"] == "/home/u/.claude/plans/slug.md"
+    assert meta["tool_input"]["planFilePath"] == str(plan_file)
+    assert meta["call_verified"] is True
+    assert meta["tool_use_id"] == "toolu_plan"
+    assert meta["interaction"]["body"] == "# Plan\n\nAdd hello.py"
     assert meta["method"] == "tty_permission"
     assert meta["status"] is SessionStatus.WAITING_INPUT
 
@@ -231,84 +264,68 @@ async def test_stable_plan_dialog_emits_exit_plan_approval() -> None:
     assert pending.is_plan is True
 
 
-async def test_overflow_bash_dialog_recovers_tool_from_transcript() -> None:
-    # A long Bash command's approval box overflows the pane, so the "Bash
-    # command" label + header scroll off and parse_approval yields tool_name=None
-    # (the "Approve Unknown" card of ticket 1191). The pending tool_use in the
-    # transcript carries the real tool + full command, so the surfaced card is a
-    # proper Bash approval with the complete command.
+async def test_cut_off_dialog_is_unverified() -> None:
+    # The dialog's top is gone even from the deeper capture, so which call it
+    # asks about, and whether a subagent's, can't be told.
     plugin = ClaudeTtyPlugin()
-    session = _make_session()
-    runtime = _make_runtime(session, _load("overflow_bash.txt"))
-    tailer = _make_tailer(plugin, runtime)
-    command = "\n".join(f'touch "$BASE/item_{i:02d}.txt"' for i in range(1, 71))
-    tailer._normalizer._pending_tool_uses["tu-1"] = ("Bash", {"command": command})
+    runtime = _make_runtime(_make_session(), _load("overflow_bash.txt"))
+    call = PendingCall("tu-1", "Bash", {"command": 'touch "$BASE/item_70.txt"'})
+    tailer = _make_tailer(plugin, runtime, calls=_Calls(call))
 
-    await tailer._poll_dialog()  # tick 1: debounce
-    await tailer._poll_dialog()  # tick 2: stable → emit
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
     runtime._emit_adapter_event.assert_called_once()
 
-    call = runtime._emit_adapter_event.call_args
-    assert call.args[1] is EventKind.APPROVAL_REQUEST
-    assert call.args[2] == f"Approve Bash command:\n{command}"
-    meta = call.args[3]
-    assert meta["tool_name"] == "Bash"
-    assert meta["tool_input"] == {"command": command}
-    assert meta["method"] == "tty_permission"
-
-    pending = plugin._pending_approvals["sess-1"]
-    assert pending.tool_name == "Bash"
-    assert pending.approve_number == 1
-    assert pending.decline_number == 3
-
-
-async def test_overflow_dialog_without_transcript_falls_back_to_unknown() -> None:
-    # With nothing pending in the transcript the surfaced card degrades to the
-    # prior "Unknown" behaviour rather than crashing — the recovery is additive
-    # and never leaves `target` unbound.
-    plugin = ClaudeTtyPlugin()
-    session = _make_session()
-    runtime = _make_runtime(session, _load("overflow_bash.txt"))
-    tailer = _make_tailer(plugin, runtime)
-
-    await tailer._poll_dialog()
-    await tailer._poll_dialog()
-    runtime._emit_adapter_event.assert_called_once()
-
+    runtime.tmux.capture_snapshot.assert_any_call("%0", -2000)
     meta = runtime._emit_adapter_event.call_args.args[3]
     assert meta["tool_name"] == "Unknown"
     assert meta["tool_input"] == {"description": ""}
+    assert meta["call_verified"] is False
+    assert "tool_use_id" not in meta
+    assert plugin._pending_approvals["sess-1"].approve_number == 1
+    assert plugin._pending_approvals["sess-1"].decline_number == 3
 
 
-@pytest.mark.parametrize("pending_name", [None, "Bash", "Read"])
-async def test_auto_hint_dialog_surfaces_command_not_tip(
-    pending_name: str | None,
-) -> None:
+_HINTED_COMMAND = (
+    "grep -nE '^ {2,6}\"[a-z_]+\": ' telemetry_payload.json | awk -F: '$1>2000' "
+    "| head -80"
+)
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+async def test_auto_hint_dialog_surfaces_command_not_tip(recorded: bool) -> None:
     plugin = ClaudeTtyPlugin()
-    session = _make_session()
-    runtime = _make_runtime(session, _load("approval_bash_auto_hint.txt"))
-    tailer = _make_tailer(plugin, runtime)
-    if pending_name is not None:
-        # An earlier tool can still be running when this dialog appears.
-        # Matching the name alone does not identify the permission-blocked call.
-        tailer._normalizer._pending_tool_uses["tu-1"] = (
-            pending_name,
-            {"command": "earlier running command"},
-        )
-        tailer._normalizer._pending_tool_uses["tu-2"] = (
-            "Bash",
-            {"command": "currently blocked command"},
-        )
-    await tailer._poll_dialog()
-    await tailer._poll_dialog()
-    meta = runtime._emit_adapter_event.call_args.args[3]
-    command = meta["tool_input"]["command"]
-    assert meta["tool_name"] == "Bash"
-    assert (
-        command
-        == "grep -nE '^ {2,6}\"[a-z_]+\": ' telemetry_payload.json | awk -F: '$1>2000' | head -80"
+    runtime = _make_runtime(_make_session(), _load("approval_bash_auto_hint.txt"))
+    # An earlier tool can still be running when this dialog appears.
+    calls = _Calls(
+        PendingCall("tu-1", "Bash", {"command": "earlier running command"}),
+        *(
+            [
+                PendingCall(
+                    "tu-2",
+                    "Bash",
+                    {
+                        "command": _HINTED_COMMAND,
+                        "description": "List section keys in the payload beyond the"
+                        " first page",
+                        "timeout": 5000,
+                    },
+                )
+            ]
+            if recorded
+            else []
+        ),
     )
-    assert meta["interaction"]["body"] == f"Approve Bash command:\n{command}"
+    tailer = _make_tailer(plugin, runtime, calls=calls)
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
+    meta = runtime._emit_adapter_event.call_args.args[3]
+    assert meta["tool_name"] == "Bash"
+    assert meta["tool_input"]["command"] == _HINTED_COMMAND
+    assert meta["call_verified"] is recorded
+    assert meta.get("tool_use_id") == ("tu-2" if recorded else None)
+    assert ("timeout" in meta["tool_input"]) is recorded
+    assert meta["interaction"]["body"] == f"Approve Bash command:\n{_HINTED_COMMAND}"
 
 
 async def test_plan_dialog_restores_auto_mode_via_auto_option() -> None:
@@ -318,8 +335,8 @@ async def test_plan_dialog_restores_auto_mode_via_auto_option() -> None:
     runtime = _make_runtime(session, _load("plan_approval.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
 
     pending = plugin._pending_approvals["sess-1"]
     assert pending.approve_number == 1  # "Yes, and use auto mode"
@@ -343,8 +360,8 @@ async def test_plan_dialog_auto_pre_mode_without_auto_option_falls_back() -> Non
     runtime = _make_runtime(session, screen)
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
 
     pending = plugin._pending_approvals["sess-1"]
     assert pending.approve_number == 1  # the manual option (no auto option present)
@@ -360,29 +377,33 @@ async def test_plan_dialog_non_auto_pre_mode_falls_back_to_default() -> None:
     runtime = _make_runtime(session, _load("plan_approval.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
 
     pending = plugin._pending_approvals["sess-1"]
     assert pending.approve_number == 2
     assert pending.restore_mode == "default"
 
 
-async def test_plan_dialog_surfaces_card_even_without_captured_body() -> None:
-    # If the dialog is seen before the plan-file Write is normalized, the card
-    # still surfaces (empty body) rather than hanging the session.
+async def test_plan_dialog_surfaces_card_even_without_a_readable_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A plan file that can't be read leaves the card unverified with no text.
+    monkeypatch.setenv("HOME", str(tmp_path))
     plugin = ClaudeTtyPlugin()
     session = _make_session(permission_mode="plan")
     runtime = _make_runtime(session, _load("plan_approval.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
 
     runtime._emit_adapter_event.assert_called_once()
     meta = runtime._emit_adapter_event.call_args.args[3]
     assert meta["tool_name"] == "ExitPlanMode"
     assert meta["tool_input"]["plan"] == ""
+    assert meta["call_verified"] is False
+    assert meta["interaction"]["body"] is None
     # Falls back to the path named in the dialog footer.
     assert meta["tool_input"]["planFilePath"].endswith(
         "make-a-plan-to-linear-hennessy.md"
@@ -395,8 +416,8 @@ async def test_stable_bash_dialog_emits_approval_request() -> None:
     runtime = _make_runtime(session, _load("approval_bash.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
 
     runtime._emit_adapter_event.assert_called_once()
     meta = runtime._emit_adapter_event.call_args.args[3]
@@ -411,7 +432,7 @@ async def test_stable_dialog_emits_only_once() -> None:
     tailer = _make_tailer(plugin, runtime)
 
     for _ in range(5):
-        await tailer._poll_dialog()
+        await tailer.dialogs.poll()
 
     assert runtime._emit_adapter_event.call_count == 1
 
@@ -432,15 +453,15 @@ async def test_vanished_dialog_clears_pending() -> None:
     runtime.tmux.capture_snapshot = AsyncMock(side_effect=_side_effect)
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()  # tick 1
-    await tailer._poll_dialog()  # tick 2 → emit + pending
+    await tailer.dialogs.poll()  # tick 1
+    await tailer.dialogs.poll()  # tick 2 → emit + pending
     assert "sess-1" in plugin._pending_approvals
 
-    await tailer._poll_dialog()  # tick 3: still same screen, already pending
+    await tailer.dialogs.poll()  # tick 3: still same screen, already pending
     assert "sess-1" in plugin._pending_approvals
 
     approval_id = plugin._pending_approvals["sess-1"].approval_id
-    await tailer._poll_dialog()  # tick 4: dialog gone → clear
+    await tailer.dialogs.poll()  # tick 4: dialog gone → clear
     assert "sess-1" not in plugin._pending_approvals
     runtime._record_system_event.assert_awaited_once_with(
         "sess-1",
@@ -458,14 +479,14 @@ async def test_no_reemit_after_response_while_dialog_lingers() -> None:
     runtime = _make_runtime(session, _load("approval_write.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()  # tick 1: debounce
-    await tailer._poll_dialog()  # tick 2: emit + pending
+    await tailer.dialogs.poll()  # tick 1: debounce
+    await tailer.dialogs.poll()  # tick 2: emit + pending
     assert runtime._emit_adapter_event.call_count == 1
 
     # Simulate the transport answering the approval.
     del plugin._pending_approvals["sess-1"]
 
-    await tailer._poll_dialog()  # tick 3: same dialog still rendered
+    await tailer.dialogs.poll()  # tick 3: same dialog still rendered
     assert runtime._emit_adapter_event.call_count == 1  # no duplicate
     assert "sess-1" not in plugin._pending_approvals
 
@@ -489,12 +510,12 @@ async def test_reemits_distinct_dialog_after_screen_clears() -> None:
     runtime.tmux.capture_snapshot = AsyncMock(side_effect=_side_effect)
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()  # emit (debounce tick 1)
-    await tailer._poll_dialog()  # emit (tick 2) → 1
+    await tailer.dialogs.poll()  # emit (debounce tick 1)
+    await tailer.dialogs.poll()  # emit (tick 2) → 1
     del plugin._pending_approvals["sess-1"]  # responded
-    await tailer._poll_dialog()  # ready: screen cleared, guard resets
-    await tailer._poll_dialog()  # write again, debounce
-    await tailer._poll_dialog()  # write stable → re-emit → 2
+    await tailer.dialogs.poll()  # ready: screen cleared, guard resets
+    await tailer.dialogs.poll()  # write again, debounce
+    await tailer.dialogs.poll()  # write stable → re-emit → 2
 
     assert runtime._emit_adapter_event.call_count == 2
 
@@ -510,8 +531,8 @@ async def test_auto_mode_dialog_still_surfaced() -> None:
         runtime = _make_runtime(session, _load("approval_write.txt"))
         tailer = _make_tailer(plugin, runtime)
 
-        await tailer._poll_dialog()  # tick 1: debounce
-        await tailer._poll_dialog()  # tick 2: stable → emit
+        await tailer.dialogs.poll()  # tick 1: debounce
+        await tailer.dialogs.poll()  # tick 2: stable → emit
 
         runtime.tmux.capture_snapshot.assert_called()
         runtime._emit_adapter_event.assert_called_once()
@@ -527,9 +548,9 @@ async def test_trust_prompt_is_accepted() -> None:
     runtime = _make_runtime(session, _load("trust_dialog.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
     runtime.tmux.send_input.assert_not_called()
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
 
     runtime.tmux.send_input.assert_called_once_with("%0", "", submit=True)
     runtime._emit_adapter_event.assert_not_called()
@@ -544,7 +565,7 @@ async def test_trust_prompt_selects_trust_option_before_accepting() -> None:
     runtime = _make_runtime(session, _load("trust_dialog_2_1_331.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
 
     runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b[B")
     runtime.tmux.send_input.assert_not_called()
@@ -559,10 +580,10 @@ async def test_trust_prompt_arrow_waits_for_redraw() -> None:
     tailer = _make_tailer(plugin, runtime)
 
     for _ in range(6):
-        await tailer._poll_dialog()
+        await tailer.dialogs.poll()
     assert runtime.tmux.send_bytes.await_count == 1
 
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
     assert runtime.tmux.send_bytes.await_count == 2
     runtime.tmux.send_input.assert_not_called()
 
@@ -573,9 +594,9 @@ async def test_trust_prompt_accepts_once_trust_option_is_selected() -> None:
     runtime = _make_runtime(session, _load("trust_dialog_2_1_331_trust_selected.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
     runtime.tmux.send_input.assert_not_called()
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
 
     runtime.tmux.send_bytes.assert_not_called()
     runtime.tmux.send_input.assert_called_once_with("%0", "", submit=True)
@@ -588,11 +609,11 @@ async def test_trust_selection_debounce_restarts_after_prompt_leaves() -> None:
     runtime = _make_runtime(session, selected)
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
     runtime.tmux.capture_snapshot.return_value = _load("ready.txt")
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
     runtime.tmux.capture_snapshot.return_value = selected
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
 
     runtime.tmux.send_input.assert_not_called()
 
@@ -604,8 +625,8 @@ async def test_non_approval_screen_does_not_emit() -> None:
         runtime = _make_runtime(session, _load(fixture))
         tailer = _make_tailer(plugin, runtime)
 
-        await tailer._poll_dialog()
-        await tailer._poll_dialog()
+        await tailer.dialogs.poll()
+        await tailer.dialogs.poll()
 
         runtime._emit_adapter_event.assert_not_called()
 
@@ -622,12 +643,12 @@ async def test_question_dialog_dismissed_when_stable() -> None:
     runtime = _make_runtime(session, _load("question_dialog.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()  # tick 1: debounce
+    await tailer.dialogs.poll()  # tick 1: debounce
     runtime.tmux.send_bytes.assert_not_called()
 
-    await tailer._poll_dialog()  # tick 2: stable → Esc
+    await tailer.dialogs.poll()  # tick 2: stable → Esc
     runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
-    assert tailer._dismissed_screen is PaneScreen.QUESTION
+    assert tailer.dialogs._dismissed_screen is PaneScreen.QUESTION
     runtime._emit_adapter_event.assert_not_called()
 
 
@@ -638,7 +659,7 @@ async def test_question_dialog_dismissed_only_once() -> None:
     tailer = _make_tailer(plugin, runtime)
 
     for _ in range(5):
-        await tailer._poll_dialog()
+        await tailer.dialogs.poll()
 
     runtime.tmux.send_bytes.assert_called_once()
 
@@ -655,12 +676,12 @@ async def test_auto_mode_teaching_dismissed_when_stable() -> None:
     runtime = _make_runtime(session, _load("auto_mode_teaching.txt"))
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()  # tick 1: debounce
+    await tailer.dialogs.poll()  # tick 1: debounce
     runtime.tmux.send_bytes.assert_not_called()
 
-    await tailer._poll_dialog()  # tick 2: stable → Esc
+    await tailer.dialogs.poll()  # tick 2: stable → Esc
     runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
-    assert tailer._dismissed_screen is PaneScreen.AUTO_MODE_TEACHING
+    assert tailer.dialogs._dismissed_screen is PaneScreen.AUTO_MODE_TEACHING
     runtime._emit_adapter_event.assert_not_called()
     assert "sess-1" not in plugin._pending_approvals
 
@@ -674,7 +695,7 @@ async def test_auto_mode_teaching_dismissed_only_once_per_appearance() -> None:
     tailer = _make_tailer(plugin, runtime)
 
     for _ in range(5):
-        await tailer._poll_dialog()
+        await tailer.dialogs.poll()
 
     runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
     runtime._emit_adapter_event.assert_not_called()
@@ -699,12 +720,12 @@ async def test_auto_mode_teaching_reesc_after_screen_clears() -> None:
     runtime.tmux.capture_snapshot = AsyncMock(side_effect=_side_effect)
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()  # modal debounce
-    await tailer._poll_dialog()  # modal stable → Esc (1)
-    await tailer._poll_dialog()  # ready: latch resets
-    assert tailer._dismissed_screen is None
-    await tailer._poll_dialog()  # modal debounce again
-    await tailer._poll_dialog()  # modal stable → Esc (2)
+    await tailer.dialogs.poll()  # modal debounce
+    await tailer.dialogs.poll()  # modal stable → Esc (1)
+    await tailer.dialogs.poll()  # ready: latch resets
+    assert tailer.dialogs._dismissed_screen is None
+    await tailer.dialogs.poll()  # modal debounce again
+    await tailer.dialogs.poll()  # modal stable → Esc (2)
 
     assert runtime.tmux.send_bytes.call_count == 2
     runtime._emit_adapter_event.assert_not_called()
@@ -731,12 +752,12 @@ async def test_esc_fires_per_kind_on_direct_popup_swap() -> None:
     runtime.tmux.capture_snapshot = AsyncMock(side_effect=_side_effect)
     tailer = _make_tailer(plugin, runtime)
 
-    await tailer._poll_dialog()  # question debounce
-    await tailer._poll_dialog()  # question stable → Esc (1)
-    assert tailer._dismissed_screen is PaneScreen.QUESTION
-    await tailer._poll_dialog()  # auto-mode debounce (sig changed, count resets)
-    await tailer._poll_dialog()  # auto-mode stable → Esc (2)
-    assert tailer._dismissed_screen is PaneScreen.AUTO_MODE_TEACHING
+    await tailer.dialogs.poll()  # question debounce
+    await tailer.dialogs.poll()  # question stable → Esc (1)
+    assert tailer.dialogs._dismissed_screen is PaneScreen.QUESTION
+    await tailer.dialogs.poll()  # auto-mode debounce (sig changed, count resets)
+    await tailer.dialogs.poll()  # auto-mode stable → Esc (2)
+    assert tailer.dialogs._dismissed_screen is PaneScreen.AUTO_MODE_TEACHING
 
     assert runtime.tmux.send_bytes.call_count == 2
     for call in runtime.tmux.send_bytes.call_args_list:
@@ -973,18 +994,25 @@ async def test_exited_reconnect_clears_resolved_model() -> None:
 def _pending(
     approval_id: str = "aid-1",
     tool_name: str = "Write",
-    target: str | None = "probe_out.txt",
     approve_number: int = 1,
     decline_number: int | None = 3,
 ) -> PendingTtyApproval:
     return PendingTtyApproval(
         approval_id=approval_id,
         tool_name=tool_name,
-        target=target,
         approve_number=approve_number,
         decline_number=decline_number,
-        signature=f"{tool_name}:{target}:Do you want to create {target}?",
+        signature="pane:dialog",
+        identity="dialog",
     )
+
+
+def _register_tailer(plugin: ClaudeTtyPlugin, session_id: str = "sess-1") -> MagicMock:
+    """A tailer that finds the pane still showing the dialog."""
+    tailer = MagicMock()
+    tailer.dialogs.reply_refusal = AsyncMock(return_value=None)
+    plugin._tailers[session_id] = _TailerRun(tailer, MagicMock())
+    return tailer
 
 
 def _make_transport(plugin: ClaudeTtyPlugin) -> tuple[ClaudeTtyTransport, MagicMock]:
@@ -998,6 +1026,7 @@ def _make_transport(plugin: ClaudeTtyPlugin) -> tuple[ClaudeTtyTransport, MagicM
     runtime.tmux = tmux
     runtime._record_system_event = AsyncMock()
     transport = ClaudeTtyTransport(runtime, plugin)
+    _register_tailer(plugin)
     return transport, tmux
 
 
@@ -1006,8 +1035,9 @@ async def test_ready_for_input_reads_the_composer(
 ) -> None:
     transport, tmux = _make_transport(ClaudeTtyPlugin())
     session = _make_session()
+    composer = "\n".join(["─" * 40, "❯ ", "─" * 40])
     tmux.capture_snapshot = AsyncMock(
-        side_effect=["booting", "❯ ", TmuxError("no pane"), TmuxError("no pane")]
+        side_effect=["booting", composer, TmuxError("no pane"), TmuxError("no pane")]
     )
 
     results = [await transport.ready_for_input(session) for _ in range(4)]
@@ -1016,7 +1046,7 @@ async def test_ready_for_input_reads_the_composer(
     assert caplog.text.count("no pane") == 1
 
 
-async def test_respond_approve_sends_digit_1_enter() -> None:
+async def test_respond_approve_sends_only_digit_1() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session()
     plugin._pending_approvals["sess-1"] = _pending(approve_number=1)
@@ -1025,7 +1055,7 @@ async def test_respond_approve_sends_digit_1_enter() -> None:
     result = await transport.respond_to_approval(session, "approve", None)
 
     assert result is True
-    tmux.send_input.assert_called_once_with("%0", "1", submit=True)
+    tmux.send_input.assert_called_once_with("%0", "1", submit=False)
     assert "sess-1" not in plugin._pending_approvals
 
 
@@ -1040,11 +1070,11 @@ async def test_respond_accept_sends_approve_digit_not_decline() -> None:
     result = await transport.respond_to_approval(session, "accept", None)
 
     assert result is True
-    tmux.send_input.assert_called_once_with("%0", "1", submit=True)
+    tmux.send_input.assert_called_once_with("%0", "1", submit=False)
     assert "sess-1" not in plugin._pending_approvals
 
 
-async def test_respond_decline_sends_no_digit_enter() -> None:
+async def test_respond_decline_sends_only_the_no_digit() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session()
     plugin._pending_approvals["sess-1"] = _pending(decline_number=3)
@@ -1053,7 +1083,7 @@ async def test_respond_decline_sends_no_digit_enter() -> None:
     result = await transport.respond_to_approval(session, "decline", None)
 
     assert result is True
-    tmux.send_input.assert_called_once_with("%0", "3", submit=True)
+    tmux.send_input.assert_called_once_with("%0", "3", submit=False)
     assert "sess-1" not in plugin._pending_approvals
 
 
@@ -1079,15 +1109,14 @@ def _make_plan_transport(
     runtime.tmux.send_input = AsyncMock()
     runtime.tmux.send_bytes = AsyncMock()
     runtime.update_session_fields = AsyncMock()
+    _register_tailer(plugin)
     return ClaudeTtyTransport(runtime, plugin), runtime
 
 
 async def test_respond_approve_plan_presses_manual_digit_and_exits_plan_mode() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session(permission_mode="plan")
-    pending = _pending(
-        tool_name="ExitPlanMode", target=None, approve_number=2, decline_number=None
-    )
+    pending = _pending(tool_name="ExitPlanMode", approve_number=2, decline_number=None)
     pending.is_plan = True
     pending.restore_mode = "default"
     plugin._pending_approvals["sess-1"] = pending
@@ -1096,7 +1125,7 @@ async def test_respond_approve_plan_presses_manual_digit_and_exits_plan_mode() -
     result = await transport.respond_to_approval(session, "approve", None)
 
     assert result is True
-    runtime.tmux.send_input.assert_called_once_with("%0", "2", submit=True)
+    runtime.tmux.send_input.assert_called_once_with("%0", "2", submit=False)
     runtime.update_session_fields.assert_awaited_once_with(
         "sess-1", permission_mode="default"
     )
@@ -1105,9 +1134,7 @@ async def test_respond_approve_plan_presses_manual_digit_and_exits_plan_mode() -
 async def test_respond_approve_plan_restores_auto_mode() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session(permission_mode="plan")
-    pending = _pending(
-        tool_name="ExitPlanMode", target=None, approve_number=1, decline_number=None
-    )
+    pending = _pending(tool_name="ExitPlanMode", approve_number=1, decline_number=None)
     pending.is_plan = True
     pending.restore_mode = "auto"
     plugin._pending_approvals["sess-1"] = pending
@@ -1116,7 +1143,7 @@ async def test_respond_approve_plan_restores_auto_mode() -> None:
     result = await transport.respond_to_approval(session, "approve", None)
 
     assert result is True
-    runtime.tmux.send_input.assert_called_once_with("%0", "1", submit=True)
+    runtime.tmux.send_input.assert_called_once_with("%0", "1", submit=False)
     runtime.update_session_fields.assert_awaited_once_with(
         "sess-1", permission_mode="auto"
     )
@@ -1125,9 +1152,7 @@ async def test_respond_approve_plan_restores_auto_mode() -> None:
 async def test_respond_decline_plan_sends_esc_and_keeps_plan_mode() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session(permission_mode="plan")
-    pending = _pending(
-        tool_name="ExitPlanMode", target=None, approve_number=2, decline_number=None
-    )
+    pending = _pending(tool_name="ExitPlanMode", approve_number=2, decline_number=None)
     pending.is_plan = True
     plugin._pending_approvals["sess-1"] = pending
 
@@ -1220,11 +1245,11 @@ def _open_card(approval_id: str, signature: str | None) -> MagicMock:
 
 
 async def _surface(tailer: TranscriptTailer) -> None:
-    await tailer._poll_dialog()
-    await tailer._poll_dialog()
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
 
 
-async def test_restarted_tailer_adopts_the_open_plan_card() -> None:
+async def test_restarted_tailer_adopts_the_open_plan_card(plan_file: Path) -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session(permission_mode="plan")
     runtime = _make_runtime(session, _load("plan_approval.txt"))
@@ -1239,7 +1264,7 @@ async def test_restarted_tailer_adopts_the_open_plan_card() -> None:
     ]
     restarted = _make_tailer(ClaudeTtyPlugin(), runtime)
     restarted._plugin._pending_approvals.clear()
-    restarted._load_adoptable()
+    restarted.dialogs.adopt_open_cards()
     await _surface(restarted)
 
     runtime._emit_adapter_event.assert_not_called()
@@ -1261,8 +1286,8 @@ async def test_restarted_tailer_expires_cards_without_a_dialog() -> None:
     runtime.storage.list_approval_events.return_value = [_open_card("a1", "sig")]
     tailer = _make_tailer(plugin, runtime)
 
-    tailer._load_adoptable()
-    await tailer._poll_dialog()
+    tailer.dialogs.adopt_open_cards()
+    await tailer.dialogs.poll()
 
     runtime._record_system_event.assert_awaited_once_with(
         "sess-1",
@@ -1316,10 +1341,7 @@ async def test_failed_keystroke_keeps_the_approval_pending() -> None:
         await transport.respond_to_approval(_make_session(), "approve", None)
 
     assert "sess-1" in plugin._pending_approvals
-    # Answerable again with no event to say so: the pending-asks feed is told.
-    cast(MagicMock, transport._runtime).asks.mark_dirty.assert_called_once_with(
-        "sess-1"
-    )
+    assert not plugin._pending_approvals["sess-1"].replying
 
 
 async def test_terminate_closes_the_pending_card() -> None:

@@ -47,6 +47,7 @@ from waypoint.backends.claude_code.normalize import (
     build_task_notification_metadata,
     claim_peer_message,
     classify_injected_user_turn,
+    deferred_result_metadata,
     extract_created_task_id,
     format_task_snapshot,
     iter_content_blocks,
@@ -547,6 +548,7 @@ class TranscriptNormalizer:
                 "is_error": is_error,
                 "payload": block,
                 "status": SessionStatus.RUNNING,
+                **deferred_result_metadata(record.get("toolUseResult")),
             }
             if tool_use_id in self._file_edit_tool_use_ids:
                 self._file_edit_tool_use_ids.discard(tool_use_id)

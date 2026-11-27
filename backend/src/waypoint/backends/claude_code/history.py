@@ -37,6 +37,7 @@ from waypoint.backends.claude_code.normalize import (
     build_task_notification_metadata,
     claim_peer_message,
     classify_injected_user_turn,
+    deferred_result_metadata,
     iter_content_blocks,
     parse_peer_message,
     parse_task_notification,
@@ -309,6 +310,7 @@ def _convert_user(
                     "tool_use_id": str(block.get("tool_use_id") or ""),
                     "is_error": bool(block.get("is_error")),
                     "payload": block,
+                    **deferred_result_metadata(record.get("toolUseResult")),
                 },
             )
             for block in tool_result_blocks

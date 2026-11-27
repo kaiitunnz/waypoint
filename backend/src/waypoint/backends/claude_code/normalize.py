@@ -540,6 +540,17 @@ def stringify_tool_result(content: Any) -> str:
     return json.dumps(content)
 
 
+def deferred_result_metadata(tool_use_result: Any) -> dict[str, bool]:
+    """``result_deferred`` for a tool result that only acknowledges a launch, from
+    the CLI's structured record of the result. The call's outcome arrives later as
+    a task notification carrying its ``tool_use_id``.
+    """
+    if isinstance(tool_use_result, dict):
+        if tool_use_result.get("status") == "async_launched":
+            return {"result_deferred": True}
+    return {}
+
+
 # ─── Task tools (Claude Code >= v2.1.142) ───────────────────────────────────
 #
 # Newer Claude Code tracks todos through structured Task tools instead of the

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type MouseEvent } from "react";
+import { useEffect, type MouseEvent, type ReactNode } from "react";
 
 import { isWorkingStatus } from "@waypoint/web-core/sessionPresentation";
 import type { PendingSend } from "@waypoint/web-core/hooks/useOptimisticSends";
@@ -27,6 +27,8 @@ interface TranscriptProps {
   hiddenCount: number;
   onShowAll: () => void;
   pending: PendingSend[];
+  // The running turn's row, at the transcript's end.
+  workingRow?: ReactNode;
   // A question card to scroll to and mark; `seq` makes a repeat a new request.
   reveal?: { toolUseId: string; seq: number } | null;
   // Whether the card was on the page.
@@ -47,6 +49,7 @@ export function Transcript({
   hiddenCount,
   onShowAll,
   pending,
+  workingRow,
   reveal,
   onRevealed,
 }: TranscriptProps) {
@@ -101,6 +104,7 @@ export function Transcript({
                 ))}
               </div>
               {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
+              {workingRow}
               {!loading && turns.length === 0 && pending.length === 0 ? (
                 <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
               ) : null}

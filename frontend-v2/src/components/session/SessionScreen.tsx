@@ -17,10 +17,13 @@ import { useAskQuestionState } from "@waypoint/web-core/hooks/useAskQuestionStat
 import { useOptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { useSessionScheduledMessages } from "@waypoint/web-core/hooks/useSessionScheduledMessages";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
+import { useTurnStart } from "@waypoint/web-core/hooks/useTurnStart";
 import { COMPACT_HEADER_WIDTH } from "@waypoint/web-core/layoutRules";
 import { findPendingApprovals, pendingPlanApproval } from "@waypoint/web-core/session/approvals";
+import { isAgentBusy } from "@waypoint/web-core/session/connection";
 import { composerAvailability, isExitedSession } from "@waypoint/web-core/session/send";
 import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
+import { workingStep } from "@waypoint/web-core/session/workingRow";
 import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
 
 import { Composer } from "@/components/composer/Composer";
@@ -58,6 +61,7 @@ import { Transcript } from "./Transcript";
 import { useQuestionReveal } from "./useQuestionReveal";
 import { useSessionPanels } from "./useSessionPanels";
 import { ViewSwitch, type SessionView } from "./ViewSwitch";
+import { WorkingRow } from "./WorkingRow";
 
 // `initialView` is the view asked for on arrival; a session without it shows its own.
 export function SessionScreen({ id, initialView }: { id: string; initialView: SessionView }) {
@@ -71,7 +75,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
   const { toast, dismiss } = useToast();
   const catalog = useBackendCatalog(host, token, null);
   const stream = useSessionStream(host, token, id, handleAuthFailure);
-  const { session, events, connection, pendingQuestions, hasOlder, loadingOlder, loadOlder } = stream;
+  const { session, events, connection, pendingQuestions, hasOlder, loadingOlder, loadOlder, oldestSequence } = stream;
   const scheduled = useSessionScheduledMessages(host, token, id);
   const [filesOpen, setFilesOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -179,6 +183,19 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
     () => deriveTranscript(rendered, density, dockedPlanSequence),
     [rendered, density, dockedPlanSequence],
   );
+  // A turn runs by the same rule that offers Stop.
+  const busy = session !== null && isAgentBusy(session, connection);
+  const turnStartedAt = useTurnStart({
+    host,
+    token,
+    sessionId: id,
+    events,
+    oldestSequence,
+    hasOlder,
+    running: busy,
+    onAuthFailure: handleAuthFailure,
+  });
+  const step = useMemo(() => (busy ? workingStep(transcript.turns, rendered) : null), [busy, transcript.turns, rendered]);
   const canOpenFiles = composing && session !== null && supportsAttachments(session.backend, catalog);
   const openFiles = useMemo(() => (canOpenFiles ? () => setFilesOpen(true) : null), [canOpenFiles]);
   const context = useMemo(
@@ -293,6 +310,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
       hiddenCount={transcript.hiddenCount}
       onShowAll={() => setDensity("full")}
       pending={optimistic.pending}
+      workingRow={busy ? <WorkingRow step={step} startedAt={turnStartedAt} /> : null}
       reveal={reveal}
       onRevealed={onRevealed}
     />

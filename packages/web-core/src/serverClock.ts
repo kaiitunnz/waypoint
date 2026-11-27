@@ -44,10 +44,7 @@ function setOffset(next: number): void {
 function readDate(date: string | null, sentAt: number, receivedAt: number): number {
   const header = date ? Date.parse(date) : Number.NaN;
   // A server that does not expose its `Date` is taken to agree.
-  if (!Number.isFinite(header)) {
-    bounds = null;
-    return 0;
-  }
+  if (!Number.isFinite(header)) return 0;
   let least = header - receivedAt;
   let most = header + DATE_LAG_MS - sentAt;
   // Headers narrow one another while they overlap; one that does not means a clock moved.

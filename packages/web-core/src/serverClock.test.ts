@@ -162,7 +162,7 @@ describe("syncServerClock", () => {
       "fetch",
       vi.fn(async () => {
         vi.setSystemTime(Date.now() + 10 * 60_000);
-        return { headers: { get: () => header(SERVER) } };
+        return { headers: { get: () => header(SERVER + 3_600_000) } };
       }),
     );
     await syncServerClock(host);

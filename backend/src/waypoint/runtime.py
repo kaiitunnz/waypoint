@@ -6071,6 +6071,22 @@ class SessionRuntime:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    @staticmethod
+    def _require_launch_folder(
+        launch_target: SshLaunchTargetConfig | None, cwd: str | None
+    ) -> None:
+        """Refuse a local pane launch into a missing folder, where tmux would
+        silently start the pane in $HOME."""
+        if (
+            launch_target is None
+            and cwd is not None
+            and not Path(cwd).expanduser().is_dir()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"working folder does not exist: {cwd}",
+            )
+
     def _command_for_backend(
         self,
         backend: str,
@@ -6086,13 +6102,8 @@ class SessionRuntime:
         extra_env = self._agent_process_env(
             backend, dict(launch_env or {}), session_id=session_id
         )
+        self._require_launch_folder(launch_target, cwd)
         if launch_target is None:
-            # tmux silently starts a pane in $HOME when its folder is missing.
-            if cwd is not None and not Path(cwd).expanduser().is_dir():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"working folder does not exist: {cwd}",
-                )
             executable = (
                 self.settings.plugin_config(backend).local_bin
                 or plugin.capabilities.cli_binary

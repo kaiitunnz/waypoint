@@ -709,6 +709,29 @@ async def test_bg_task_success_updates_record(
     assert qs[0].fork_thread_id is not None
 
 
+async def test_bg_task_runs_in_the_launch_folder_when_the_folder_is_gone(
+    runtime: Any, plugin: Any, tmp_path: Path
+) -> None:
+    session = _make_session(
+        runtime.storage, transport_state_extra={"launch_cwd": str(tmp_path)}
+    )
+    sq = SideQuestion(
+        id="sq-moved",
+        question="Where?",
+        status=SideQuestionStatus.PENDING,
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    _write_side_questions(runtime, session.id, [sq])
+    one_shot = AsyncMock(return_value="here")
+
+    with patch.object(sq_module, "_run_one_shot_local", new=one_shot):
+        await sq_module._run_side_question_bg(runtime, plugin, session.id, "sq-moved")
+
+    assert one_shot.await_args is not None
+    assert one_shot.await_args.args[3] == str(tmp_path)
+
+
 async def test_bg_task_persists_fork_id_before_one_shot(
     runtime: Any,
     plugin: Any,

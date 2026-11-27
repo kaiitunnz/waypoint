@@ -232,6 +232,17 @@ def test_local_replaced_transcript_reports_the_new_identity(tmp_path: Path) -> N
     assert read.identity != first.identity
 
 
+def test_local_skips_a_file_swapped_between_stat_and_open(
+    tmp_path: Path, monkeypatch
+) -> None:
+    src, path = _local_source(tmp_path)
+    path.write_bytes(b"one\n")
+    other = tmp_path / "other"
+    other.write_bytes(b"two\n")
+    monkeypatch.setattr(bs.os, "fstat", lambda fd: other.stat())
+    assert src.read_from(0).observed is False
+
+
 def test_local_ambiguous_matches_stay_unobserved(tmp_path: Path) -> None:
     _moved_path(tmp_path, "/one").write_bytes(b"a\n")
     _moved_path(tmp_path, "/two").write_bytes(b"b\n")

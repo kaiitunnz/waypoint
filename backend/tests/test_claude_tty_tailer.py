@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from waypoint.backends.claude_tty.byte_source import TranscriptRead
-from waypoint.backends.claude_tty.tailer import TranscriptTailer, transcript_path
+from waypoint.backends.claude_tty.byte_source import TranscriptRead, transcript_path
+from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
 
 

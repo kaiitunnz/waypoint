@@ -30,13 +30,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from waypoint.backends.claude_code.session_folder import launch_folder
 from waypoint.backends.claude_code.threads import (
     UUID_RE,
     claude_projects_root,
     encode_project_dir,
     local_claude_thread_artifacts,
 )
-from waypoint.backends.claude_tty._state import launch_folder
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.backends.transcript_fs_remote_script import find_clear_successors
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -46,9 +46,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("waypoint.backends.claude_tty")
 
-_STEADY_INTERVAL = 1.0  # seconds between remote reads at steady state
-_MAX_BACKOFF = 10.0  # cap on the exponential error backoff
-_READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
+# Seconds between remote reads at steady state, and the first search backoff.
+_STEADY_INTERVAL = 1.0
+# Cap on the exponential backoff of remote errors and local searches.
+_MAX_BACKOFF = 10.0
+READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
 
 
 def _single(ids: list[str]) -> str | None:
@@ -77,13 +79,13 @@ def _stat(path: Path) -> os.stat_result | None:
         return None
 
 
-def _identity(st: os.stat_result) -> tuple[int, int]:
+def _stat_identity(st: os.stat_result) -> tuple[int, int]:
     return (st.st_dev, st.st_ino)
 
 
 def _path_identity(path: Path) -> tuple[int, int] | None:
     st = _stat(path)
-    return None if st is None else _identity(st)
+    return None if st is None else _stat_identity(st)
 
 
 def resolve_remote_config_root(
@@ -153,8 +155,9 @@ class TranscriptByteSource(Protocol):
         """Read from ``offset``.
 
         ``metadata_only`` asks for size + identity without fetching the body
-        (start-at-end priming). ``force`` bypasses a source's poll-cadence gate
-        (used by the tailer's terminal drain on session exit).
+        (start-at-end priming). ``force`` bypasses a source's poll-cadence or
+        search backoff (the terminal drain on exit, and the tail read after
+        priming).
         """
         ...
 
@@ -175,38 +178,39 @@ class LocalTranscriptByteSource:
         self._path = transcript_path(cwd, thread_id, config_dir)
         self._thread_id = thread_id
         self._config_dir = config_dir
-        self._identity: tuple[int, int] | None = None
-        # A search scans every project folder, so one that finds nothing (a
-        # session with no transcript yet) backs off.
+        self._identity: tuple[int, int] | None = None  # of the file last read
+        # Monotonic time before which a miss does not search again.
         self._next_search_at = 0.0
+        # Wait after the next search that finds nothing doubles this; a search
+        # scans every project folder.
         self._search_delay = 0.0
+        # Whether the several-matches warning has been logged.
         self._warned_ambiguous = False
 
     def read_from(
         self, offset: int, *, metadata_only: bool = False, force: bool = False
     ) -> TranscriptRead:
-        # ``force`` only skips the search backoff; a read is already unthrottled.
         st = self._locate(force)
         if st is None:
             # Missing before the first turn (or a transient stat error): keep
             # polling without disturbing the cursor.
             return TranscriptRead(observed=False)
         if metadata_only:
-            self._identity = _identity(st)
+            self._identity = _stat_identity(st)
             return TranscriptRead(
-                observed=True, size=st.st_size, identity=_identity(st)
+                observed=True, size=st.st_size, identity=self._identity
             )
         try:
             with self._path.open("rb") as fh:
                 opened = os.fstat(fh.fileno())
-                if _identity(opened) != _identity(st):
+                if _stat_identity(opened) != _stat_identity(st):
                     # Renamed and reused since the stat: locate it again.
                     return TranscriptRead(observed=False)
                 fh.seek(offset)
                 data = fh.read()
         except OSError:
             return TranscriptRead(observed=False)
-        self._identity = _identity(opened)
+        self._identity = _stat_identity(opened)
         return TranscriptRead(
             observed=True, data=data, size=opened.st_size, identity=self._identity
         )
@@ -218,7 +222,7 @@ class LocalTranscriptByteSource:
         is nowhere else, for the tailer to treat as a replacement.
         """
         st = _stat(self._path)
-        replaced = st is not None and self._identity not in (None, _identity(st))
+        replaced = st is not None and self._identity not in (None, _stat_identity(st))
         if st is not None and not replaced:
             self._next_search_at = self._search_delay = 0.0
             return st
@@ -337,9 +341,9 @@ class RemoteClaudeTranscriptByteSource:
                 self._schedule(error=False)
                 return TranscriptRead(observed=False)
             self._path = resolved
-        limit = 0 if metadata_only else _READ_LIMIT
+        limit = 0 if metadata_only else READ_LIMIT
         read = self._fs.read_range(self._path, offset, limit)
-        if read is None or self._identity not in (None, (read.device, read.inode)):
+        if read is None or self._identity not in (None, read.identity):
             moved = self._resolve()
             if moved is not None and moved != self._path:
                 self._path = moved
@@ -349,12 +353,9 @@ class RemoteClaudeTranscriptByteSource:
             self._warn_once("read-error", "remote transcript read failed")
             return TranscriptRead(observed=False)
         self._schedule(error=False)
-        self._identity = (read.device, read.inode)
+        self._identity = read.identity
         return TranscriptRead(
-            observed=True,
-            data=read.data,
-            size=read.size,
-            identity=self._identity,
+            observed=True, data=read.data, size=read.size, identity=self._identity
         )
 
     def _resolve(self) -> str | None:
@@ -374,7 +375,7 @@ class RemoteClaudeTranscriptByteSource:
 
     def _remote_identity(self, path: str) -> tuple[int, int] | None:
         read = self._fs.read_range(path, 0, 0)
-        return None if read is None else (read.device, read.inode)
+        return None if read is None else read.identity
 
     def _resolved_config_root(self, cwd: str) -> str:
         if self._config_root is not None:

@@ -28,12 +28,10 @@ from waypoint.backends.claude_code.models import (
     observe_claude_model,
 )
 from waypoint.backends.claude_code.normalize import format_approval_text
+from waypoint.backends.claude_code.session_folder import follow_relocation
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval
-from waypoint.backends.claude_tty.byte_source import (
-    TranscriptByteSource,
-    transcript_path,
-)
+from waypoint.backends.claude_tty.byte_source import READ_LIMIT, TranscriptByteSource
 from waypoint.backends.claude_tty.normalize import (
     SYNTHETIC_MODEL_ID,
     TranscriptNormalizer,
@@ -51,10 +49,6 @@ if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
 
 log = logging.getLogger("waypoint.backends.claude_tty")
-
-# ``transcript_path`` moved to ``byte_source`` (where the local source uses it);
-# re-exported here for callers/tests that still import it from the tailer.
-__all__ = ["TranscriptTailer", "transcript_path"]
 
 _POLL_INTERVAL = 0.5  # seconds between transcript polls
 _PANE_CHECK_INTERVAL = 10.0  # seconds between tmux pane liveness checks
@@ -78,8 +72,8 @@ _EXPIRED_NOTE = "Pending approval expired"
 # completes past this size is dropped rather than grown without bound.
 _MAX_PARTIAL_BYTES = 8 * 1024 * 1024
 # The CLI re-appends ``relocated`` about every 32 KB it writes, so the tail of an
-# existing transcript holds the latest one.
-_RELOCATION_TAIL_BYTES = 256 * 1024
+# existing transcript holds the latest one. One remote read covers it.
+_RELOCATION_TAIL_BYTES = READ_LIMIT
 
 
 def _relocated_folder(record: dict[str, Any]) -> str | None:
@@ -167,9 +161,8 @@ class TranscriptTailer:
         self._stop_requested = True
 
     async def _drain(self, *, force: bool = False) -> None:
-        # The priming tick fetches size + identity only (no body) so start-at-end
-        # never downloads history; ``force`` bypasses a remote source's poll
-        # cadence (terminal drain on exit).
+        # The priming tick fetches size + identity only (no body); ``force``
+        # bypasses a remote source's poll cadence (terminal drain on exit).
         metadata_only = self._start_at_end and not self._primed
         read = await asyncio.to_thread(
             self._source.read_from,
@@ -181,7 +174,7 @@ class TranscriptTailer:
             return
 
         # First observation: record identity and, for start-at-end, jump to the
-        # current end without parsing (records already on disk are in the DB).
+        # current end without emitting (records already on disk are in the DB).
         # This is correct regardless of whether the source resolved at
         # construction time, so a transient boot-time miss never replays history.
         if not self._primed:
@@ -273,9 +266,7 @@ class TranscriptTailer:
         # After the records: the offset is already past them, so a lookup cut
         # short by a restart must not take any with it.
         if relocated is not None:
-            await self._plugin.follow_relocation(
-                self._runtime, self._session_id, relocated
-            )
+            await follow_relocation(self._runtime, self._session_id, relocated)
 
     async def _follow_earlier_move(self, end: int) -> None:
         """Follow a move made before this tailer started, as after a restart or
@@ -288,12 +279,10 @@ class TranscriptTailer:
                 continue
             try:
                 record: dict[str, Any] = json.loads(line)
-            except json.JSONDecodeError:
+            except ValueError:  # a window cut inside a character or record
                 continue
             if folder := _relocated_folder(record):
-                await self._plugin.follow_relocation(
-                    self._runtime, self._session_id, folder
-                )
+                await follow_relocation(self._runtime, self._session_id, folder)
                 return
 
     async def _maybe_observe_model(self, record: dict[str, Any]) -> None:

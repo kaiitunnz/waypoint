@@ -64,6 +64,10 @@ class RemoteRead:
     device: int
     inode: int
 
+    @property
+    def identity(self) -> tuple[int, int]:
+        return (self.device, self.inode)
+
 
 _SCRIPT_BYTES: bytes | None = None
 
@@ -98,6 +102,11 @@ class RemoteTranscriptFilesystem:
 
     def is_dir(self, path: str) -> bool:
         return bool(self._run("is_dir", path).get("is_dir", False))
+
+    def probe_dir(self, path: str) -> bool | None:
+        """``is_dir``, or ``None`` when the host could not be asked."""
+        result = self._run("is_dir", path)
+        return None if "error" in result else bool(result.get("is_dir"))
 
     def is_symlink(self, path: str) -> bool:
         return bool(self._run("is_symlink", path).get("is_symlink", False))

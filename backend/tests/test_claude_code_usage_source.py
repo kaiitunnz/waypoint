@@ -9,6 +9,7 @@ import pytest
 
 from waypoint.backends.claude_code.models import make_context_window_resolver
 from waypoint.backends.claude_code.usage_source import TranscriptContextUsageSource
+from waypoint.backends.claude_tty.byte_source import transcript_path
 from waypoint.schemas import BackendModelOption
 
 
@@ -64,6 +65,33 @@ def _assistant_record(
             "usage": usage or {"input_tokens": 10, "output_tokens": 5},
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_drain_follows_a_moved_transcript(tmp_path: Path) -> None:
+    runtime = _make_runtime(resolved_model="claude-sonnet-4-5")
+    thread_id = "11111111-1111-1111-1111-111111111111"
+    source = TranscriptContextUsageSource(
+        session_id="sess-1",
+        session_uuid=thread_id,
+        cwd="/repo/app",
+        runtime=runtime,
+        config_dir=str(tmp_path),
+    )
+    home = transcript_path("/repo/app", thread_id, str(tmp_path))
+    away = transcript_path("/repo/app/.claude/worktrees/w", thread_id, str(tmp_path))
+    home.parent.mkdir(parents=True)
+    away.parent.mkdir(parents=True)
+    home.write_bytes(_jsonl(_assistant_record()))
+    await source._drain()
+    home.rename(away)
+    with away.open("ab") as fh:
+        record = _assistant_record(usage={"input_tokens": 99, "output_tokens": 1})
+        fh.write(_jsonl(record))
+
+    await source._drain()
+
+    assert runtime.update_session_fields.await_count == 2
 
 
 @pytest.mark.asyncio

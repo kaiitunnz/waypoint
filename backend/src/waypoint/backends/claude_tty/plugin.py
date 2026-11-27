@@ -72,6 +72,14 @@ from waypoint.backends.claude_code.schemas import (
     ClaudeThreadImportRequest,
     ClaudeThreadSummary,
 )
+from waypoint.backends.claude_code.session_folder import (
+    carried_launch_cwd,
+    folder_fields,
+    launch_folder,
+    leave_removed_folder,
+    note_removed_folder,
+    relaunch_folder,
+)
 from waypoint.backends.claude_code.threads import (
     ClaudeThreadInfo,
     find_local_claude_thread,
@@ -79,11 +87,7 @@ from waypoint.backends.claude_code.threads import (
     local_claude_thread_artifacts,
 )
 from waypoint.backends.claude_tty import pane_dialog
-from waypoint.backends.claude_tty._state import (
-    LAUNCH_CWD_KEY,
-    PendingTtyApproval,
-    launch_folder,
-)
+from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.byte_source import (
     ClaudeTranscriptSource,
     LocalTranscriptByteSource,
@@ -93,12 +97,11 @@ from waypoint.backends.claude_tty.byte_source import (
 )
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
-from waypoint.backends.events import mark_important
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
-from waypoint.git_meta import GitMeta, git_common_dir, resolve_git_meta
+from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.questions import QuestionDecline, QuestionLiveness
 from waypoint.schemas import (
@@ -699,109 +702,6 @@ class ClaudeTtyPlugin:
         )
         return True
 
-    # ── The session's folder ─────────────────────────────────────────────────
-
-    async def follow_relocation(
-        self, runtime: "SessionRuntime", session_id: str, folder: str
-    ) -> None:
-        """Record the folder Claude moved the session to (a worktree, ``/cd``),
-        so the session shows it and relaunches in it. Never raises: the caller
-        is the tailer loop."""
-        try:
-            session = runtime.storage.get_session(session_id)
-            # Boot replaces an assistant whose cwd left its workspace.
-            if (
-                session is None
-                or session.source is SessionSource.ASSISTANT
-                or session.cwd == folder
-            ):
-                return
-            if await self._folder_exists(runtime, session, folder):
-                await self._set_folder(runtime, session_id, folder)
-        except Exception:
-            log.exception(
-                "failed to follow the session's folder",
-                extra={"session_id": session_id},
-            )
-
-    async def _folder_exists(
-        self, runtime: "SessionRuntime", session: SessionRecord, folder: str
-    ) -> bool:
-        if session.launch_target_id is None:
-            return await asyncio.to_thread(Path(folder).expanduser().is_dir)
-        launch_target = runtime._find_launch_target(session.launch_target_id)
-        if launch_target is None:
-            return False
-        fs = RemoteTranscriptFilesystem(launch_target)
-        return await asyncio.to_thread(fs.is_dir, folder)
-
-    async def _git_meta_for(self, session: SessionRecord, folder: str) -> GitMeta:
-        """Repo and branch of a session moving to ``folder``. The repo name
-        stays within one repository, so its worktrees are not separate repos."""
-        if session.launch_target_id is not None:
-            # The git state is on the remote host.
-            return GitMeta(repo_name=session.repo_name, branch=None)
-        meta = await resolve_git_meta(folder)
-        common = await git_common_dir(folder)
-        if common is not None and common == await git_common_dir(session.cwd):
-            return GitMeta(repo_name=session.repo_name, branch=meta.branch)
-        return meta
-
-    async def _set_folder(
-        self, runtime: "SessionRuntime", session_id: str, folder: str
-    ) -> SessionRecord | None:
-        """Move the session's recorded folder, keeping the one it was launched in."""
-        session = runtime.storage.get_session(session_id)
-        if session is None:
-            return None
-        meta = await self._git_meta_for(session, folder)
-        # Re-read: the lookup yielded.
-        session = runtime.storage.get_session(session_id)
-        if session is None:
-            return None
-        return await runtime.update_session_fields(
-            session_id,
-            cwd=folder,
-            repo_name=meta.repo_name,
-            branch=meta.branch,
-            transport_state={
-                **session.transport_state,
-                LAUNCH_CWD_KEY: launch_folder(session),
-            },
-        )
-
-    async def _relaunch_folder(
-        self, runtime: "SessionRuntime", session: SessionRecord
-    ) -> str:
-        """The folder to launch a pane for ``session`` in: its own, or the one
-        it was launched in when a worktree it moved into has been removed."""
-        launch = launch_folder(session)
-        if launch == session.cwd or await self._folder_exists(
-            runtime, session, session.cwd
-        ):
-            return session.cwd
-        # Requiring the launch folder to exist keeps a dead SSH link, where
-        # neither does, from reading as a removed worktree.
-        if await self._folder_exists(runtime, session, launch):
-            return launch
-        return session.cwd
-
-    async def _leave_removed_folder(
-        self, runtime: "SessionRuntime", session: SessionRecord
-    ) -> SessionRecord:
-        """Before a relaunch, move a session whose folder is gone back to the
-        one it was launched in."""
-        folder = await self._relaunch_folder(runtime, session)
-        if folder == session.cwd:
-            return session
-        updated = await self._set_folder(runtime, session.id, folder)
-        await runtime._record_system_event(
-            session.id,
-            f"Folder {session.cwd} no longer exists; relaunching in {folder}",
-            metadata=mark_important({}),
-        )
-        return updated or session
-
     async def drop_pending_approval(
         self, runtime: "SessionRuntime", session_id: str, note: str
     ) -> PendingTtyApproval | None:
@@ -971,7 +871,7 @@ class ClaudeTtyPlugin:
                 await runtime.tmux.kill_session(old_tmux_session)
 
         launch_target = runtime._find_launch_target(session.launch_target_id)
-        session = await self._leave_removed_folder(runtime, session)
+        session = await leave_removed_folder(runtime, session)
         state = session.transport_state
         stored_args = state.get("launch_args")
         # After a transport switch the state is reset to the neutral native-thread
@@ -1047,7 +947,7 @@ class ClaudeTtyPlugin:
             "thread_id": new_thread_id,
             "launch_args": launch_args,
             **_carried_pre_plan_mode(session.permission_mode, state),
-            **_carried_launch_cwd(state),
+            **carried_launch_cwd(state),
         }
         # The respawned pane hasn't confirmed a model yet.
         runtime.storage.update_session(
@@ -1109,10 +1009,9 @@ class ClaudeTtyPlugin:
         )
         config_dir = self._config_dir(session)
         new_thread_id = str(uuid.uuid4())
-        folder = await self._relaunch_folder(runtime, session)
-        git_meta = GitMeta(repo_name=session.repo_name, branch=session.branch)
-        if folder != session.cwd:
-            git_meta = await self._git_meta_for(session, folder)
+        folder = await relaunch_folder(runtime, session)
+        # Before the transcript copy, which a refused launch would orphan.
+        runtime._require_launch_folder(launch_target, folder)
         # Claude writes a --fork-session transcript only after the first turn.
         # Copying it under the new thread id lets the resumed pane reopen the
         # full history now, and clone_events seeds the event DB so the fork
@@ -1169,10 +1068,8 @@ class ClaudeTtyPlugin:
             source=SessionSource.MANAGED,
             transport=self.transport_id,
             title=title,
-            cwd=folder,
+            **await folder_fields(session, folder),
             launch_target_id=session.launch_target_id,
-            repo_name=git_meta.repo_name,
-            branch=git_meta.branch,
             status=SessionStatus.STARTING,
             created_at=now,
             updated_at=now,
@@ -1189,7 +1086,7 @@ class ClaudeTtyPlugin:
                 **_carried_pre_plan_mode(
                     session.permission_mode, session.transport_state
                 ),
-                **_carried_launch_cwd(session.transport_state),
+                **carried_launch_cwd(session.transport_state),
             },
             permission_mode=session.permission_mode,
             model=session.model,
@@ -1202,6 +1099,8 @@ class ClaudeTtyPlugin:
         runtime.storage.create_session(new_session)
         if materialized:
             runtime.storage.clone_events(session.id, new_session_id)
+        if folder != session.cwd:
+            await note_removed_folder(runtime, new_session_id, session.cwd, folder)
         await runtime._record_system_event(
             new_session_id,
             f"Claude TUI forked from {session.title or session.id} (thread {new_thread_id})",
@@ -1361,6 +1260,11 @@ class ClaudeTtyPlugin:
                 detail="claude_tty session has no thread id to resume",
             )
 
+        launch_target = runtime._find_launch_target(session.launch_target_id)
+        # Past the kill, a launch refused for a missing folder strands the session.
+        runtime._require_launch_folder(
+            launch_target, await relaunch_folder(runtime, session)
+        )
         old_tmux_session = state.get("tmux_session")
         if old_tmux_session:
             with suppress(TmuxError):
@@ -1371,7 +1275,7 @@ class ClaudeTtyPlugin:
         await self._cancel_tailer(session.id)
         # The tailer may have moved the session's folder up to here.
         session = runtime.storage.get_session(session.id) or session
-        session = await self._leave_removed_folder(runtime, session)
+        session = await leave_removed_folder(runtime, session)
         state = session.transport_state
 
         stored_args = state.get("launch_args")
@@ -1382,7 +1286,6 @@ class ClaudeTtyPlugin:
             model=merged[0], effort=merged[1], permission_mode=merged[2]
         )
 
-        launch_target = runtime._find_launch_target(session.launch_target_id)
         # The thread file is only written on first input, so a settings change
         # made before the session's first turn has nothing to resume — relaunching
         # with `--resume` makes the CLI exit with "no conversation found" and kills
@@ -1434,7 +1337,7 @@ class ClaudeTtyPlugin:
                 new_state["pre_plan_mode"] = session.permission_mode
         else:
             new_state.update(_carried_pre_plan_mode(new_permission_mode, state))
-        new_state.update(_carried_launch_cwd(state))
+        new_state.update(carried_launch_cwd(state))
         # The respawn may run a different model; the no-op early return above
         # keeps a benign relaunch from reaching here.
         runtime.storage.update_session(
@@ -1540,15 +1443,7 @@ class ClaudeTtyPlugin:
             ),
             *base_args,
         ]
-        folder = await self._relaunch_folder(runtime, parent)
-        folder_fields: dict[str, Any] = {}
-        if folder != new_session.cwd:
-            git_meta = await self._git_meta_for(parent, folder)
-            folder_fields = {
-                "cwd": folder,
-                "repo_name": git_meta.repo_name,
-                "branch": git_meta.branch,
-            }
+        folder = await relaunch_folder(runtime, parent)
         command = runtime._command_for_backend(
             self.id,
             launch_args,
@@ -1583,11 +1478,13 @@ class ClaudeTtyPlugin:
                     **_carried_pre_plan_mode(
                         new_session.permission_mode, parent.transport_state
                     ),
-                    **_carried_launch_cwd(parent.transport_state),
+                    **carried_launch_cwd(parent.transport_state),
                 },
                 status=SessionStatus.STARTING,
-                **folder_fields,
+                **await folder_fields(parent, folder),
             )
+            if folder != parent.cwd:
+                await note_removed_folder(runtime, new_session.id, parent.cwd, folder)
             await runtime._record_system_event(
                 new_session.id,
                 f"Promoted side question to a session (resumed thread {thread_id})",
@@ -1902,14 +1799,6 @@ def _carried_pre_plan_mode(
     pre_plan_mode = source_state.get("pre_plan_mode")
     if isinstance(pre_plan_mode, str) and pre_plan_mode:
         return {"pre_plan_mode": pre_plan_mode}
-    return {}
-
-
-def _carried_launch_cwd(source_state: dict[str, Any]) -> dict[str, str]:
-    """``launch_cwd`` to keep when a relaunch rebuilds ``transport_state``."""
-    launch_cwd = source_state.get(LAUNCH_CWD_KEY)
-    if isinstance(launch_cwd, str) and launch_cwd:
-        return {LAUNCH_CWD_KEY: launch_cwd}
     return {}
 
 

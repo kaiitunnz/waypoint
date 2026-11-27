@@ -1,24 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import { seeksTurnStart } from "./useTurnStart";
+import { planTurnSearch } from "./useTurnStart";
 
 // A running turn that began before the loaded events.
 const turn = { hasOlder: true, bounded: false, running: true };
 const paused = { ...turn, running: false };
 
-describe("seeksTurnStart", () => {
-  it("starts for a running turn only", () => {
-    expect(seeksTurnStart(false, turn)).toBe(true);
-    expect(seeksTurnStart(false, paused)).toBe(false);
+describe("planTurnSearch", () => {
+  it("searches only while the turn runs and no search has answered", () => {
+    expect(planTurnSearch(turn, false)).toEqual({ drop: false, search: true });
+    expect(planTurnSearch(paused, false)).toEqual({ drop: false, search: false });
   });
 
-  it("holds through an approval prompt and the turn's resumption", () => {
-    expect(seeksTurnStart(true, paused)).toBe(true);
-    expect(seeksTurnStart(true, turn)).toBe(true);
+  it("keeps an answer through an approval prompt and the turn's resumption", () => {
+    expect(planTurnSearch(paused, true)).toEqual({ drop: false, search: false });
+    expect(planTurnSearch(turn, true)).toEqual({ drop: false, search: false });
   });
 
-  it("ends once the turn before has its end loaded, or nothing is older", () => {
-    expect(seeksTurnStart(true, { ...turn, bounded: true })).toBe(false);
-    expect(seeksTurnStart(true, { ...paused, hasOlder: false })).toBe(false);
+  it("drops the answer once the turn before has its end loaded, or nothing is older", () => {
+    expect(planTurnSearch({ ...turn, bounded: true }, true)).toEqual({ drop: true, search: false });
+    expect(planTurnSearch({ ...paused, hasOlder: false }, true)).toEqual({ drop: true, search: false });
   });
 });

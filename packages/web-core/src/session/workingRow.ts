@@ -11,7 +11,7 @@ import { lastRunIndex, runCallsOf, type TranscriptTurn } from "./turns";
 const ACTIVE = new Set(["starting", "running", "waiting_input"]);
 const ENDED = new Set(["idle", "interrupted", "error", "exited"]);
 const CUT_SHORT = new Set(["interrupted", "error", "exited"]);
-// Structured Claude Code records a compaction as idle while its turn goes on.
+// Stored structured Claude Code events can record a mid-turn compaction as idle.
 const COMPACTION_METHODS = new Set(["system.status", "system.compact_boundary"]);
 
 const statusOf = (event: EventRecord): string => {

@@ -6087,6 +6087,12 @@ class SessionRuntime:
             backend, dict(launch_env or {}), session_id=session_id
         )
         if launch_target is None:
+            # tmux silently starts a pane in $HOME when its folder is missing.
+            if cwd is not None and not Path(cwd).expanduser().is_dir():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"working folder does not exist: {cwd}",
+                )
             executable = (
                 self.settings.plugin_config(backend).local_bin
                 or plugin.capabilities.cli_binary

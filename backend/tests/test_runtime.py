@@ -332,6 +332,15 @@ def test_command_for_backend_local_omits_env_wrapper_when_plugin_has_none(
     assert command == ["codex", "resume", "abc"]
 
 
+def test_command_for_backend_refuses_a_missing_local_folder(tmp_path) -> None:
+    # tmux would otherwise start the pane in $HOME.
+    runtime, _, _ = make_runtime(tmp_path)
+    with pytest.raises(HTTPException) as raised:
+        runtime._command_for_backend("codex", [], cwd=str(tmp_path / "gone"))
+    assert "working folder does not exist" in raised.value.detail
+    assert runtime._command_for_backend("codex", [], cwd=str(tmp_path))
+
+
 def test_command_for_backend_remote_forwards_plugin_extra_env(tmp_path) -> None:
     runtime, _, _ = make_runtime(tmp_path)
     target = SshLaunchTargetConfig(

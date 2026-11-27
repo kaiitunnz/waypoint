@@ -44,6 +44,11 @@
   letter-spacing: -0.01em;
 }
 
+/* A tool's server and a subagent's kind, beside what names the call. */
+.aside {
+  color: var(--faint);
+}
+
 .status {
   font-size: var(--f-code);
   white-space: nowrap;
@@ -68,6 +73,31 @@
 .out {
   composes: block from "./FoldedText.module.css";
   color: var(--muted);
+}
+
+.caption {
+  margin-bottom: 3px;
+  font-size: var(--f-stamp);
+  color: var(--faint);
+}
+
+.prose {
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--sunken);
+  line-height: 1.45;
+  color: var(--text);
+}
+
+/* A code block keeps its own surface inside the inset. */
+.prose pre {
+  background: var(--plane);
+}
+
+.cut {
+  margin-top: 6px;
+  font-size: var(--f-stamp);
+  color: var(--faint);
 }
 
 .todos {

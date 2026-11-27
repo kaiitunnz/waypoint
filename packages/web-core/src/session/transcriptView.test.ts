@@ -43,3 +43,42 @@ describe("docked plan", () => {
     expect(sequences(2)).not.toContain('"sequence":2');
   });
 });
+
+describe("deferred reports", () => {
+  const notification = (sequence: number, callId: string, text: string) =>
+    ev(sequence, "system_note", text, {
+      method: "task_notification",
+      visibility: "detail",
+      task_notification: { version: 1, id: text, kind: "agent", tool_use_id: callId },
+    });
+  const launch = (sequence: number, id: string, extra: Record<string, unknown> = { result_deferred: true }) => [
+    ev(sequence, "tool_call", "", { item_id: id, tool_name: "Agent" }),
+    ev(sequence + 1, "tool_result", "launched", { item_id: id, ...extra }),
+  ];
+  const reportsOf = (events: ReturnType<typeof ev>[], density: "summary" | "full") => {
+    const reports: Record<string, string | undefined> = {};
+    for (const turn of deriveTranscript(events, density).turns) {
+      if (turn.kind !== "agent") continue;
+      for (const item of turn.items) {
+        for (const leaf of item.kind === "pair" ? [item] : "items" in item ? item.items : []) {
+          if (leaf.kind === "pair") reports[leaf.pair.itemId] = leaf.pair.report?.text;
+        }
+      }
+    }
+    return reports;
+  };
+
+  it("gives a deferred call the latest notification about it, at either density", () => {
+    const events = [
+      ...launch(1, "a"),
+      ...launch(3, "b"),
+      ...launch(5, "c", {}),
+      notification(7, "a", "first"),
+      notification(8, "a", "second"),
+      notification(9, "c", "stray"),
+    ];
+    for (const density of ["summary", "full"] as const) {
+      expect(reportsOf(events, density)).toEqual({ a: "second", b: undefined, c: undefined });
+    }
+  });
+});

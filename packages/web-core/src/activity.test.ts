@@ -23,6 +23,12 @@ describe("describeStep", () => {
     expect(stepOf(claudeTool(5, "Agent", {}))).toBe("Running a subagent");
   });
 
+  it("names an MCP tool by its server and tool", () => {
+    expect(stepOf(claudeTool(1, "mcp__local-notes__ping", {}))).toBe("local-notes · ping");
+    expect(stepOf(claudeTool(2, "docs:search", {}))).toBe("docs · search");
+    expect(stepOf(claudeTool(3, "ListAgents", {}))).toBe("ListAgents");
+  });
+
   it("separates the verb from the command or file it acts on", () => {
     expect(describeStep(claudeTool(1, "Bash", { command: "npm test" }))).toEqual({ verb: "Running", subject: "npm test" });
     expect(describeStep(claudeTool(2, "Edit", { file_path: "/a/b.py" }))).toEqual({ verb: "Editing", subject: "b.py" });

@@ -284,6 +284,241 @@ describe("describeCall", () => {
   });
 });
 
+// Claude as its events record it: the input under the payload, no tool name on the result.
+const claudeCall = (tool: string, input: Record<string, unknown>) =>
+  ev(1, "tool_call", `${tool}\n${JSON.stringify(input, null, 2)}`, { item_id: "a", tool_name: tool, payload: { input } });
+
+const codexItem = (
+  kind: "tool_call" | "tool_result",
+  tool: string,
+  itemType: string,
+  item: Record<string, unknown>,
+  text: string,
+) =>
+  ev(kind === "tool_call" ? 1 : 3, kind, text, {
+    item_id: "a",
+    tool_name: tool,
+    item_type: itemType,
+    payload: { item: { type: itemType, ...item } },
+  });
+
+const openCode = (kind: "tool_call" | "tool_result", tool: string, input: Record<string, unknown>, text: string) =>
+  ev(kind === "tool_call" ? 1 : 3, kind, text, { item_id: "a", tool_name: tool, tool_input: input });
+
+const only = (...events: ReturnType<typeof ev>[]) => describeCall(run(events)[0]);
+
+describe("describeCall tool names", () => {
+  it("leads a tool with no card of its own with its name, its arguments below", () => {
+    expect(only(claudeCall("mcp__local-notes__lookup_note", { topic: "lamps", limit: 3 }))).toMatchObject({
+      name: { server: "local-notes", tool: "lookup_note" },
+      label: "topic: lamps\nlimit: 3",
+      title: "mcp__local-notes__lookup_note",
+      mono: true,
+    });
+    expect(only(codexItem("tool_call", "docs:search", "mcpToolCall", { arguments: { query: "x" } }, "MCP docs:search"))).toMatchObject({
+      name: { server: "docs", tool: "search" },
+      label: "query: x",
+    });
+    expect(only(openCode("tool_call", "docs_search", { query: "x" }, "docs_search({})"))).toMatchObject({
+      name: { server: null, tool: "docs_search" },
+      label: "query: x",
+    });
+  });
+
+  it("shows only the name of a call with no arguments", () => {
+    expect(only(claudeCall("ListAgents", {}))).toMatchObject({ name: { server: null, tool: "ListAgents" }, label: "" });
+    expect(only(openCode("tool_call", "docs_ping", {}, "docs_ping({})"))?.label).toBe("");
+    expect(only(codexItem("tool_call", "docs:ping", "mcpToolCall", { arguments: {} }, "MCP docs:ping"))?.label).toBe("");
+  });
+
+  it("keeps what a call without structured arguments says, unless it only repeats the name", () => {
+    const image = codexItem("tool_call", "ViewImage", "imageView", { path: "/a/shot.png" }, "/a/shot.png");
+    expect(only(image)).toMatchObject({ name: { tool: "ViewImage" }, label: "/a/shot.png" });
+    expect(only(ev(1, "tool_call", "ping", { item_id: "a", tool_name: "ping" }))?.label).toBe("");
+    expect(only(ev(1, "tool_call", "", { item_id: "a", tool_name: "ping" }))?.label).toBe("");
+  });
+
+  it("names watched tasks and follow-ups, which their arguments do not identify", () => {
+    expect(only(claudeCall("Monitor", { command: "tail -f log" }))).toMatchObject({ name: { tool: "Monitor" } });
+    expect(only(codexItem("tool_call", "wait", "collabAgentToolCall", {}, "wait"))).toMatchObject({
+      name: { tool: "Wait" },
+      label: "",
+    });
+  });
+
+  it("leaves a call that already says what it is unnamed", () => {
+    const rows = [
+      claudeCall("Bash", { command: "ls" }),
+      claudeCall("Read", { file_path: "/a.py" }),
+      claudeCall("Grep", { pattern: "x" }),
+      claudeCall("WebFetch", { url: "https://example.test" }),
+      claudeCall("Skill", { skill: "review" }),
+      claudeCall("Agent", { description: "Explore", prompt: "p" }),
+      claudeCall("TodoWrite", { todos: [] }),
+    ];
+    for (const row of rows) expect(only(row)?.name).toBeNull();
+  });
+
+  it("names a subagent call that carries no description", () => {
+    expect(only(codexItem("tool_call", "spawnAgent", "collabAgentToolCall", { prompt: "do it" }, "spawnAgent\n\ndo it"))).toMatchObject({
+      name: { server: null, tool: "spawnAgent" },
+      label: "",
+      prompt: "do it",
+    });
+  });
+});
+
+describe("describeCall subagents", () => {
+  const agent = claudeCall("Agent", { description: "List docs", subagent_type: "general-purpose", prompt: "List them.\nThen stop." });
+  const reply = (text: string, extra: Record<string, unknown> = {}) => ev(3, "tool_result", text, { item_id: "a", ...extra });
+  const notification = (fields: Record<string, unknown>) =>
+    ev(9, "system_note", "Agent finished", {
+      method: "task_notification",
+      task_notification: { version: 1, id: "n", kind: "agent", tool_use_id: "a", ...fields },
+    });
+  // The pair as `deriveTranscript` leaves it once the report has arrived.
+  const reported = (report: ReturnType<typeof ev>) => {
+    const [item] = run([agent, reply("launched", { result_deferred: true })]);
+    if (item.kind !== "pair") throw new Error("expected a pair");
+    return describeCall({ ...item, pair: { ...item.pair, report } });
+  };
+
+  it("shows what a running subagent was asked and what kind it is", () => {
+    expect(only(agent)).toMatchObject({
+      name: null,
+      label: "List docs",
+      agentType: "general-purpose",
+      prompt: "List them.\nThen stop.",
+      result: null,
+      output: null,
+      status: "pending",
+    });
+  });
+
+  it("shows the answer a call returns as prose", () => {
+    expect(only(agent, reply("# Done\n\n2 files"))).toMatchObject({
+      result: "# Done\n\n2 files",
+      output: null,
+      status: "done",
+      cut: false,
+    });
+  });
+
+  it("keeps a call whose result only acknowledges the launch running, without the acknowledgement", () => {
+    const row = only(agent, reply("Async agent launched", { result_deferred: true }));
+    expect(row).toMatchObject({ status: "pending", result: null, output: null, durationMs: null });
+    expect(row?.prompt).toContain("List them.");
+  });
+
+  it("takes the notification's report as the result of a deferred call", () => {
+    expect(reported(notification({ status: "completed", result_preview: "2 files", result_truncated: false }))).toMatchObject({
+      status: "done",
+      result: "2 files",
+      output: null,
+      cut: false,
+      durationMs: 8000,
+    });
+    expect(reported(notification({ status: "completed", result_preview: "2 fi", result_truncated: true }))?.cut).toBe(true);
+    expect(reported(notification({ result_preview: "ok" }))?.status).toBe("done");
+  });
+
+  it("marks a deferred call failed when its report did not complete", () => {
+    for (const status of ["failed", "killed", "stopped"]) {
+      expect(reported(notification({ status }))).toMatchObject({ status: "failed", result: null, cut: false });
+    }
+  });
+
+  it("shows a refused launch as the error it is", () => {
+    expect(only(agent, reply("Agent type not found", { is_error: true }))).toMatchObject({
+      status: "failed",
+      output: "Agent type not found",
+      result: null,
+    });
+  });
+
+  it("shows a deferred command's report as output", () => {
+    const [item] = run([claudeCall("Bash", { command: "make" }), reply("started", { result_deferred: true })]);
+    if (item.kind !== "pair") throw new Error("expected a pair");
+    const report = notification({ status: "completed", result_preview: "built" });
+    expect(describeCall({ ...item, pair: { ...item.pair, report } })).toMatchObject({ output: "built", result: null });
+  });
+
+  it("reads OpenCode's task call, whose tool name differs", () => {
+    const input = { description: "Count", agent: "general", prompt: "Count to three." };
+    expect(only(openCode("tool_call", "task", input, "task({})"), openCode("tool_result", "task", input, "one two three"))).toMatchObject({
+      toolLabel: "Task",
+      label: "Count",
+      agentType: "general",
+      prompt: "Count to three.",
+      result: "one two three",
+    });
+  });
+
+  it("reads a Codex spawn's prompt and the reports a wait collected", () => {
+    const spawn = only(codexItem("tool_call", "spawnAgent", "collabAgentToolCall", { prompt: "Count." }, "spawnAgent\n\nCount."));
+    expect(spawn).toMatchObject({ prompt: "Count.", result: null });
+    const states = { t1: { status: "completed", message: "one" }, t2: { status: "completed", message: "two" } };
+    const item = { agentsStates: states };
+    const waited = (tool: string) =>
+      only(
+        codexItem("tool_call", tool, "collabAgentToolCall", {}, tool),
+        codexItem("tool_result", tool, "collabAgentToolCall", item, `${tool}\n\none\n\ntwo`),
+      );
+    expect(waited("wait")).toMatchObject({ result: "one\n\ntwo", output: null, label: "" });
+    // Closing repeats the report the wait gave.
+    expect(waited("closeAgent")).toMatchObject({ result: null, output: null });
+  });
+
+  it("shows a message sent to a Codex subagent as its prompt", () => {
+    expect(only(codexItem("tool_call", "sendInput", "collabAgentToolCall", { prompt: "And four." }, "sendInput\n\nAnd four."))).toMatchObject({
+      name: { tool: "sendInput" },
+      label: "",
+      prompt: "And four.",
+    });
+  });
+
+  it("does not repeat the label of a result-only subagent notice", () => {
+    const notice = ev(1, "tool_result", "Spawned scout", { item_id: "a", tool_name: "Subagent", item_type: "subAgentActivity" });
+    expect(only(notice)).toMatchObject({ name: null, label: "Spawned scout", result: null, output: null });
+  });
+});
+
+describe("describeCall output of other tools", () => {
+  it("shows what a tool with no card of its own returned", () => {
+    const call = claudeCall("mcp__local-notes__ping", {});
+    expect(only(call, result(3, "a", "\npong\n"))).toMatchObject({ output: "pong", result: null, status: "done" });
+  });
+
+  it("reads the text of a Codex plugin tool from its content items", () => {
+    const item = { arguments: { q: "x" }, contentItems: [{ type: "inputText", text: "one" }, { type: "inputText", text: "two" }] };
+    expect(
+      only(
+        codexItem("tool_call", "app:find", "dynamicToolCall", item, "app:find"),
+        codexItem("tool_result", "app:find", "dynamicToolCall", item, "app:find"),
+      )?.output,
+    ).toBe("one\ntwo");
+  });
+
+  it("leaves out a result that only repeats the call", () => {
+    const silent = (tool: string, itemType: string, text: string) =>
+      only(codexItem("tool_call", tool, itemType, {}, text), codexItem("tool_result", tool, itemType, {}, text))?.output;
+    expect(silent("docs:ping", "mcpToolCall", "MCP docs:ping")).toBeNull();
+    expect(silent("ViewImage", "imageView", "/a/shot.png")).toBeNull();
+    expect(silent("app:find", "dynamicToolCall", "app:find")).toBeNull();
+  });
+
+  it("adds no output to reads, searches, web calls and skills", () => {
+    const calls = [
+      claudeCall("Read", { file_path: "/a.py" }),
+      claudeCall("Grep", { pattern: "x" }),
+      claudeCall("WebFetch", { url: "https://example.test" }),
+      claudeCall("Skill", { skill: "review" }),
+      claudeCall("Edit", { file_path: "/a.py" }),
+    ];
+    for (const call of calls) expect(only(call, result(3, "a", "contents"))).toMatchObject({ output: null, result: null, prompt: null });
+  });
+});
+
 describe("formatCallDuration", () => {
   it("scales from tenths to minutes", () => {
     expect(formatCallDuration(1840)).toBe("1.8s");

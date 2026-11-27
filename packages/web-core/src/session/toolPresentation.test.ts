@@ -9,6 +9,7 @@ import {
   isFileEditToolName,
   previewForToolEvent,
   toolBadgeFor,
+  toolNameParts,
   toolPairAttachments,
 } from "./toolPresentation";
 
@@ -100,6 +101,20 @@ describe("previewForToolEvent", () => {
   it("falls back to the event text for results", () => {
     const result = ev(2, "tool_result", "12 passed\nin 1.8s", { tool_name: "Bash" });
     expect(previewForToolEvent(result, "Bash")).toBe("12 passed · 2 lines");
+  });
+});
+
+describe("toolNameParts", () => {
+  it("splits an MCP or plugin name into server and tool", () => {
+    expect(toolNameParts("mcp__local-notes__lookup_note")).toEqual({ server: "local-notes", tool: "lookup_note" });
+    expect(toolNameParts("mcp__claude_ai_Drive__search__files")).toEqual({ server: "claude_ai_Drive", tool: "search__files" });
+    expect(toolNameParts("docs:search")).toEqual({ server: "docs", tool: "search" });
+  });
+
+  it("leaves any other name whole", () => {
+    for (const name of ["ListAgents", "docs_search", "mcp__thing"]) {
+      expect(toolNameParts(name)).toEqual({ server: null, tool: name });
+    }
   });
 });
 

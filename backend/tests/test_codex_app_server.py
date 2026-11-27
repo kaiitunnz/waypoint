@@ -699,19 +699,48 @@ def test_pending_approval_ids_are_empty_before_the_adapter_exists() -> None:
     assert transport.pending_approval_ids(session) == ()
 
 
+def _command_approval(action: dict[str, Any], **fields: Any) -> dict[str, Any]:
+    return {
+        "kind": "command",
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "cmd-1",
+        "startedAtMs": 1_700_000_000_000,
+        "environmentId": "local",
+        "command": f"/bin/bash -lc '{action['command']}'",
+        "cwd": "/tmp/work",
+        "commandActions": [action],
+        "proposedExecpolicyAmendment": action["command"].split(),
+        "availableDecisions": ["accept", "cancel"],
+        **fields,
+    }
+
+
+_READ_NOTES = {
+    "type": "read",
+    "command": "cat notes.txt",
+    "name": "notes.txt",
+    "path": "/tmp/work/notes.txt",
+}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("actions", "summary"),
+    ("request_params", "summary"),
     [
+        (_command_approval(_READ_NOTES), "Read `notes.txt`"),
+        (_command_approval({"type": "unknown", "command": "rm a"}), None),
+        # An escalated read: only its reason says it leaves the sandbox.
         (
-            [{"type": "read", "command": "cat a", "name": "a", "path": "a"}],
-            "Read `a`",
+            _command_approval(
+                _READ_NOTES, reason="Check the notes outside the sandbox"
+            ),
+            None,
         ),
-        ([{"type": "unknown", "command": "rm a"}], None),
     ],
 )
 async def test_command_approval_event_carries_the_summary(
-    actions: list[dict[str, Any]], summary: str | None
+    request_params: dict[str, Any], summary: str | None
 ) -> None:
     emitted: list = []
     adapter, fake = make_parked_adapter(emitted)
@@ -721,9 +750,7 @@ async def test_command_approval_event_carries_the_summary(
     assert handler is not None
     reader = asyncio.create_task(
         asyncio.to_thread(
-            handler,
-            "item/commandExecution/requestApproval",
-            {"itemId": "cmd-1", "command": "cat a", "commandActions": actions},
+            handler, "item/commandExecution/requestApproval", request_params
         )
     )
     while not any(kind == EventKind.APPROVAL_REQUEST for _, kind, *_ in emitted):

@@ -283,9 +283,14 @@ def map_turn_status(value: Any) -> SessionStatus:
 
 
 def approval_summary(method: str, params: dict[str, Any]) -> str | None:
-    """A command approval's summary. Its ``reason`` is a detail of the request,
-    not a description of the command."""
-    if method != "item/commandExecution/requestApproval" or not params.get("command"):
+    """A command approval's summary. A request that gives a ``reason`` has none:
+    it can ask for more than its command, such as running outside the sandbox,
+    and nothing else in it says so."""
+    if (
+        method != "item/commandExecution/requestApproval"
+        or not params.get("command")
+        or params.get("reason")
+    ):
         return None
     return command_summary(params.get("commandActions"))
 

@@ -335,11 +335,11 @@ def test_codex_live_and_imported_commands(
     assert "summary" not in result.metadata
 
 
-def test_codex_approval_takes_the_parsed_action_and_never_the_reason() -> None:
+def test_codex_approval_takes_the_parsed_action() -> None:
     method = "item/commandExecution/requestApproval"
     params: dict[str, Any] = {
         "command": "cat SKILL.md",
-        "reason": "Needed to learn the commands",
+        "reason": None,
         "commandActions": [_read("SKILL.md")],
     }
 
@@ -348,3 +348,5 @@ def test_codex_approval_takes_the_parsed_action_and_never_the_reason() -> None:
     assert approval_summary(method, {**params, "commandActions": None}) is None
     assert approval_summary(method, {**params, "command": None}) is None
     assert approval_summary("item/fileChange/requestApproval", params) is None
+    # A reason is the only trace of an ask beyond the command.
+    assert approval_summary(method, {**params, "reason": "Run unsandboxed"}) is None

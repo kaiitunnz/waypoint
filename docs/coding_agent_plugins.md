@@ -974,7 +974,7 @@ about the call, never from a tool's title, path or command:
 | --- | --- |
 | Claude (both transports and history import) | The `description` input of `Bash`, `Agent`, `Task`, `Monitor` and `PowerShell`. On any other tool that key is an argument of the call. |
 | OpenCode | The `description` input of the `subagent` tool. `shell` has none. |
-| Codex | The command's parsed `commandActions`, such as ``Read `SKILL.md` ``, when every action reads, searches or lists. An approval's `reason` is not one. |
+| Codex | The command's parsed `commandActions`, such as ``Read `SKILL.md` ``, when every action reads, searches or lists. A command approval that gives a `reason` has none, since the reason can ask for more than the command, such as running it outside the sandbox. |
 
 A transport that reads dialogs off a screen sets it only for a call it matched.
 Clients show it as untrusted agent text. It titles an approval only where

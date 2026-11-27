@@ -460,7 +460,9 @@ async def test_a_poll_overtaken_by_a_reply_raises_nothing(
 ) -> None:
     pane = Pane(tmp_path, "approval_bash_boxed.txt")
     await pane.poll()
-    append(pane.main, use("late", "Bash", BASH))
+    # Made after the reply, so the unnamed answer does not claim it.
+    later = datetime.now(UTC) + timedelta(seconds=60)
+    append(pane.main, use("late", "Bash", BASH, at=later))
     dialogs = pane.tailer.dialogs
     match = dialogs._match
     raised = len(pane.asks)

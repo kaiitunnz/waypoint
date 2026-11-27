@@ -1052,3 +1052,18 @@ def test_a_typed_numbered_line_is_input_not_an_option() -> None:
     screen = _load("composer_labelled.txt").replace("plain draft", "1. numbered draft")
     assert composer_drawn(screen)
     assert composer_holds_input(screen)
+
+
+@pytest.mark.parametrize(
+    ("fixture", "agent", "matchable"),
+    [
+        ("approval_bash_subagent_narrow.txt", "general-purpose", True),
+        ("approval_bash_subagent_title_wrapped.txt", None, False),
+    ],
+)
+def test_captured_narrow_subagent_headings(
+    fixture: str, agent: str | None, matchable: bool
+) -> None:
+    dialog = parse_approval(_load(fixture))
+    assert dialog is not None
+    assert (dialog.agent, dialog.matchable) == (agent, matchable)

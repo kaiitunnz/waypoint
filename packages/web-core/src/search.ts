@@ -108,7 +108,7 @@ export function matchesQuery(item: any, groups: ParsedQuery, defaultFields: stri
         const strValue = String(itemValue);
         if (term.isRegex) {
           const pattern = term.value as RegExp;
-          // A `g` regex would otherwise resume from the last session it matched.
+          // A `g` regex would otherwise resume where its match on the previous item ended.
           pattern.lastIndex = 0;
           if (pattern.test(strValue)) {
             termMatched = true;

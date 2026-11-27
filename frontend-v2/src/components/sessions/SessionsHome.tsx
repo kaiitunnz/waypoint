@@ -118,7 +118,6 @@ export function SessionsHome() {
       menu: menuFor(session),
     };
   };
-  // Pinned and Live read alike.
   const cardGroup = (title: string, group: SessionRecord[]) =>
     group.length > 0 ? (
       <section>

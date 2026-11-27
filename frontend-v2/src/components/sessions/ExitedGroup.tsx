@@ -30,7 +30,6 @@ interface ExitedToggleProps {
   className?: string;
 }
 
-// The Exited group's heading, which shows or hides every exited session.
 export function ExitedToggle({ label, open, onToggle, className }: ExitedToggleProps) {
   return (
     <button type="button" className={cx(styles.toggle, className)} aria-expanded={open} onClick={onToggle}>

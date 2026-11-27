@@ -1,19 +1,13 @@
 import { itemIdForEvent, readToolName } from "../events";
 import type { EventRecord } from "../types";
 import { isBlankAgentMessage } from "./cardText";
-import { pairCardKindOf } from "./cardKind";
+import { toolBadgeFor } from "./toolPresentation";
 import { pendingCallOf } from "./toolRun";
-import {
-  isStandaloneToolCard,
-  isToolResultDelta,
-  minRawSequence,
-  type LeafItem,
-  type TranscriptItem,
-} from "./transcript";
-import type { TranscriptTurn } from "./turns";
+import { isStandaloneToolCard, isToolResultDelta, minRawSequence } from "./transcript";
+import { lastRunIndex, runCallsOf, type TranscriptTurn } from "./turns";
 
-// Every event carries the session's status when it was recorded, which is how a
-// transcript says where its turns start and end.
+// An event carries the session's status as it was recorded, which is how a
+// transcript says where its turns start and end; one without a status says neither.
 const ACTIVE = new Set(["starting", "running", "waiting_input"]);
 const ENDED = new Set(["idle", "interrupted", "error", "exited"]);
 const CUT_SHORT = new Set(["interrupted", "error", "exited"]);
@@ -51,6 +45,19 @@ function lastTurnEnd(events: readonly EventRecord[]): number {
   return -1;
 }
 
+// A note about the session, which can be recorded as running between turns.
+const isNote = (event: EventRecord): boolean => event.kind === "system_note" || event.kind === "status_update";
+
+// The events since the turn before ended.
+function currentTurn(events: readonly EventRecord[]): { events: readonly EventRecord[]; bounded: boolean } {
+  const end = lastTurnEnd(events);
+  const since = events.slice(end + 1);
+  // A turn cut short can still deliver events afterwards; the next message starts anew.
+  const cutShort = end >= 0 && CUT_SHORT.has(statusOf(events[end]));
+  const message = cutShort ? since.findIndex((event) => event.kind === "user_input") : -1;
+  return { events: message > 0 ? since.slice(message) : since, bounded: end >= 0 };
+}
+
 export interface TurnStart {
   // Epoch ms, or null when the events hold nothing of the current turn.
   startedAt: number | null;
@@ -58,16 +65,15 @@ export interface TurnStart {
   bounded: boolean;
 }
 
-// When the transcript's latest turn started: its first message, or, for a turn
-// that began without one, its first activity.
+// When the transcript's latest turn started: its first activity, leaving out notes
+// that run up to its first message.
 export function turnStart(events: readonly EventRecord[]): TurnStart {
-  const end = lastTurnEnd(events);
-  const turn = events.slice(end + 1).filter(isActivity);
-  // A turn cut short can still deliver events afterwards; the next message starts anew.
-  const cutShort = end >= 0 && CUT_SHORT.has(statusOf(events[end]));
-  const first = (cutShort && turn.find((event) => event.kind === "user_input")) || turn[0];
+  const turn = currentTurn(events);
+  const activity = turn.events.filter(isActivity);
+  const message = activity.findIndex((event) => event.kind === "user_input");
+  const first = message > 0 && activity.slice(0, message).every(isNote) ? activity[message] : activity[0];
   const startedAt = first ? Date.parse(first.ts) : Number.NaN;
-  return { startedAt: Number.isFinite(startedAt) ? startedAt : null, bounded: end >= 0 };
+  return { startedAt: Number.isFinite(startedAt) ? startedAt : null, bounded: turn.bounded };
 }
 
 export type FetchOlderEvents = (beforeSequence: number) => Promise<{ events: EventRecord[]; has_more: boolean }>;
@@ -81,11 +87,10 @@ export async function findTurnStart(
   events: readonly EventRecord[],
   oldestSequence: number,
   fetchOlder: FetchOlderEvents,
-  maxPages: number = MAX_PAGES,
 ): Promise<number | null> {
   let history = [...events];
   let before = oldestSequence;
-  for (let page = 0; page < maxPages; page += 1) {
+  for (let page = 0; page < MAX_PAGES; page += 1) {
     const older = await fetchOlder(before);
     history = [...older.events, ...history];
     const found = turnStart(history);
@@ -106,24 +111,11 @@ export function formatElapsed(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-// The turn's last tool run: the one a working session shows as live.
-export function lastRunIndex(turn: TranscriptTurn): number {
-  return turn.kind === "rule" ? -1 : turn.items.findLastIndex((item) => item.kind === "tool_run" || item.kind === "pair");
-}
-
-// The calls a transcript item draws as a run line.
-function runCalls(item: TranscriptItem): LeafItem[] {
-  if (item.kind === "tool_run") return item.items;
-  if (item.kind !== "pair") return [];
-  const kind = pairCardKindOf(item.pair);
-  return kind === "ask_question" || kind === "send_file" ? [] : [item];
-}
-
 function hasLiveRun(turns: readonly TranscriptTurn[]): boolean {
   const turn = turns[turns.length - 1];
   if (!turn || turn.kind === "rule") return false;
   const item = turn.items[lastRunIndex(turn)];
-  return item !== undefined && pendingCallOf(runCalls(item)) !== undefined;
+  return item !== undefined && pendingCallOf(runCallsOf(item)) !== undefined;
 }
 
 // A call still running: no result, or only streamed output. A card of its own is
@@ -149,11 +141,11 @@ const isSpoken = (event: EventRecord): boolean =>
 // already: a live run line names its call, and a reply being written shows itself.
 export function workingStep(turns: readonly TranscriptTurn[], events: readonly EventRecord[]): string | null {
   if (hasLiveRun(turns)) return null;
-  const turn = events.slice(lastTurnEnd(events) + 1);
+  const turn = currentTurn(events).events;
   const call = runningCall(turn);
   if (call) {
     const tool = readToolName(call);
-    return tool ? `Running ${tool.toLowerCase()}` : null;
+    return tool ? `Running ${toolBadgeFor(tool).label.toLowerCase()}` : null;
   }
   const last = turn.findLast(isSpoken);
   if (last?.kind === "agent_output" && last.metadata?.item_kind !== "reasoning") return null;

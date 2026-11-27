@@ -6,6 +6,7 @@ import { cardKindOf, pairCardKindOf } from "@waypoint/web-core/session/cardKind"
 import { modelChangeText } from "@waypoint/web-core/session/cardText";
 import { summarizeNotificationRun } from "@waypoint/web-core/session/taskNotificationView";
 import { itemKey, primaryEvent, type LeafItem, type Repeat, type TranscriptItem } from "@waypoint/web-core/session/transcript";
+import { runCallsOf } from "@waypoint/web-core/session/turns";
 import type { EventRecord } from "@waypoint/web-core/types";
 
 import { AnswerCard } from "./cards/AnswerCard";
@@ -96,15 +97,12 @@ export function ItemView({ item, first, live }: ItemViewProps) {
       return <ToolRun items={item.items} working={live} />;
     case "notification_run":
       return <NotificationRun items={item.items} />;
-    case "pair":
-      switch (pairCardKindOf(item.pair)) {
-        case "ask_question":
-          return item.pair.call ? <AskCard event={item.pair.call} /> : null;
-        case "send_file":
-          return <SentFiles event={primaryEvent(item)} />;
-        default:
-          return <ToolRun items={[item]} working={live} />;
-      }
+    case "pair": {
+      const calls = runCallsOf(item);
+      if (calls.length > 0) return <ToolRun items={calls} working={live} />;
+      if (pairCardKindOf(item.pair) === "send_file") return <SentFiles event={primaryEvent(item)} />;
+      return item.pair.call ? <AskCard event={item.pair.call} /> : null;
+    }
     case "single":
       return <Single event={item.event} first={first} repeat={item.repeat} />;
   }

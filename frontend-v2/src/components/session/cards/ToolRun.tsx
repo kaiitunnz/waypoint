@@ -21,7 +21,7 @@ export function ToolRun({ items, working }: ToolRunProps) {
   const { cwd, full } = useSessionContext();
   const summary = summarizeToolRun(items);
   const calls = items.map((child) => ({ child, row: describeCall(child, cwd) }));
-  const pending = working ? pendingCallOf(items, cwd) : undefined;
+  const pending = working ? pendingCallOf(items) : undefined;
   const live = pending !== undefined;
   const step = pending ? describeStep(primaryEvent(pending)) : null;
 

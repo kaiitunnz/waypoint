@@ -1,8 +1,7 @@
 "use client";
 
 import { itemKey } from "@waypoint/web-core/session/transcript";
-import { lastRunIndex } from "@waypoint/web-core/session/workingRow";
-import type { TranscriptTurn } from "@waypoint/web-core/session/turns";
+import { lastRunIndex, type TranscriptTurn } from "@waypoint/web-core/session/turns";
 
 import { cx } from "@/lib/cx";
 

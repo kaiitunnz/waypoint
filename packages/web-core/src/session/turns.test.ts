@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
 import { buildTranscriptItems, mergeEvents } from "./transcript";
-import { groupTurns, type TranscriptTurn } from "./turns";
+import { groupTurns, lastRunIndex, runCallsOf, type TranscriptTurn } from "./turns";
 
 const call = (seq: number, id: string, tool = "Bash") => ev(seq, "tool_call", "", { item_id: id, tool_name: tool });
 
@@ -79,5 +79,26 @@ describe("groupTurns", () => {
     const start = turns([delta(1, "Hi ")]);
     const streamed = turns(mergeEvents([delta(1, "Hi ")], delta(2, "there")));
     expect(streamed.map((turn) => turn.key)).toEqual(start.map((turn) => turn.key));
+  });
+});
+
+describe("lastRunIndex", () => {
+  const sent = (seq: number) => call(seq, `file-${seq}`, "SendUserFile");
+
+  it("finds the turn's last run", () => {
+    const list = turns([ev(1, "user_input", "go"), call(2, "a"), ev(3, "agent_output", "done")]);
+    expect(lastRunIndex(list[0])).toBe(-1);
+    expect(lastRunIndex(list[1])).toBe(0);
+  });
+
+  it("passes over a card that follows the run", () => {
+    const [turn] = turns([call(1, "a"), sent(2)]);
+    expect(turn.kind === "agent" && turn.items.map((item) => runCallsOf(item).length)).toEqual([1, 0]);
+    expect(lastRunIndex(turn)).toBe(0);
+  });
+
+  it("counts a tool pair standing alone", () => {
+    const [pair] = buildTranscriptItems([call(1, "a")]).flatMap((item) => (item.kind === "tool_run" ? item.items : []));
+    expect(runCallsOf(pair)).toEqual([pair]);
   });
 });

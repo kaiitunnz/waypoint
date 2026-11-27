@@ -4,6 +4,7 @@ import { ev } from "../test-helpers";
 import { buildTranscriptItems, type TranscriptItem } from "./transcript";
 import {
   describeCall,
+  pendingCallOf,
   formatCallDuration,
   summarizeToolRun,
   toolNamesOfRun,
@@ -294,5 +295,23 @@ describe("formatCallDuration", () => {
   it("does not round a near-ten-second call up to 10.0s", () => {
     expect(formatCallDuration(9_949)).toBe("9.9s");
     expect(formatCallDuration(9_999)).toBe("10s");
+  });
+});
+
+describe("pendingCallOf", () => {
+  const run = (...events: ReturnType<typeof ev>[]) =>
+    buildTranscriptItems(events).flatMap((item) => (item.kind === "tool_run" ? item.items : []));
+  const call = (seq: number, id: string) => ev(seq, "tool_call", "", { item_id: id, tool_name: "Bash" });
+
+  it("takes the latest call without a result", () => {
+    const items = run(call(1, "a"), call(2, "b"), call(3, "c"), ev(4, "tool_result", "", { item_id: "c" }));
+    expect(pendingCallOf(items)).toBe(items[1]);
+    expect(describeCall(items[1])?.status).toBe("pending");
+  });
+
+  it("counts a call without an item id, and no stray result", () => {
+    const loose = run(ev(1, "tool_call", "", { tool_name: "Bash" }));
+    expect(pendingCallOf(loose)).toBe(loose[0]);
+    expect(pendingCallOf(run(ev(1, "tool_result", "")))).toBeUndefined();
   });
 });

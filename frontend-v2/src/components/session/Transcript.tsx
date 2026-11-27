@@ -105,7 +105,8 @@ export function Transcript({
               </div>
               {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
               {workingRow}
-              {!loading && turns.length === 0 && pending.length === 0 ? (
+              {/* The working row already says the agent is at work. */}
+              {!loading && turns.length === 0 && pending.length === 0 && (hiddenCount > 0 || !workingRow) ? (
                 <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
               ) : null}
             </div>

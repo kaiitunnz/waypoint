@@ -93,6 +93,8 @@ describe("rankSessionsForSwitcher with the search syntax", () => {
     }),
     session("claude", "Waypoint Manager", { backend: "claude_code", last_event_at: "2026-11-25T11:00:00Z" }),
     session("sub", "subagent:machine-health", { backend: "claude_code", cwd: "/srv/ms/x", repo_name: "infra" }),
+    // Matches both halves the parser makes of `/srv/ms/x`, but not the path.
+    session("decoy", "Decoy", { backend: "claude_code", cwd: "/opt/srv/y/x", repo_name: "infra", transport: "tmux" }),
     session("both", "Research and development", { backend: "codex", repo_name: "waypoint" }),
     session("gone", "Old codex sweep", { backend: "codex", status: "exited" }),
   ];
@@ -114,6 +116,10 @@ describe("rankSessionsForSwitcher with the search syntax", () => {
   it("keeps smart case for the free text", () => {
     expect(search("agent:codex FMv")).toEqual(["codex"]);
     expect(search("agent:codex fmV")).toEqual([]);
+  });
+
+  it("filters by any field a session has", () => {
+    expect(search("transport:tmux")).toEqual(["decoy"]);
   });
 
   it("searches a title for name:value where sessions have no such field", () => {
@@ -141,7 +147,7 @@ describe("rankSessionsForSwitcher with the search syntax", () => {
   });
 
   it("lists each match of an OR query once, in the section's own order", () => {
-    expect(search("agent:claude_code OR agent:codex")).toEqual(["codex", "claude", "sub", "both", "gone"]);
+    expect(search("agent:claude_code OR agent:codex")).toEqual(["codex", "claude", "sub", "decoy", "both", "gone"]);
     expect(search("agent:codex or research")).toEqual(["codex", "both", "gone"]);
   });
 

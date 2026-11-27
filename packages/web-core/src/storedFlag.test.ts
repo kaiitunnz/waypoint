@@ -125,7 +125,7 @@ describe("storedFlag", () => {
     localStorage.setItem("w", "1");
     vi.stubGlobal("window", { sessionStorage, localStorage });
     const flag = storedFlag("w", false, windowStorage);
-    // A choice another window or an older build kept in the browser is not this window's.
+    // A choice in browser-wide storage is not this window's.
     expect(flag.get()).toBe(false);
     flag.set(true);
     expect(sessionStorage.data.get("w")).toBe("1");

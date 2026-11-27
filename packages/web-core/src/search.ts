@@ -60,7 +60,10 @@ export function parseQuery(query: string): ParsedQuery {
       const flags = rawValue.slice(lastSlash + 1);
       try {
         const finalFlags = flags.includes('i') ? flags : flags + 'i';
-        value = new RegExp(pattern, finalFlags);
+        const compiled = new RegExp(pattern, finalFlags);
+        // A path such as `/home/my` reads as flags; `y` would anchor the match, which
+        // the server's search does not.
+        value = compiled.sticky ? new RegExp(pattern, compiled.flags.replace('y', '')) : compiled;
         isRegex = true;
       } catch {
         // Fallback safely to a plain string if regex compilation fails
@@ -104,7 +107,10 @@ export function matchesQuery(item: any, groups: ParsedQuery, defaultFields: stri
         
         const strValue = String(itemValue);
         if (term.isRegex) {
-          if ((term.value as RegExp).test(strValue)) {
+          const pattern = term.value as RegExp;
+          // A `g` regex would otherwise resume from the last session it matched.
+          pattern.lastIndex = 0;
+          if (pattern.test(strValue)) {
             termMatched = true;
             break;
           }

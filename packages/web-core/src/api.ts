@@ -2120,7 +2120,7 @@ interface SocketHandlers {
   onClose?: (event: CloseEvent) => void;
 }
 
-// Each connection to a host measures its clock again.
+// Each connection through here measures the host's clock again.
 function attachHandlers(host: string, socket: WebSocket, handlers: SocketHandlers): WebSocket {
   socket.onmessage = (event) => {
     handlers.onMessage(JSON.parse(event.data) as SessionEnvelope);

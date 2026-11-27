@@ -4,6 +4,8 @@
 // A `Date` header drops the milliseconds and uvicorn rewrites it once a second, so the
 // server's clock reads up to this much later than the header says.
 const DATE_LAG_MS = 2_000;
+// A slower answer says too little about the clocks to replace the offset held.
+const MAX_ROUND_TRIP_MS = 5_000;
 
 // The server's clock minus this client's, in ms.
 let offset = 0;
@@ -51,15 +53,21 @@ async function measure(host: string): Promise<void> {
   const sentAt = Date.now();
   let date: string | null;
   try {
-    const response = await fetch(`${host}/health`, { cache: "no-store" });
+    const response = await fetch(`${host}/health`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(MAX_ROUND_TRIP_MS),
+    });
     date = response.headers.get("date");
   } catch {
     return;
   }
+  const receivedAt = Date.now();
+  // A suspended page's timer can let an answer through long after the timeout.
+  if (receivedAt - sentAt > MAX_ROUND_TRIP_MS) return;
   // Another host was connected to meanwhile.
   if (measured !== host) return;
   // A server that does not expose its `Date` is taken to agree.
-  setOffset(estimateClockOffset(date, sentAt, Date.now()) ?? 0);
+  setOffset(estimateClockOffset(date, sentAt, receivedAt) ?? 0);
 }
 
 // Measures the offset against `host`; called when a connection to it opens.

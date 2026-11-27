@@ -57,6 +57,14 @@ describe("parseQuery", () => {
     ]);
   });
 
+  it("matches every item on its own, whatever flags a /regex/ carries", () => {
+    const sessions = [{ cwd: "/home/a" }, { cwd: "/home/b" }];
+    for (const query of ["/home/g", "/home/y"]) {
+      const parsed = parseQuery(query);
+      expect(sessions.filter((s) => matchesQuery(s, parsed, ["cwd"]))).toHaveLength(2);
+    }
+  });
+
   it("compiles /regex/ terms case-insensitively", () => {
     const [term] = parseQuery("/b.g/")[0];
     expect(term.isRegex).toBe(true);

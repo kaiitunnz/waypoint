@@ -935,11 +935,11 @@ inside that agent's `normalize.py`; the frontend reader stays put.
 
 ### Status
 
-An event's `status` becomes the session's status; `None` keeps the current one. Set
-it on a turn boundary (a turn starting, ending, or waiting on the human) and on the
-turn's own model and tool activity. Everything else the agent reports (bookkeeping,
-background tasks, compaction results, queued or transcript-only messages) is
-emitted with `None`, since it can arrive while the session is idle.
+An event's `status` becomes the session's status, and `None` keeps the current
+one. Set it only for a turn boundary (a turn starting, ending, or waiting on the
+human) or the turn's own activity. A record that can arrive while the session is
+idle (bookkeeping, background task progress, compaction results, queued or
+transcript-only messages) carries `None`.
 
 ### Deferred results
 

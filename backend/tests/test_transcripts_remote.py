@@ -22,7 +22,11 @@ from waypoint.backends import transcript_fs_remote as remote_mod
 from waypoint.backends import transcript_fs_remote_script as script_mod
 from waypoint.backends.base import BackendPlugin
 from waypoint.backends.bootstrap import build_default_registry
-from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
+from waypoint.backends.transcript_fs_remote import (
+    RemoteMissing,
+    RemoteRead,
+    RemoteTranscriptFilesystem,
+)
 from waypoint.backends.transcripts import (
     ThreadAvailability,
     TranscriptUnavailableError,
@@ -346,6 +350,16 @@ def test_remote_glob_artifacts_degrades_to_empty_on_transport_failure(
         )
 
 
+def test_remote_probe_dir_tells_unreachable_from_missing(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    assert fs.probe_dir(str(tmp_path)) is True
+    assert fs.probe_dir(str(tmp_path / "gone")) is False
+    fake_remote.force_error("is_dir", "transport failure")
+    assert fs.probe_dir(str(tmp_path)) is None
+
+
 def test_remote_expanduser_resolves_against_remote_home(
     tmp_path: Path, fake_remote: _FakeRemote, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -420,7 +434,7 @@ def test_remote_read_range_reads_bytes_and_reports_identity(
     target.write_bytes(b"line one\nline two\n")
     fs = RemoteTranscriptFilesystem(_launch_target())
     read = fs.read_range(str(target), 0, 256 * 1024)
-    assert read is not None
+    assert isinstance(read, RemoteRead)
     assert read.data == b"line one\nline two\n"
     assert read.size == 18
     st = target.stat()
@@ -435,7 +449,7 @@ def test_remote_read_range_honors_offset(
     target.write_bytes(b"0123456789")
     fs = RemoteTranscriptFilesystem(_launch_target())
     read = fs.read_range(str(target), 4, 256 * 1024)
-    assert read is not None
+    assert isinstance(read, RemoteRead)
     assert read.data == b"456789"
     assert read.size == 10
 
@@ -447,7 +461,7 @@ def test_remote_read_range_caps_to_limit(
     target.write_bytes(b"0123456789")
     fs = RemoteTranscriptFilesystem(_launch_target())
     read = fs.read_range(str(target), 0, 4)
-    assert read is not None
+    assert isinstance(read, RemoteRead)
     assert read.data == b"0123"
     # size still reflects the whole file, not the capped read
     assert read.size == 10
@@ -460,7 +474,7 @@ def test_remote_read_range_metadata_only_with_zero_limit(
     target.write_bytes(b"0123456789")
     fs = RemoteTranscriptFilesystem(_launch_target())
     read = fs.read_range(str(target), 0, 0)
-    assert read is not None
+    assert isinstance(read, RemoteRead)
     assert read.data == b""
     assert read.size == 10
 
@@ -472,7 +486,7 @@ def test_remote_read_range_offset_past_eof_returns_empty(
     target.write_bytes(b"0123456789")
     fs = RemoteTranscriptFilesystem(_launch_target())
     read = fs.read_range(str(target), 50, 256 * 1024)
-    assert read is not None
+    assert isinstance(read, RemoteRead)
     assert read.data == b""
     assert read.size == 10
 
@@ -485,15 +499,16 @@ def test_remote_read_range_binary_round_trip(
     target.write_bytes(payload)
     fs = RemoteTranscriptFilesystem(_launch_target())
     read = fs.read_range(str(target), 0, 256 * 1024)
-    assert read is not None
+    assert isinstance(read, RemoteRead)
     assert read.data == payload
 
 
-def test_remote_read_range_missing_file_returns_none(
+def test_remote_read_range_reports_a_missing_file(
     tmp_path: Path, fake_remote: _FakeRemote
 ) -> None:
     fs = RemoteTranscriptFilesystem(_launch_target())
-    assert fs.read_range(str(tmp_path / "nope.jsonl"), 0, 256 * 1024) is None
+    read = fs.read_range(str(tmp_path / "nope.jsonl"), 0, 256 * 1024)
+    assert read == RemoteMissing()
 
 
 def test_remote_read_range_directory_returns_none(
@@ -537,7 +552,7 @@ def test_remote_read_range_expands_tilde(
     (tmp_path / "t.jsonl").write_bytes(b"hi")
     fs = RemoteTranscriptFilesystem(_launch_target())
     read = fs.read_range("~/t.jsonl", 0, 256 * 1024)
-    assert read is not None
+    assert isinstance(read, RemoteRead)
     assert read.data == b"hi"
 
 

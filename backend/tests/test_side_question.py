@@ -182,6 +182,7 @@ def _make_session(
     launch_env: dict[str, str] | None = None,
     model: str | None = None,
     effort: str | None = None,
+    cwd: str = "/tmp/project",
 ) -> SessionRecord:
     settings_dir = storage.database_path.parent / "sessions" / session_id
     settings_dir.mkdir(parents=True, exist_ok=True)
@@ -197,7 +198,7 @@ def _make_session(
         source=SessionSource.MANAGED,
         transport="claude_cli",
         title="Test Session",
-        cwd="/tmp/project",
+        cwd=cwd,
         launch_target_id=launch_target_id,
         status=status,
         created_at=now,
@@ -707,6 +708,31 @@ async def test_bg_task_success_updates_record(
     assert qs[0].status == SideQuestionStatus.ANSWERED
     assert qs[0].answer == "All green!"
     assert qs[0].fork_thread_id is not None
+
+
+async def test_bg_task_runs_in_the_launch_folder_when_the_folder_is_gone(
+    runtime: Any, plugin: Any, tmp_path: Path
+) -> None:
+    session = _make_session(
+        runtime.storage,
+        transport_state_extra={"launch_cwd": str(tmp_path)},
+        cwd=str(tmp_path / "removed"),
+    )
+    sq = SideQuestion(
+        id="sq-moved",
+        question="Where?",
+        status=SideQuestionStatus.PENDING,
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    _write_side_questions(runtime, session.id, [sq])
+    one_shot = AsyncMock(return_value="here")
+
+    with patch.object(sq_module, "_run_one_shot_local", new=one_shot):
+        await sq_module._run_side_question_bg(runtime, plugin, session.id, "sq-moved")
+
+    assert one_shot.await_args is not None
+    assert one_shot.await_args.args[3] == str(tmp_path)
 
 
 async def test_bg_task_persists_fork_id_before_one_shot(

@@ -9,14 +9,16 @@ from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
 )
-from waypoint.backends.transcript_fs_remote import RemoteRead
+from waypoint.backends.transcript_fs_remote import RemoteMissing, RemoteRead
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
 TID = "11111111-1111-1111-1111-111111111111"
+CWD = "/repo/app"
+MOVED_CWD = "/repo/app/.claude/worktrees/w"
 
 
-def _session(cwd: str = "/repo/app") -> SessionRecord:
+def _session(cwd: str = CWD) -> SessionRecord:
     now = datetime.now(UTC)
     return SessionRecord(
         id="s1",
@@ -44,18 +46,26 @@ def _launch_target() -> SshLaunchTargetConfig:
 # ── Local source ─────────────────────────────────────────────────────────────
 
 
+def _project_file(config_dir: Path, cwd: str = MOVED_CWD) -> Path:
+    path = bs.transcript_path(cwd, TID, str(config_dir))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _local_source(config_dir: Path) -> tuple[LocalTranscriptByteSource, Path]:
+    source = LocalTranscriptByteSource(CWD, TID, str(config_dir))
+    return source, _project_file(config_dir, CWD)
+
+
 def test_local_missing_file_is_unobserved(tmp_path: Path) -> None:
-    src = LocalTranscriptByteSource.__new__(LocalTranscriptByteSource)
-    src._path = tmp_path / "nope.jsonl"
+    src, _ = _local_source(tmp_path)
     read = src.read_from(0)
     assert read.observed is False
 
 
 def test_local_reads_data_size_identity(tmp_path: Path) -> None:
-    path = tmp_path / "t.jsonl"
+    src, path = _local_source(tmp_path)
     path.write_bytes(b"line one\nline two\n")
-    src = LocalTranscriptByteSource.__new__(LocalTranscriptByteSource)
-    src._path = path
     read = src.read_from(0)
     assert read.observed is True
     assert read.data == b"line one\nline two\n"
@@ -65,24 +75,171 @@ def test_local_reads_data_size_identity(tmp_path: Path) -> None:
 
 
 def test_local_honors_offset(tmp_path: Path) -> None:
-    path = tmp_path / "t.jsonl"
+    src, path = _local_source(tmp_path)
     path.write_bytes(b"0123456789")
-    src = LocalTranscriptByteSource.__new__(LocalTranscriptByteSource)
-    src._path = path
     read = src.read_from(4)
     assert read.data == b"456789"
 
 
 def test_local_metadata_only_does_not_read_body(tmp_path: Path) -> None:
-    path = tmp_path / "t.jsonl"
+    src, path = _local_source(tmp_path)
     path.write_bytes(b"0123456789")
-    src = LocalTranscriptByteSource.__new__(LocalTranscriptByteSource)
-    src._path = path
     read = src.read_from(0, metadata_only=True)
     assert read.observed is True
     assert read.data == b""
     assert read.size == 10
     assert read.identity is not None
+
+
+# ── Local source: a transcript Claude moved ──────────────────────────────────
+
+
+def test_local_follows_a_moved_transcript_from_the_same_offset(tmp_path: Path) -> None:
+    src, path = _local_source(tmp_path)
+    path.write_bytes(b"one\n")
+    first = src.read_from(0)
+    moved = _project_file(tmp_path)
+    path.rename(moved)
+    with moved.open("ab") as fh:
+        fh.write(b"two\n")
+
+    read = src.read_from(4)
+
+    assert read.observed is True
+    assert read.data == b"two\n"
+    assert read.size == 8
+    assert read.identity == first.identity
+
+
+def test_local_searches_for_a_cwd_too_long_to_name_a_folder(tmp_path: Path) -> None:
+    _project_file(tmp_path).write_bytes(b"one\n")
+    src = LocalTranscriptByteSource("/" + "x" * 300, TID, str(tmp_path))
+    assert src.read_from(0).data == b"one\n"
+
+
+def test_local_search_runs_only_on_a_miss_and_backs_off(
+    tmp_path: Path, monkeypatch
+) -> None:
+    now = {"t": 100.0}
+    monkeypatch.setattr(bs.time, "monotonic", lambda: now["t"])
+    searches: list[str] = []
+    real = bs.local_claude_thread_artifacts
+
+    def counting(thread_id: str, config_dir: str | None = None) -> list[Path]:
+        searches.append(thread_id)
+        return real(thread_id, config_dir)
+
+    monkeypatch.setattr(bs, "local_claude_thread_artifacts", counting)
+    src, path = _local_source(tmp_path)
+
+    # No transcript yet: one search, then none until the backoff elapses.
+    for _ in range(5):
+        assert src.read_from(0).observed is False
+    assert len(searches) == 1
+    now["t"] += 1.0
+    src.read_from(0)
+    assert len(searches) == 2
+    for _ in range(10):
+        now["t"] += 20.0
+        src.read_from(0)
+    # The backoff is capped at 10 seconds.
+    searches.clear()
+    now["t"] += 9.0
+    src.read_from(0)
+    assert searches == []
+    now["t"] += 1.0
+    src.read_from(0)
+    assert len(searches) == 1
+
+    # Reading the file at its known path never searches.
+    path.write_bytes(b"one\n")
+    searches.clear()
+    for _ in range(5):
+        assert src.read_from(0).observed is True
+    assert searches == []
+
+    # The next miss searches at once.
+    path.rename(_project_file(tmp_path))
+    assert src.read_from(4).observed is True
+    assert len(searches) == 1
+
+
+def test_local_finds_a_transcript_that_reappears_after_the_backoff(
+    tmp_path: Path, monkeypatch
+) -> None:
+    now = {"t": 100.0}
+    monkeypatch.setattr(bs.time, "monotonic", lambda: now["t"])
+    src, path = _local_source(tmp_path)
+    path.write_bytes(b"one\n")
+    src.read_from(0)
+    parked = tmp_path / "parked"
+    path.rename(parked)
+    assert src.read_from(4).observed is False
+
+    parked.rename(_project_file(tmp_path))
+    assert src.read_from(4).observed is False  # still backing off
+    now["t"] += 1.0
+    read = src.read_from(4)
+    assert read.observed is True
+    assert read.data == b""
+    assert read.size == 4
+
+
+def test_local_forced_read_ignores_the_search_backoff(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(bs.time, "monotonic", lambda: 100.0)
+    src, _ = _local_source(tmp_path)
+    assert src.read_from(0).observed is False
+    _project_file(tmp_path).write_bytes(b"tail\n")
+    assert src.read_from(0).observed is False
+    assert src.read_from(0, force=True).data == b"tail\n"
+
+
+def test_local_replaced_path_prefers_the_file_it_was_reading(tmp_path: Path) -> None:
+    src, path = _local_source(tmp_path)
+    path.write_bytes(b"one\n")
+    first = src.read_from(0)
+    moved = _project_file(tmp_path)
+    path.rename(moved)
+    path.write_bytes(b"another file\n")
+
+    read = src.read_from(4)
+
+    assert read.identity == first.identity
+    assert read.data == b""
+
+
+def test_local_replaced_transcript_reports_the_new_identity(tmp_path: Path) -> None:
+    src, path = _local_source(tmp_path)
+    path.write_bytes(b"one\n")
+    first = src.read_from(0)
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(b"rewritten\n")
+    replacement.replace(path)
+
+    read = src.read_from(4)
+
+    assert read.observed is True
+    assert read.identity != first.identity
+
+
+def test_local_skips_a_file_swapped_between_stat_and_open(
+    tmp_path: Path, monkeypatch
+) -> None:
+    src, path = _local_source(tmp_path)
+    path.write_bytes(b"one\n")
+    other = tmp_path / "other"
+    other.write_bytes(b"two\n")
+    monkeypatch.setattr(bs.os, "fstat", lambda fd: other.stat())
+    assert src.read_from(0).observed is False
+
+
+def test_local_ambiguous_matches_stay_unobserved(tmp_path: Path) -> None:
+    _project_file(tmp_path, "/one").write_bytes(b"a\n")
+    _project_file(tmp_path, "/two").write_bytes(b"b\n")
+    src, _ = _local_source(tmp_path)
+    assert src.read_from(0).observed is False
 
 
 # ── Remote source ────────────────────────────────────────────────────────────
@@ -92,6 +249,8 @@ class _FakeFs:
     def __init__(self) -> None:
         self.glob_result: list[str] = []
         self.read_result: RemoteRead | None = None
+        # When set, reads are answered per path (a path not in it is missing).
+        self.by_path: dict[str, RemoteRead] | None = None
         self.glob_calls = 0
         self.read_calls: list[tuple[str, int, int]] = []
         self.expand: dict[str, str] = {}
@@ -102,8 +261,12 @@ class _FakeFs:
         self.last_pattern = pattern
         return list(self.glob_result)
 
-    def read_range(self, path: str, offset: int, limit: int) -> RemoteRead | None:
+    def read_range(
+        self, path: str, offset: int, limit: int
+    ) -> RemoteRead | RemoteMissing | None:
         self.read_calls.append((path, offset, limit))
+        if self.by_path is not None:
+            return self.by_path.get(path, RemoteMissing())
         return self.read_result
 
     def expanduser(self, path: str) -> str:
@@ -256,6 +419,89 @@ def test_remote_config_root_relative_joins_remote_cwd(monkeypatch) -> None:
     src = _remote_source(fs, _session(cwd="~/repo"), config_dir=".claude-rel")
     src.read_from(0)
     assert fs.last_config_dir == "/home/u/repo/.claude-rel"
+
+
+def test_remote_failed_read_does_not_search_again(monkeypatch) -> None:
+    monkeypatch.setattr(bs.time, "monotonic", lambda: 0.0)
+    fs = _FakeFs()
+    fs.glob_result = [f"/p/{TID}.jsonl"]
+    fs.read_result = RemoteRead(data=b"one\n", size=4, device=1, inode=2)
+    src = _remote_source(fs, _session())
+    src.read_from(0)
+
+    fs.read_result = None  # the host could not be asked
+    src._next_read_at = 0.0
+    assert src.read_from(4).observed is False
+
+    assert fs.glob_calls == 1
+    assert len(fs.read_calls) == 2
+
+
+def test_remote_follows_a_moved_transcript(monkeypatch) -> None:
+    monkeypatch.setattr(bs.time, "monotonic", lambda: 0.0)
+    old, new = f"/p/old/{TID}.jsonl", f"/p/new/{TID}.jsonl"
+    fs = _FakeFs()
+    fs.glob_result = [old]
+    fs.by_path = {old: RemoteRead(data=b"one\n", size=4, device=1, inode=2)}
+    src = _remote_source(fs, _session())
+    src.read_from(0)
+
+    fs.glob_result = [new]
+    fs.by_path = {new: RemoteRead(data=b"two\n", size=8, device=1, inode=2)}
+    src._next_read_at = 0.0
+    read = src.read_from(4)
+
+    assert read.data == b"two\n"
+    assert read.identity == (1, 2)
+    assert fs.read_calls[-1] == (new, 4, 256 * 1024)
+    assert src._backoff == 1.0
+
+
+def test_remote_keeps_its_path_when_a_search_finds_nothing(monkeypatch) -> None:
+    monkeypatch.setattr(bs.time, "monotonic", lambda: 0.0)
+    old = f"/p/old/{TID}.jsonl"
+    fs = _FakeFs()
+    fs.glob_result = [old]
+    fs.by_path = {old: RemoteRead(data=b"", size=4, device=1, inode=2)}
+    src = _remote_source(fs, _session())
+    src.read_from(0)
+
+    fs.glob_result, fs.by_path = [], {}
+    src._next_read_at = 0.0
+    assert src.read_from(4).observed is False
+    assert src._path == old
+    assert src._backoff > 1.0
+
+
+def test_remote_replaced_path_prefers_the_file_it_was_reading(monkeypatch) -> None:
+    monkeypatch.setattr(bs.time, "monotonic", lambda: 0.0)
+    old, new = f"/p/old/{TID}.jsonl", f"/p/new/{TID}.jsonl"
+    original = RemoteRead(data=b"one\n", size=4, device=1, inode=2)
+    fs = _FakeFs()
+    fs.glob_result = [old]
+    fs.by_path = {old: original}
+    src = _remote_source(fs, _session())
+    src.read_from(0)
+
+    fs.glob_result = [old, new]
+    fs.by_path = {
+        old: RemoteRead(data=b"other", size=5, device=1, inode=9),
+        new: original,
+    }
+    src._next_read_at = 0.0
+    read = src.read_from(4)
+
+    assert read.identity == (1, 2)
+    assert src._path == new
+
+
+def test_remote_relative_config_dir_stays_on_the_launch_folder(monkeypatch) -> None:
+    monkeypatch.setattr(bs.time, "monotonic", lambda: 0.0)
+    session = _session(cwd="/repo/app/.claude/worktrees/w")
+    session.transport_state["launch_cwd"] = "/repo/app"
+    fs = _FakeFs()
+    _remote_source(fs, session, config_dir=".claude-rel").read_from(0)
+    assert fs.last_config_dir == "/repo/app/.claude-rel"
 
 
 def test_remote_exception_does_not_raise(monkeypatch) -> None:

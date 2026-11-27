@@ -26,6 +26,7 @@ from waypoint.backends.claude_tty.plugin import (
     _validate_custom_args,
 )
 from waypoint.backends.tmux.adapter import TmuxError
+from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     CommandCompletion,
     SessionCreateRequest,
@@ -78,7 +79,7 @@ def _make_session(
     )
 
 
-def _restart_runtime() -> tuple[MagicMock, MagicMock]:
+def _restart_runtime(session: SessionRecord) -> tuple[MagicMock, MagicMock]:
     target = MagicMock(session="s-new", window="0", pane="%9", pane_pid=123)
     runtime = MagicMock()
     runtime.tmux.kill_session = AsyncMock()
@@ -89,6 +90,7 @@ def _restart_runtime() -> tuple[MagicMock, MagicMock]:
     runtime._command_for_backend.return_value = ["claude", "--resume", "thread-1"]
     runtime._record_system_event = AsyncMock()
     runtime.storage.update_session = MagicMock()
+    runtime.get_session.return_value = session
     return runtime, target
 
 
@@ -151,7 +153,7 @@ async def test_restart_while_running_relaunches_and_notes_interruption() -> None
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
     session = _make_session(status=SessionStatus.RUNNING, model="opus")
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     result = await plugin._restart_with_args(runtime, session, model="sonnet")
 
@@ -165,7 +167,7 @@ async def test_restart_guard_raises_when_starting() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
     session = _make_session(status=SessionStatus.STARTING, model="opus")
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     with pytest.raises(HTTPException) as exc:
         await plugin._restart_with_args(runtime, session, model="sonnet")
@@ -179,7 +181,7 @@ async def test_restart_when_exited_tolerates_dead_pane_and_relaunches() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
     session = _make_session(status=SessionStatus.EXITED, model="opus")
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
     # The old pane is already gone, so killing it raises — which must be
     # swallowed so the resume relaunch still happens.
     runtime.tmux.kill_session = AsyncMock(side_effect=TmuxError("no such session"))
@@ -197,7 +199,7 @@ async def test_restart_unchanged_value_returns_false_without_relaunch() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
     session = _make_session(model="opus")
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     result = await plugin._restart_with_args(runtime, session, model="opus")
 
@@ -215,7 +217,7 @@ async def test_restart_rebuilds_resume_flags_preserving_custom_args() -> None:
         effort="high",
         launch_args=["--session-id", "thread-1", "--model", "opus", "--verbose"],
     )
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     result = await plugin._restart_with_args(runtime, session, model="sonnet")
 
@@ -268,7 +270,7 @@ async def test_restore_reconstructs_custom_args_when_launch_args_absent() -> Non
         model="opus",
         args=["--verbose"],
     )
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     await plugin.restore_session(runtime, session)
 
@@ -289,7 +291,7 @@ async def test_reconnect_pins_controls_from_session_fields() -> None:
         permission_mode="auto",
         launch_args=["--resume", "thread-1", "--verbose"],
     )
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     await plugin.restore_session(runtime, session)
 
@@ -318,7 +320,7 @@ async def test_reconnect_new_thread_pins_controls() -> None:
         model="deepseek-v4-flash[1m]",
         permission_mode="auto",
     )
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     await plugin.restore_session(runtime, session)
 
@@ -340,7 +342,7 @@ async def test_reconnect_in_plan_keeps_pre_plan_mode() -> None:
     _stub_lifecycle(plugin)
     session = _make_session(status=SessionStatus.EXITED, permission_mode="plan")
     session.transport_state["pre_plan_mode"] = "auto"
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     await plugin.restore_session(runtime, session)
 
@@ -353,7 +355,7 @@ async def test_restart_into_plan_stashes_pre_plan_mode() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
     session = _make_session(permission_mode="acceptEdits")
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     await plugin._restart_with_args(runtime, session, permission_mode="plan")
 
@@ -366,7 +368,7 @@ async def test_restart_leaving_plan_drops_pre_plan_mode() -> None:
     _stub_lifecycle(plugin)
     session = _make_session(permission_mode="plan")
     session.transport_state["pre_plan_mode"] = "auto"
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     await plugin._restart_with_args(runtime, session, permission_mode="default")
 
@@ -381,7 +383,7 @@ async def test_restart_staying_in_plan_preserves_pre_plan_mode() -> None:
     _stub_lifecycle(plugin)
     session = _make_session(permission_mode="plan", model="opus")
     session.transport_state["pre_plan_mode"] = "auto"
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     await plugin._restart_with_args(runtime, session, model="sonnet")
 
@@ -401,7 +403,7 @@ async def test_restart_before_first_turn_uses_session_id_not_resume() -> None:
         permission_mode="auto",
         launch_args=["--session-id", "thread-1", "--permission-mode", "auto"],
     )
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     result = await plugin._restart_with_args(runtime, session, permission_mode="plan")
 
@@ -419,7 +421,7 @@ async def test_restart_clears_pending_approval_and_tailer() -> None:
     _stub_lifecycle(plugin)
     plugin._pending_approvals["sess-1"] = MagicMock()
     session = _make_session(model="opus")
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     await plugin._restart_with_args(runtime, session, model="sonnet")
 
@@ -434,11 +436,11 @@ async def test_launch_resumed_pane_kills_pane_on_post_start_failure() -> None:
     doesn't leave an unmanaged claude process holding the fork thread."""
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
-    runtime, target = _restart_runtime()
-    # A step after start_managed_session raises.
-    runtime.tmux.pipe_output = AsyncMock(side_effect=TmuxError("pipe failed"))
     parent = _make_session(session_id="parent-1")
     new_session = _make_session(session_id="new-1", thread_id=None)
+    runtime, target = _restart_runtime(new_session)
+    # A step after start_managed_session raises.
+    runtime.tmux.pipe_output = AsyncMock(side_effect=TmuxError("pipe failed"))
 
     with pytest.raises(TmuxError):
         await plugin._launch_resumed_pane(runtime, parent, new_session, "fork-thread")
@@ -450,7 +452,6 @@ async def test_launch_resumed_pane_kills_pane_on_post_start_failure() -> None:
 async def test_launch_resumed_pane_pins_controls_from_new_session() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
-    runtime, _ = _restart_runtime()
     parent = _make_session(
         session_id="parent-1",
         permission_mode="plan",
@@ -464,6 +465,7 @@ async def test_launch_resumed_pane_pins_controls_from_new_session() -> None:
         effort="high",
         permission_mode="plan",
     )
+    runtime, _ = _restart_runtime(new_session)
 
     await plugin._launch_resumed_pane(runtime, parent, new_session, "fork-thread")
 
@@ -482,6 +484,9 @@ async def test_launch_resumed_pane_pins_controls_from_new_session() -> None:
     state = runtime.storage.update_session.call_args.kwargs["transport_state"]
     assert state["launch_args"] == built_args
     assert state["pre_plan_mode"] == "auto"
+    # The folder exists, so nothing is said about it.
+    notes = [call.args[1] for call in runtime._record_system_event.call_args_list]
+    assert not any("no longer exists" in note for note in notes)
 
 
 # ── apply_effort return contract ──────────────────────────────────────────────
@@ -491,7 +496,7 @@ async def test_apply_effort_returns_true_on_change() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
     session = _make_session(effort="low")
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     assert await plugin.apply_effort(runtime, session, "high") is True
 
@@ -500,7 +505,7 @@ async def test_apply_effort_returns_false_when_unchanged() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
     session = _make_session(effort="high")
-    runtime, _ = _restart_runtime()
+    runtime, _ = _restart_runtime(session)
 
     assert await plugin.apply_effort(runtime, session, "high") is False
     runtime.tmux.start_managed_session.assert_not_called()
@@ -997,6 +1002,25 @@ async def test_import_thread_persists_resolving_agent_backend(
     assert result.backend == "claude_code"
     assert result.transport == "claude_tty"
     assert result.transport_state["thread_id"] == "imp-2"
+
+
+async def test_import_thread_refuses_a_missing_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    info = _thread_info("imp-gone")
+    info.cwd = str(tmp_path / "gone")
+    monkeypatch.setattr(
+        plugin_mod, "find_local_claude_thread", lambda thread_id, config_dir=None: info
+    )
+    runtime = MagicMock()
+    runtime._require_pane_folder = SessionRuntime._require_pane_folder
+
+    with pytest.raises(HTTPException, match="working folder does not exist"):
+        await ClaudeTtyPlugin().import_thread(
+            runtime, ClaudeThreadImportRequest(thread_id="imp-gone")
+        )
+
+    runtime.tmux.start_managed_session.assert_not_called()
 
 
 async def test_import_thread_missing_raises_404(

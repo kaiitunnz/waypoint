@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+from waypoint.backends.claude_code.session_folder import relaunch_folder
 from waypoint.backends.claude_code.threads import claude_projects_root
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
@@ -444,9 +445,10 @@ async def _run_side_question_bg(
             session.backend, session.launch_env, launch_target=launch_target
         )
         try:
+            folder = await relaunch_folder(runtime, session)
             if launch_target is None:
                 answer = await _run_one_shot_local(
-                    question, thread_id, fork_id, session.cwd, control_flags, env=env
+                    question, thread_id, fork_id, folder, control_flags, env=env
                 )
             else:
                 claude_bin = plugin.remote_executable(launch_target) or "claude"
@@ -454,7 +456,7 @@ async def _run_side_question_bg(
                     question,
                     thread_id,
                     fork_id,
-                    session.cwd,
+                    folder,
                     control_flags,
                     launch_target,
                     claude_bin,

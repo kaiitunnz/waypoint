@@ -9,6 +9,12 @@ events carry metadata shaped like the live normalizers' output
 ``TranscriptCard`` on the frontend key off of to render and pair
 tool_call/tool_result cards.
 
+Each event carries the status the live claude_tty path records for it (a user
+message imports as ``running``), and an interrupt marker becomes the same note.
+Not imported: the live path's other turn-end notes (turn complete, compaction,
+command output) and the statuses it sets without an event, such as the one a
+dismissed question's marker sets.
+
 Unlike the live normalizers (``adapter.py``'s ``_handle_user`` and
 ``claude_tty/normalize.py``'s ``_process_user``), which intentionally skip
 plain user text because it is already recorded at the input boundary
@@ -51,6 +57,14 @@ from waypoint.backends.claude_code.threads import (
     parse_iso_timestamp,
     read_local_claude_transcript,
 )
+from waypoint.backends.claude_code.turn_boundaries import (
+    TurnAbortTracker,
+    delivery_status,
+    is_interrupt_marker,
+    is_user_rejection,
+    turn_end_metadata,
+)
+from waypoint.questions import ASK_USER_QUESTION_TOOL
 from waypoint.schemas import EventKind, EventRecord, SessionStatus, TokenUsageRecord
 
 
@@ -78,10 +92,11 @@ def convert_transcript_records(
 ) -> list[EventRecord]:
     """Convert ordered raw transcript records into ordered EventRecords.
 
-    Only ``assistant`` text/tool_use/progress-update and ``user``
-    text/tool_result records produce events; other record types (system
-    notes, compact boundaries, summaries) carry no chat content worth
-    replaying and are dropped.
+    ``assistant`` text, tool_use and progress-update records, ``user`` text,
+    tool_result and interrupt-marker records, and task notifications and peer
+    messages produce events. Other record types (system notes, compact
+    boundaries, summaries) carry no chat content worth replaying and are
+    dropped.
     """
     events: list[EventRecord] = []
     last_ts = datetime.now(UTC)
@@ -91,7 +106,7 @@ def convert_transcript_records(
         last_ts = ts
         rec_type = record.get("type")
         if rec_type == "assistant":
-            events.extend(_convert_assistant(session_id, record, ts))
+            events.extend(_convert_assistant(session_id, record, ts, state))
         elif rec_type == "user":
             events.extend(_convert_user(session_id, record, ts, state))
         elif rec_type == "queue-operation":
@@ -109,6 +124,8 @@ class _ImportState:
     # "Agent … finished" task notification that follows.
     pending_handback: dict[str, str] = field(default_factory=dict)
     queued_peer_messages: Counter[str] = field(default_factory=Counter)
+    abort: TurnAbortTracker = field(default_factory=TurnAbortTracker)
+    question_ids: set[str] = field(default_factory=set)
 
 
 def token_usage_records_from_history(
@@ -146,7 +163,7 @@ def token_usage_records_from_history(
 
 
 def _convert_assistant(
-    session_id: str, record: dict[str, Any], ts: datetime
+    session_id: str, record: dict[str, Any], ts: datetime, state: _ImportState
 ) -> list[EventRecord]:
     message: dict[str, Any] = record.get("message") or {}
     message_id = str(message.get("id") or "")
@@ -174,6 +191,10 @@ def _convert_assistant(
             tool_use_id = str(block.get("id") or "")
             tool_name = str(block.get("name") or "tool")
             input_text = json.dumps(block.get("input") or {}, indent=2)
+            status = SessionStatus.RUNNING
+            if tool_name == ASK_USER_QUESTION_TOOL:
+                state.question_ids.add(tool_use_id)
+                status = SessionStatus.WAITING_INPUT
             events.append(
                 _event(
                     session_id,
@@ -187,6 +208,7 @@ def _convert_assistant(
                         "tool_use_id": tool_use_id,
                         "payload": block,
                     },
+                    status,
                 )
             )
         elif (progress := visible_progress_text(block)) is not None:
@@ -209,6 +231,7 @@ def _task_notification_event(
     record_uuid: str | None,
     ts: datetime,
     state: _ImportState,
+    status: SessionStatus | None,
 ) -> list[EventRecord]:
     parsed = parse_task_notification(content)
     if parsed is None:
@@ -228,7 +251,7 @@ def _task_notification_event(
         capture_enabled=False,
         ts=ts,
     )
-    return [_event(session_id, ts, EventKind.SYSTEM_NOTE, text, metadata)]
+    return [_event(session_id, ts, EventKind.SYSTEM_NOTE, text, metadata, status)]
 
 
 def _peer_message_event(
@@ -238,8 +261,9 @@ def _peer_message_event(
     record_uuid: str | None,
     ts: datetime,
     state: _ImportState,
+    status: SessionStatus | None,
 ) -> list[EventRecord]:
-    """Mirror of the live normalizer's peer path, minus the status updates."""
+    """Mirror of the live normalizer's peer path, minus the status-only updates."""
     parsed = parse_peer_message(content)
     if parsed is None:
         return []
@@ -255,7 +279,7 @@ def _peer_message_event(
         capture_enabled=False,
         ts=ts,
     )
-    return [_event(session_id, ts, EventKind.SYSTEM_NOTE, text, metadata)]
+    return [_event(session_id, ts, EventKind.SYSTEM_NOTE, text, metadata, status)]
 
 
 def _convert_queue_operation(
@@ -267,13 +291,16 @@ def _convert_queue_operation(
     content = record.get("content")
     if operation not in ("enqueue", "remove") or not isinstance(content, str):
         return []
+    # A queued record is not delivered yet, so it sets no status.
     if starts_with_peer_element(content):
         return _peer_message_event(
-            session_id, content, operation, record.get("uuid"), ts, state
+            session_id, content, operation, record.get("uuid"), ts, state, None
         )
     if operation != "enqueue" or "<task-notification>" not in content:
         return []
-    return _task_notification_event(session_id, content, record.get("uuid"), ts, state)
+    return _task_notification_event(
+        session_id, content, record.get("uuid"), ts, state, None
+    )
 
 
 def _convert_user(
@@ -284,14 +311,22 @@ def _convert_user(
     injected = classify_injected_user_turn(record, content)
     if injected == "task_notification" and isinstance(content, str):
         return _task_notification_event(
-            session_id, content, record.get("uuid"), ts, state
+            session_id, content, record.get("uuid"), ts, state, delivery_status(record)
         )
     if injected == "peer_message" and isinstance(content, str):
         return _peer_message_event(
-            session_id, content, "user", record.get("uuid"), ts, state
+            session_id,
+            content,
+            "user",
+            record.get("uuid"),
+            ts,
+            state,
+            delivery_status(record),
         )
     if injected == "continuation":
         return []
+    if is_interrupt_marker(content):
+        return _interrupt_events(session_id, ts, state)
     blocks = iter_content_blocks(content)
     tool_result_blocks = [b for b in blocks if b.get("type") == "tool_result"]
     if tool_result_blocks:
@@ -299,20 +334,7 @@ def _convert_user(
         # only echoes the tool verdict here), matching the live normalizers'
         # assumption in ``_handle_user``/``_process_user``.
         return [
-            _event(
-                session_id,
-                ts,
-                EventKind.TOOL_RESULT,
-                stringify_tool_result(block.get("content")),
-                {
-                    "method": "user.tool_result",
-                    "item_id": str(block.get("tool_use_id") or ""),
-                    "tool_use_id": str(block.get("tool_use_id") or ""),
-                    "is_error": bool(block.get("is_error")),
-                    "payload": block,
-                    **deferred_result_metadata(record.get("toolUseResult")),
-                },
-            )
+            _tool_result_event(session_id, record, block, ts, state)
             for block in tool_result_blocks
         ]
     text = "\n".join(
@@ -333,19 +355,75 @@ def _convert_user(
     ]
 
 
+def _tool_result_event(
+    session_id: str,
+    record: dict[str, Any],
+    block: dict[str, Any],
+    ts: datetime,
+    state: _ImportState,
+) -> EventRecord:
+    tool_use_id = str(block.get("tool_use_id") or "")
+    status = SessionStatus.RUNNING
+    if is_user_rejection(record):
+        if tool_use_id in state.question_ids:
+            # The live path ends the turn on a dismissed question.
+            state.abort.question_dismissed()
+            status = SessionStatus.IDLE
+        else:
+            state.abort.rejected(record)
+    return _event(
+        session_id,
+        ts,
+        EventKind.TOOL_RESULT,
+        stringify_tool_result(block.get("content")),
+        {
+            "method": "user.tool_result",
+            "item_id": tool_use_id,
+            "tool_use_id": tool_use_id,
+            "is_error": bool(block.get("is_error")),
+            "payload": block,
+            **deferred_result_metadata(record.get("toolUseResult")),
+        },
+        status,
+    )
+
+
+def _interrupt_events(
+    session_id: str, ts: datetime, state: _ImportState
+) -> list[EventRecord]:
+    if (resolution := state.abort.resolve()) is None:
+        return []
+    note, stop_reason = resolution
+    return [
+        _event(
+            session_id,
+            ts,
+            EventKind.SYSTEM_NOTE,
+            note,
+            turn_end_metadata(stop_reason),
+            SessionStatus.IDLE,
+        )
+    ]
+
+
 def _event(
     session_id: str,
     ts: datetime,
     kind: EventKind,
     text: str,
     metadata: dict[str, Any],
+    status: SessionStatus | None = SessionStatus.RUNNING,
 ) -> EventRecord:
+    # Metadata builders may preset ``status``; only the argument counts.
+    metadata = {key: value for key, value in metadata.items() if key != "status"}
+    if status is not None:
+        metadata["status"] = status
     return EventRecord(
         session_id=session_id,
         ts=ts,
         kind=kind,
         text=text,
-        metadata={**metadata, "status": SessionStatus.RUNNING},
+        metadata=metadata,
         sequence=0,  # storage.seed_events reassigns sequences from list order.
     )
 

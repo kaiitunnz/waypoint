@@ -1,0 +1,10 @@
+{"type": "user", "message": {"role": "user", "content": "Write a 1500 word essay about the history of clocks. Do not use any tools."}, "origin": {"kind": "human"}, "promptSource": "typed", "isSidechain": false}
+{"type": "queue-operation", "operation": "enqueue", "content": "reply with the single word QUEUED"}
+{"type": "queue-operation", "operation": "dequeue"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": ""}], "stop_reason": null, "id": "msg_fixture_13"}, "isSidechain": false}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "# The Long Road to the Precise Hour\n\nFew inventions have reshaped human life as "}], "stop_reason": null, "id": "msg_fixture_13"}, "isSidechain": false, "isAbortedMidStream": true}
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]}, "rowSource": "harness", "interruptedMessageId": "msg_fixture_13", "isSidechain": false}
+{"type": "user", "message": {"role": "user", "content": "reply with the single word QUEUED"}, "origin": {"kind": "human"}, "promptSource": "queued", "isSidechain": false}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": ""}], "stop_reason": "end_turn", "id": "msg_fixture_14"}, "isSidechain": false}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "QUEUED"}], "stop_reason": "end_turn", "id": "msg_fixture_14"}, "isSidechain": false}
+{"type": "system", "subtype": "turn_duration", "isMeta": false, "isSidechain": false}

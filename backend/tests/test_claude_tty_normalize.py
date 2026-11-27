@@ -837,16 +837,19 @@ def test_generic_error_tool_result_stays_running() -> None:
 
 def test_user_rejected_tool_resolves_session_to_idle() -> None:
     # A declined tool aborts the turn back to the prompt with no terminal
-    # stop_reason record, so the normalizer must synthesize an idle result or
-    # the session stays stuck running.
+    # stop_reason record, so the marker that follows must synthesize an idle
+    # result or the session stays stuck running.
     norm = TranscriptNormalizer()
     record = _user_record(
         [_tool_result_block("tu3", "The tool use was rejected", is_error=True)]
     )
     record["toolUseResult"] = "User rejected tool use"
-    events = norm.process_record(record)
+    record["toolDenialBeforeRun"] = True
+    assert [e.kind for e in norm.process_record(record)] == [EventKind.TOOL_RESULT]
 
-    note = next(e for e in events if e.kind == EventKind.SYSTEM_NOTE)
+    [note] = norm.process_record(
+        _user_record([_text_block("[Request interrupted by user for tool use]")])
+    )
     assert note.status == SessionStatus.IDLE
     assert note.metadata["stop_reason"] == "tool_rejected"
 
@@ -961,13 +964,12 @@ def test_question_dismissal_ends_the_turn_after_a_sibling_tool_result() -> None:
     assert not [e for e in events if e.kind is EventKind.TOOL_RESULT]
     assert events[-1].kind is EventKind.STATUS_UPDATE
     assert events[-1].status == SessionStatus.IDLE
-    # The interrupt marker and turn_duration that follow carry no status.
-    assert (
-        norm.process_record(
-            _user_record([_text_block("[Request interrupted by user for tool use]")])
-        )
-        == []
+    # The interrupt marker that follows adds no note and settles the turn again.
+    marker = norm.process_record(
+        _user_record([_text_block("[Request interrupted by user for tool use]")])
     )
+    assert [e.kind for e in marker] == [EventKind.STATUS_UPDATE]
+    assert _status_updates(marker) == [SessionStatus.IDLE]
     assert norm.process_record({"type": "system", "subtype": "turn_duration"}) == []
 
 
@@ -1277,7 +1279,7 @@ def test_failed_edit_result_has_no_diff_preview() -> None:
     assert "diff_preview" not in result.metadata
 
 
-def test_rejected_file_edit_has_no_diff_preview_and_aborts_turn() -> None:
+def test_rejected_file_edit_has_no_diff_preview() -> None:
     norm = TranscriptNormalizer()
     norm.process_record(
         _assistant_record(
@@ -1291,14 +1293,9 @@ def test_rejected_file_edit_has_no_diff_preview_and_aborts_turn() -> None:
         "message": {"content": [_tool_result_block("tu1", "denied", is_error=True)]},
         "toolUseResult": "User rejected tool use",
     }
-    events = norm.process_record(rejection)
-    result = next(e for e in events if e.kind == EventKind.TOOL_RESULT)
+    [result] = norm.process_record(rejection)
+    assert result.kind == EventKind.TOOL_RESULT
     assert "diff_preview" not in result.metadata
-    assert any(
-        e.kind == EventKind.SYSTEM_NOTE
-        and e.metadata.get("stop_reason") == "tool_rejected"
-        for e in events
-    )
 
 
 # ── compaction ────────────────────────────────────────────────────────────────

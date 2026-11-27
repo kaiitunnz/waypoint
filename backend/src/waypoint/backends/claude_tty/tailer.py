@@ -22,6 +22,7 @@ from waypoint.backends.claude_code.models import (
     observe_claude_model,
 )
 from waypoint.backends.claude_code.session_folder import follow_relocation
+from waypoint.backends.claude_code.turn_boundaries import ExpectedInterrupt
 from waypoint.backends.claude_tty.byte_source import READ_LIMIT, TailedTranscript
 from waypoint.backends.claude_tty.dialog_watch import DialogWatcher, pane_target
 from waypoint.backends.claude_tty.normalize import (
@@ -113,6 +114,10 @@ class TranscriptTailer:
         """Finish after one last forced drain, leaving dialog state for the next
         tailer to adopt."""
         self._stop_requested = True
+
+    @property
+    def expected_interrupt(self) -> ExpectedInterrupt:
+        return self._normalizer.expected_interrupt
 
     async def _drain(self, *, force: bool = False) -> None:
         # The priming tick fetches size + identity only (no body).
@@ -279,8 +284,6 @@ class TranscriptTailer:
             text = f"Running {current} (selected {selection})"
         else:
             text = f"Model changed to {current}"
-        # session.status keeps the event-insert COALESCE a no-op; this note fires
-        # mid-turn and must not flip the lifecycle.
         await self._runtime._emit_adapter_event(
             self._session_id,
             EventKind.SYSTEM_NOTE,
@@ -292,7 +295,7 @@ class TranscriptTailer:
                 "current_model": current,
                 "selection": selection,
             },
-            session.status,
+            None,
         )
 
     async def _maybe_publish_context_usage(self, record: dict[str, Any]) -> None:

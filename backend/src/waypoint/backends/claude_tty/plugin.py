@@ -86,6 +86,7 @@ from waypoint.backends.claude_code.threads import (
     list_local_claude_threads,
     local_claude_thread_artifacts,
 )
+from waypoint.backends.claude_code.turn_boundaries import ExpectedInterrupt
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty.byte_source import (
     ClaudeTranscriptSource,
@@ -703,6 +704,10 @@ class ClaudeTtyPlugin:
             extra={"session_id": session_id, "thread_id": successor},
         )
         return True
+
+    def expected_interrupt(self, session_id: str) -> ExpectedInterrupt | None:
+        run = self._tailers.get(session_id)
+        return run.tailer.expected_interrupt if run else None
 
     async def reply_refusal(
         self, session_id: str, pending: PendingTtyApproval

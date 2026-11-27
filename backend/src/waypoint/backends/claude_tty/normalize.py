@@ -15,6 +15,13 @@ Key invariants (all verified against real transcripts in Phase 0):
 - A synthesized result (SYSTEM_NOTE, status=IDLE) is emitted when the last
   assistant record in a turn has a terminal ``stop_reason`` (anything other than
   ``tool_use``) and contains no ``tool_use`` blocks.
+- An interrupted, cut-off or declined turn writes no terminal assistant record,
+  so its interrupt marker emits the result. A marker answering Waypoint's own
+  interrupt emits no note.
+- A queued prompt's ``user`` record sets RUNNING. A ``queueTranscriptOnly``
+  record, never sent to the model, sets no status, and neither does a record
+  delivered while Waypoint's interrupt is unanswered: a turn cut before any
+  output writes no marker to end it.
 - ``thinking`` blocks stay hidden, except the TUI's progress updates (thinking
   with a narration signature), which surface as ``agent_output``.
 - ``<task-notification>`` injected user turns (subagent/Agent completion,
@@ -61,6 +68,15 @@ from waypoint.backends.claude_code.normalize import (
     visible_progress_text,
 )
 from waypoint.backends.claude_code.threads import parse_iso_timestamp
+from waypoint.backends.claude_code.turn_boundaries import (
+    ExpectedInterrupt,
+    InterruptOrigin,
+    TurnAbortTracker,
+    delivery_status,
+    is_interrupt_marker,
+    is_user_rejection,
+    turn_end_metadata,
+)
 from waypoint.backends.diff_preview import (
     build_preview,
     files_from_claude_tool_result,
@@ -138,6 +154,8 @@ class TranscriptNormalizer:
         # (which carries the applied diff in its toolUseResult) can attach a
         # diff preview. The TUI records the change on the result, not the call.
         self._file_edit_tool_use_ids: set[str] = set()
+        self._abort = TurnAbortTracker()
+        self.expected_interrupt = ExpectedInterrupt()
 
     def process_record(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         rec_type = record.get("type")
@@ -197,11 +215,7 @@ class TranscriptNormalizer:
         return NormalizedEvent(
             kind=EventKind.SYSTEM_NOTE,
             text=text,
-            metadata={
-                "method": "result",
-                "stop_reason": stop_reason,
-                "status": SessionStatus.IDLE,
-            },
+            metadata=turn_end_metadata(stop_reason),
             status=SessionStatus.IDLE,
         )
 
@@ -394,11 +408,9 @@ class TranscriptNormalizer:
                     kind=EventKind.SYSTEM_NOTE,
                     text=result_text,
                     metadata={
-                        "method": "result",
-                        "stop_reason": stop_reason,
+                        **turn_end_metadata(stop_reason),
                         "usage": usage_payload,
                         "payload": usage_payload,
-                        "status": SessionStatus.IDLE,
                     },
                     status=SessionStatus.IDLE,
                 )
@@ -442,10 +454,10 @@ class TranscriptNormalizer:
     ) -> list[NormalizedEvent]:
         """Show a peer message once, as a ``message`` task notification.
 
-        A delivered (``user``) record starts a turn, so it sets RUNNING even when
-        the card was already shown.
+        A delivered (``user``) record sets its turn-start status even when the card
+        was already shown.
         """
-        status = SessionStatus.RUNNING if operation == "user" else None
+        status = self._turn_start_status(record) if operation == "user" else None
         parsed = parse_peer_message(content)
         if parsed is None:
             return _status_only(status)
@@ -492,14 +504,18 @@ class TranscriptNormalizer:
         injected = classify_injected_user_turn(record, content)
         if injected == "task_notification" and isinstance(content, str):
             return self._task_notification_events(
-                content, record.get("uuid"), SessionStatus.RUNNING
+                content, record.get("uuid"), self._turn_start_status(record)
             )
         if injected == "peer_message" and isinstance(content, str):
             return self._peer_message_events(content, "user", record)
         if injected == "continuation":
             return []
+        if is_interrupt_marker(content):
+            return self._interrupt_marker_events()
+        if _is_human_prompt(record):
+            return self._human_prompt_events(record)
 
-        turn_aborted = _is_user_rejection(record)
+        turn_aborted = is_user_rejection(record)
         dismissed_question = False
 
         # Only tool_result blocks are surfaced from user records. A user/peer
@@ -516,7 +532,7 @@ class TranscriptNormalizer:
                 if turn_aborted:
                     # The "user rejected" result the TUI writes when Waypoint
                     # Escs the popup to surface it. Drop it so the question card
-                    # stays answerable, and skip the abort note below.
+                    # stays answerable.
                     dismissed_question = True
                     continue
                 # A genuine terminal failure (InputValidationError, timeout) for
@@ -566,27 +582,41 @@ class TranscriptNormalizer:
             )
 
         if dismissed_question:
-            # The dismissal lands after any sibling tool's result, so it marks
-            # the turn's end.
+            self._abort.question_dismissed()
             events.extend(_status_only(SessionStatus.IDLE))
         elif turn_aborted:
-            # A declined tool ends the turn with no terminal-stop_reason record
-            # to follow, so resolve the session to idle here or it stays stuck
-            # running.
-            events.append(
-                NormalizedEvent(
-                    kind=EventKind.SYSTEM_NOTE,
-                    text="Turn ended — tool use declined",
-                    metadata={
-                        "method": "result",
-                        "stop_reason": "tool_rejected",
-                        "status": SessionStatus.IDLE,
-                    },
-                    status=SessionStatus.IDLE,
-                )
-            )
+            # The interrupt marker that follows ends the turn.
+            self._abort.rejected(record)
 
         return events
+
+    def _human_prompt_events(self, record: dict[str, Any]) -> list[NormalizedEvent]:
+        # A prompt's text is recorded at the input boundary. A typed one sets no
+        # status: an Esc before any output records nothing, which would strand it
+        # as running.
+        if record.get("promptSource") != "queued":
+            self.expected_interrupt.forget_superseded()
+            return []
+        # The CLI can write a queued prompt ahead of the cut turn's marker, so it
+        # says nothing about an interrupt still expected.
+        return _status_only(self._turn_start_status(record))
+
+    def _turn_start_status(self, record: dict[str, Any]) -> SessionStatus | None:
+        """The status a delivered ``user`` record sets as it starts a turn."""
+        return None if self.expected_interrupt.unanswered else delivery_status(record)
+
+    def _interrupt_marker_events(self) -> list[NormalizedEvent]:
+        resolution = self._abort.resolve()
+        match self.expected_interrupt.take():
+            case InterruptOrigin.SUPERSEDED:
+                return []
+            case InterruptOrigin.WAYPOINT:
+                # Re-assert the Stop over any of the turn's records read since.
+                return _status_only(SessionStatus.INTERRUPTED)
+        if resolution is None:
+            # A sibling's result may have landed after the dismissal.
+            return _status_only(SessionStatus.IDLE)
+        return [self._result_note(*resolution)]
 
     def _emit_task_snapshot(self) -> list[NormalizedEvent]:
         if self._task_card_item_id is None:
@@ -607,6 +637,11 @@ class TranscriptNormalizer:
                 status=SessionStatus.RUNNING,
             )
         ]
+
+
+def _is_human_prompt(record: dict[str, Any]) -> bool:
+    origin = record.get("origin")
+    return isinstance(origin, dict) and origin.get("kind") == "human"
 
 
 def _status_only(status: SessionStatus | None) -> list[NormalizedEvent]:
@@ -644,17 +679,3 @@ def _strip_local_command_output(content: Any) -> str:
     if len(text) > _LOCAL_COMMAND_MAX_LEN:
         text = text[: _LOCAL_COMMAND_MAX_LEN - 1].rstrip() + "…"
     return text
-
-
-def _is_user_rejection(record: dict[str, Any]) -> bool:
-    """Return True when the user declined the tool this record reports on.
-
-    A declined tool aborts the TUI turn back to the ready prompt with no
-    following assistant record, so the terminal-``stop_reason`` path never
-    fires. The CLI tags the record with ``toolUseResult: "User rejected tool
-    use"``, which we use to resolve the session to idle off the rejection.
-    """
-    result = record.get("toolUseResult")
-    return isinstance(result, str) and result.strip().lower().startswith(
-        "user rejected"
-    )

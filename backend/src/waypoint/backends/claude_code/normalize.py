@@ -30,21 +30,14 @@ from waypoint.backends.task_notifications import (
 from waypoint.schemas import SessionStatus
 
 
-def format_status_event(event: dict[str, Any]) -> tuple[str, SessionStatus]:
-    status_label = event.get("status")
-    compact_result = event.get("compact_result")
-    if status_label == "compacting":
+def format_status_event(event: dict[str, Any]) -> tuple[str, SessionStatus | None]:
+    if event.get("status") == "compacting":
+        # A queued /compact starts its turn here: ``init`` follows only once the
+        # compaction is done.
         return "Compacting context…", SessionStatus.RUNNING
-    if compact_result is not None:
-        return (
-            f"Context compaction {compact_result}",
-            (
-                SessionStatus.IDLE
-                if compact_result == "success"
-                else SessionStatus.ERROR
-            ),
-        )
-    return "", SessionStatus.RUNNING
+    if (compact_result := event.get("compact_result")) is not None:
+        return f"Context compaction {compact_result}", None
+    return "", None
 
 
 def format_compact_boundary(metadata: dict[str, Any]) -> str:

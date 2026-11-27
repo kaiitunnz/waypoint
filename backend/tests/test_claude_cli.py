@@ -775,7 +775,7 @@ async def test_dispatch_system_status_compacting_emits_running_note() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_system_status_compact_result_emits_idle_note() -> None:
+async def test_dispatch_system_status_compact_result_notes_without_status() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
     state, _ = _attach_state(adapter)
@@ -791,7 +791,7 @@ async def test_dispatch_system_status_compact_result_emits_idle_note() -> None:
     )
     assert emitted[-1][1] == EventKind.SYSTEM_NOTE
     assert "compaction success" in emitted[-1][2].lower()
-    assert emitted[-1][4] == SessionStatus.IDLE
+    assert emitted[-1][4] is None
 
 
 @pytest.mark.asyncio

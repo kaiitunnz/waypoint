@@ -398,7 +398,9 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
   const stats = diff && isFileEditToolName(tool) ? diff : null;
 
   const description = category === "agent" ? filledText(input?.description) : null;
-  const request = subagentRequestForEvent(event);
+  const delegation = delegationForEvent(event);
+  // Another tool's `prompt` or `agent` argument is not a request to a subagent.
+  const request = category === "agent" || delegation ? subagentRequestForEvent(event) : null;
   const outcome = outcomeOf(child, call, result, tool);
 
   // A result alone, such as a spawned subagent's notice, is labelled by its text.
@@ -406,7 +408,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
   // A named row's preview says only its name again, or the output a result alone shows below.
   const repeated =
     args !== null ||
-    delegationForEvent(event) !== null ||
+    delegation !== null ||
     preview === "No output" ||
     preview === tool ||
     (!call && outcome.reply?.kind === "output");
@@ -425,8 +427,8 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
     deletions: stats ? stats.totalDeletions : null,
     status: outcome.status,
     durationMs: durationBetween(call, outcome.endedBy),
-    agentType: request.agentType,
-    prompt: request.prompt,
+    agentType: request?.agentType ?? null,
+    prompt: request?.prompt ?? null,
     reply: outcome.reply,
     diff,
     attachments: child.kind === "pair" ? toolPairAttachments(child.pair) : attachmentSpecsFor(child.event),

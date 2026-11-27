@@ -362,8 +362,10 @@ describe("describeCall tool names", () => {
     for (const row of rows) expect(only(row)?.name).toBeNull();
   });
 
-  it("gives a kind of agent only to a subagent call", () => {
-    expect(only(claudeCall("mcp__crew__hire", { agent: "reviewer" }))?.agentType).toBeNull();
+  it("reads a prompt and a kind of agent only from a subagent call", () => {
+    for (const tool of ["mcp__crew__hire", "Wait"]) {
+      expect(only(claudeCall(tool, { agent: "reviewer", prompt: "p" }))).toMatchObject({ agentType: null, prompt: null });
+    }
   });
 
   it("names a subagent call that carries no description", () => {

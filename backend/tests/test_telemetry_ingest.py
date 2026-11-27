@@ -1165,7 +1165,7 @@ def test_rate_limit_usage_flows_for_profile_less_codex(
             "rate_limit_usage": SessionRateLimitUsage(
                 source="codex",
                 updated_at=datetime.now(UTC),
-                notes=["noppanat@u.nus.edu", "plan: pro"],
+                notes=["person@example.edu", "plan: pro"],
                 windows=[UsageWindow(id="5h", label="5 hour", used_percent=10.0)],
             )
         },
@@ -1175,8 +1175,8 @@ def test_rate_limit_usage_flows_for_profile_less_codex(
     rows = [r for r in _facts(storage, "s1") if r["kind"] == "limit_snapshot"]
     assert len(rows) == 1
     assert rows[0]["account_key"].startswith("acct_")
-    assert "noppanat" not in rows[0]["account_key"]
-    assert rows[0]["account_label"] == "noppanat@u.nus.edu · plan: pro"
+    assert "person" not in rows[0]["account_key"]
+    assert rows[0]["account_label"] == "person@example.edu · plan: pro"
 
 
 def test_account_key_is_never_the_raw_email_or_org(

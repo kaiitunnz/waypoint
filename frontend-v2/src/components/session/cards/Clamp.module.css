@@ -6,14 +6,6 @@
   overflow: hidden;
 }
 
-/* Keeps the end in view, clipping from the top. */
-.keepEnd {
-  composes: clamp;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
-
 .content {
   display: block;
 }

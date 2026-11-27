@@ -3,10 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
-import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
-import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
-import { sessionLamp } from "@waypoint/web-core/sessionPresentation";
 import { HOME_HIDDEN_SOURCES } from "@waypoint/web-core/sessionSections";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import { useSessionHistory } from "@waypoint/web-core/sessionHistory";
@@ -29,7 +26,7 @@ import { usePointerUI } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
 import { ExitedToggle } from "./ExitedGroup";
-import { MatchedTitle, RailItem, railItemClass, railSubLine } from "./RailItem";
+import { MatchedTitle, RailItem, railItemClass, useRailRows } from "./RailItem";
 import styles from "./SessionSwitcher.module.css";
 import { EXITED_PAGE_SIZE } from "./useExitedSessions";
 
@@ -72,9 +69,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
     () => listed.filter((entry) => entry.section !== "needs").map((entry) => entry.session),
     [listed],
   );
-  const [previews] = useConversationPreviews();
-  const activities = useSessionActivity(host, token, previewed, handleAuthFailure, previews);
-  const asks = feed.pendingAsks?.items ?? [];
+  const railRow = useRailRows(previewed);
 
   const exitedCount = ranked.filter((entry) => entry.section === "exited").length + (counted.total ?? 0);
   // The heading stays until the count is known to be zero, so the toggle is never unmounted under the focus.
@@ -115,15 +110,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
 
   const renderEntry = (entry: SwitcherEntry, index: number) => {
     const { session, section } = entry;
-    const lamp = sessionLamp(session, askSessionIds.has(session.id));
-    const sub = railSubLine({
-      session,
-      lamp,
-      section,
-      ask: asks.find((item) => item.session_id === session.id),
-      previews,
-      activity: activities.get(session.id),
-    });
+    const { lamp, sub } = railRow(session, section);
     const heading = section !== "exited" && section !== entries[index - 1]?.section;
     return (
       <li key={session.id} role="presentation">
@@ -139,7 +126,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
           id={`${listId}-${session.id}`}
           aria-selected={index === selected}
           tabIndex={-1}
-          className={cx(railItemClass(session, lamp, sub === null), styles.option)}
+          className={cx(railItemClass(session, lamp, sub), styles.option)}
           onMouseMove={() => setActive(index)}
           onClick={() => open(session)}
         >

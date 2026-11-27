@@ -12,18 +12,12 @@
 }
 
 .heading {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
+  composes: sectionHead from "./RailItem.module.css";
   padding: 14px 18px 4px;
-  font-size: var(--f-meta);
-  font-weight: 600;
-  color: var(--text);
 }
 
 .count {
-  font-weight: 400;
-  color: var(--faint);
+  composes: count from "./RailItem.module.css";
 }
 
 /* A rail row, inset so the selection's fill has all its corners. */

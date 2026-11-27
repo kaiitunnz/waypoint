@@ -5,26 +5,23 @@ import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type React
 
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
-import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useLongPress } from "@waypoint/web-core/hooks/useLongPress";
-import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
-import { agentModelLabel, sessionLamp, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
+import { agentModelLabel, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import { rankSessionsForSwitcher, SWITCHER_SECTION_LABELS, type SwitcherSection } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { ExitedGroup } from "@/components/sessions/ExitedGroup";
-import { RailItem, railItemClass, railSubLine } from "@/components/sessions/RailItem";
+import { RailItem, railItemClass, useRailRows } from "@/components/sessions/RailItem";
 import { SessionMenu, type SessionAction } from "@/components/sessions/SessionMenu";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
 import { useExitedSessions } from "@/components/sessions/useExitedSessions";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
-import { handleAuthFailure } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { useShowExited } from "@/lib/show-exited";
 import { cx } from "@/lib/cx";
-import { useSessionsData, useShellData } from "@/lib/shell-data";
+import { useSessionsData } from "@/lib/shell-data";
 
 import { PanelButton } from "./PanelButton";
 import styles from "./SessionRail.module.css";
@@ -64,7 +61,6 @@ function RailRow({
 }: RailRowProps) {
   const pointer = usePointerUI();
   const press = useLongPress(() => onMenuOpen(true));
-  const single = sub === null;
   const onContextMenu = (event: MouseEvent) => {
     press.onContextMenu(event);
     // Android also fires this for a long press, which opens the menu itself.
@@ -73,7 +69,7 @@ function RailRow({
     onMenuOpen(true);
   };
   return (
-    <li className={cx(styles.row, single && styles.single)}>
+    <li className={cx(styles.row, sub === null && styles.single)}>
       <Link
         {...press}
         onContextMenu={onContextMenu}
@@ -81,7 +77,7 @@ function RailRow({
         href={sessionHref(session.id)}
         onNavigate={onNavigate}
         aria-current={current ? "page" : undefined}
-        className={cx(railItemClass(session, lamp, single), styles.item, current && styles.on)}
+        className={cx(railItemClass(session, lamp, sub), styles.item, current && styles.on)}
       >
         <RailItem session={session} lamp={lamp} section={section} now={now} sub={sub} timeClassName={styles.time} />
       </Link>
@@ -109,7 +105,6 @@ interface SessionRailProps {
 }
 
 export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: SessionRailProps) {
-  const { host, token } = useShellData();
   const feed = useSessionsData();
   const switcher = useSwitcher();
   const now = useServerNow();
@@ -135,8 +130,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
 
   // The previews follow the rows that show them: pinned and live, not the exited.
   const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
-  const [previews] = useConversationPreviews();
-  const activities = useSessionActivity(host, token, previewed, handleAuthFailure, previews);
+  const railRow = useRailRows(previewed);
   const { count: exitedCount, listed, paging } = useExitedSessions({
     query: "",
     live: unpinnedExited,
@@ -144,7 +138,6 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
     enabled: showExited,
     remember: true,
   });
-  const asks = feed.pendingAsks?.items ?? [];
 
   // The session whose menu is open, held here so a row that changes section keeps it.
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -152,15 +145,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
   if (menuFor !== null && !drawn.some((session) => session.id === menuFor)) setMenuFor(null);
 
   const row = (session: SessionRecord, section: SwitcherSection) => {
-    const lamp = sessionLamp(session, feed.askSessionIds.has(session.id));
-    const sub = railSubLine({
-      session,
-      lamp,
-      section,
-      ask: asks.find((item) => item.session_id === session.id),
-      previews,
-      activity: activities.get(session.id),
-    });
+    const { lamp, sub } = railRow(session, section);
     return (
       <RailRow
         key={session.id}

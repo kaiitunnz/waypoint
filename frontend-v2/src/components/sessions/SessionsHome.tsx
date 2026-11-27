@@ -118,9 +118,8 @@ export function SessionsHome() {
       menu: menuFor(session),
     };
   };
-  // Pinned and Live read alike: a card of the title, time, lamp, state, agent and, unless
-  // turned off, the preview line.
-  const previewGroup = (title: string, group: SessionRecord[]) =>
+  // Pinned and Live read alike.
+  const cardGroup = (title: string, group: SessionRecord[]) =>
     group.length > 0 ? (
       <section>
         <SectionHeading title={title} count={group.length} dense={phone} />
@@ -156,8 +155,8 @@ export function SessionsHome() {
         agentLabel={agentLabel}
         now={now}
       />
-      {previewGroup("Pinned", sections.pinned)}
-      {previewGroup("Live", sections.live)}
+      {cardGroup("Pinned", sections.pinned)}
+      {cardGroup("Live", sections.live)}
       {exitedCount > 0 ? (
         <ExitedGroup
           count={exitedCount}

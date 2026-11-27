@@ -1,3 +1,18 @@
+/* A section's heading and its count; each list gives the heading its padding. */
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.count {
+  font-weight: 400;
+  color: var(--faint);
+}
+
 .item {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) auto;

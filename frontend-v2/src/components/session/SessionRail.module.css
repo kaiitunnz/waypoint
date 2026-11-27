@@ -36,18 +36,12 @@
 }
 
 .sectionHead {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
+  composes: sectionHead from "../sessions/RailItem.module.css";
   padding: 14px 16px 4px;
-  font-size: var(--f-meta);
-  font-weight: 600;
-  color: var(--text);
 }
 
 .count {
-  font-weight: 400;
-  color: var(--faint);
+  composes: count from "../sessions/RailItem.module.css";
 }
 
 .list {

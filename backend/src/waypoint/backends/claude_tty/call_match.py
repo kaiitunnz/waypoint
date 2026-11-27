@@ -235,18 +235,30 @@ def _new_file_matches(body: list[str], content: str) -> bool:
 
 
 def _diff_entries(body: list[str]) -> list[tuple[int, str, list[str]]]:
-    """``(line number, marker, wrapped segments)`` for each line of a diff."""
+    """``(line number, marker, wrapped segments)`` for each line of a diff.
+
+    A long line goes on below with its marker repeated in the same column. Any
+    other line is the dialog's own, such as a note that the diff is partial.
+    """
     entries: list[tuple[int, str, list[str]]] = []
+    # Where the markers stand, the same on every line of one diff.
+    column = 0
     for line in body:
         if line.strip() in _HUNK_BREAKS:
             continue
-        if match := _DIFF_LINE_RE.match(line.rstrip()):
+        match = _DIFF_LINE_RE.match(line.rstrip())
+        if match and column in (0, match.start(2)):
+            column = match.start(2)
             entries.append((int(match.group(1)), match.group(2), [match.group(3)]))
-        elif numbered := _NUMBERED_RE.match(line.rstrip()):
+        elif (numbered := _NUMBERED_RE.match(line.rstrip())) and column in (
+            0,
+            numbered.end(1) + 1,
+        ):
             # An empty context line has nothing after its number.
             entries.append((int(numbered.group(1)), " ", [numbered.group(2) or ""]))
-        elif entries:
-            entries[-1][2].append(line)
+        elif entries and line[:column].isspace():
+            if line[column : column + 1] == entries[-1][1]:
+                entries[-1][2].append(line[column + 1 :])
     return entries
 
 

@@ -1,0 +1,20 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Edit file
+ replace.py
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 2  item_02 = 2
+ 3  item_03 = 3
+ 4  item_04 = 4
+ 5 -marker = old
+ 5 +marker = new
+ 6  item_06 = 6
+ 7  item_07 = 7
+ 8  item_08 = 8
+The diff doesn't show all of what this edit changes: 2 places in the file.
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to replace.py?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)
+   3. No
+
+ One-time Yes only: places not shown · Esc to cancel · Tab to amend

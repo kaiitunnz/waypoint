@@ -239,6 +239,68 @@ def test_a_home_path_names_a_file_under_that_home(
     assert (match_call(dialog, [call]) is not None) is matches
 
 
+ITEMS = "".join(
+    f"row {i}\n" if i not in (3, 27) else f"row {word} changed\n"
+    for i, word in ((i, {3: "three", 27: "twenty-seven"}.get(i)) for i in range(1, 31))
+)
+MARKER_EDIT = {
+    "old_string": "marker = old",
+    "new_string": "marker = new",
+    "replace_all": True,
+}
+
+
+@pytest.mark.parametrize(
+    ("fixture", "replaced", "name", "file", "tool_input"),
+    [
+        (
+            "approval_edit_wrapped_lines.txt",
+            (),
+            "Edit",
+            "wrap.py",
+            {"old_string": "value_number_11", "new_string": "value_number_99"},
+        ),
+        # Only the first of two places is drawn, with a note saying so.
+        ("approval_edit_replace_all.txt", (), "Edit", "replace.py", MARKER_EDIT),
+        # The note right after a changed line is still not part of it.
+        (
+            "approval_edit_replace_all.txt",
+            ("\n 6  item_06 = 6\n 7  item_07 = 7\n 8  item_08 = 8", ""),
+            "Edit",
+            "replace.py",
+            MARKER_EDIT,
+        ),
+        (
+            "approval_overwrite_two_hunks.txt",
+            (),
+            "Write",
+            "two.txt",
+            {"content": ITEMS},
+        ),
+    ],
+)
+def test_diff_dialogs_as_claude_draws_them(
+    fixture: str,
+    replaced: tuple[str, str] | tuple[()],
+    name: str,
+    file: str,
+    tool_input: dict[str, Any],
+) -> None:
+    dialog = _dialog(fixture, *([replaced] if replaced else []))
+    call = _call(name, {"file_path": f"{CWD}/{file}", **tool_input})
+    assert match_call(dialog, [call]) is not None
+
+
+def test_wrapped_diff_lines_still_have_to_agree() -> None:
+    tool_input = {
+        "file_path": f"{CWD}/wrap.py",
+        "old_string": "value_number_11",
+        "new_string": "value_number_98",
+    }
+    dialog = _dialog("approval_edit_wrapped_lines.txt")
+    assert match_call(dialog, [_call("Edit", tool_input)]) is None
+
+
 def test_new_file_matches_its_whole_content() -> None:
     dialog = _dialog("approval_write.txt")
     path = "/tmp/cc-tty-probe/probe_out.txt"

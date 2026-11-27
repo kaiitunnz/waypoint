@@ -94,9 +94,7 @@ def test_local_metadata_only_does_not_read_body(tmp_path: Path) -> None:
 # ── Local source: a transcript Claude moved ──────────────────────────────────
 
 
-def test_local_follows_a_moved_transcript_from_the_same_offset(
-    tmp_path: Path,
-) -> None:
+def test_local_follows_a_moved_transcript_from_the_same_offset(tmp_path: Path) -> None:
     src, path = _local_source(tmp_path)
     path.write_bytes(b"one\n")
     first = src.read_from(0)

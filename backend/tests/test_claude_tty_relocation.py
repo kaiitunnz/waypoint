@@ -411,9 +411,7 @@ async def test_follow_never_raises(tmp_path: Path) -> None:
     runtime.update_session_fields.assert_awaited_once()
 
 
-async def test_follow_on_ssh_runs_no_local_git(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_follow_on_ssh_runs_no_local_git(monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = _runtime(_session("~/proj", launch_target_id="remote-1"))
     runtime._find_launch_target.return_value = MagicMock()
     probed: list[str] = []

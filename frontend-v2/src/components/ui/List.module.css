@@ -110,7 +110,6 @@
 .compact .title {
   font-size: var(--f-body);
   line-height: 22px;
-  color: var(--text);
 }
 
 .compact .trailing {

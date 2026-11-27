@@ -849,6 +849,8 @@ def test_parse_dialog_heading_and_pane_reading(
     assert (dialog.heading, dialog.agent, dialog.tool_name) == (heading, agent, tool)
     if target is not None:
         assert dialog.target == target
+    # The bar marking wrapped lines is the box's, not the call's.
+    assert "│" not in (dialog.target or "")
     assert dialog.approve_option is not None and dialog.approve_option.number == 1
     assert dialog.decline_option is not None
 

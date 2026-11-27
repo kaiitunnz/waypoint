@@ -737,7 +737,7 @@ def _read_tool_target(
     """The tool and target the dialog reads as. Nothing above the dialog is
     consulted: a call echoed there may be another one."""
     shown = [*header, *(body or [])]
-    text = "\n".join(line.strip() for line in shown if line.strip())
+    text = "\n".join(unboxed(line).strip() for line in shown if line.strip())
     if heading is not None:
         if skill := _SKILL_HEADING_RE.match(heading):
             return "Skill", skill.group(1)

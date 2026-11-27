@@ -937,9 +937,9 @@ inside that agent's `normalize.py`; the frontend reader stays put.
 
 An event's `status` becomes the session's status, and `None` keeps the current
 one. Set it only for a turn boundary (a turn starting, ending, or waiting on the
-human) or the turn's own activity. A record that can arrive while the session is
-idle (bookkeeping, background task progress, compaction results, queued or
-transcript-only messages) carries `None`.
+human) or the turn's own activity. Any other record (bookkeeping, background task
+progress, compaction results, queued or transcript-only messages) carries `None`,
+since it can arrive while the session is idle.
 
 ### Deferred results
 

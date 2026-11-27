@@ -413,7 +413,7 @@ def _event(
     metadata: dict[str, Any],
     status: SessionStatus | None = SessionStatus.RUNNING,
 ) -> EventRecord:
-    # Notification builders preset ``status``; only the argument counts.
+    # Metadata builders may preset ``status``; only the argument counts.
     metadata = {key: value for key, value in metadata.items() if key != "status"}
     if status is not None:
         metadata["status"] = status

@@ -933,6 +933,14 @@ the envelope back out into typed fields, so renderers don't each re-derive
 them from `metadata`. When an agent bumps its protocol, the change lands
 inside that agent's `normalize.py`; the frontend reader stays put.
 
+### Status
+
+An event's `status` becomes the session's status; `None` keeps the current one. Set
+it on a turn boundary (a turn starting, ending, or waiting on the human) and on the
+turn's own model and tool activity. Everything else the agent reports (bookkeeping,
+background tasks, compaction progress, queued or transcript-only messages) is
+emitted with `None`, since it can arrive while the session is idle.
+
 ### Deferred results
 
 A `tool_result` with `metadata.result_deferred: true` only acknowledges that the

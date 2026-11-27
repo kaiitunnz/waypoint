@@ -1,7 +1,7 @@
 // A pending approval as a screen that decides it shows it: the whole request, or a lock.
 
 import { asRecord, readToolName, type EventDiffPreview } from "../events";
-import { hunksAddUp } from "../highlight";
+import { buildPlainDiffLines, hunksAddUp } from "../highlight";
 import type { EventRecord } from "../types";
 import { resolveFromCwd } from "../workspacePaths";
 import { approvalBody, WORKFLOW_TOOLS, type ApprovalBody } from "./approvals";
@@ -33,15 +33,18 @@ export interface ShownRequest {
 
 // Characters that draw nothing or reorder the text around them; line breaks and tabs
 // are not among them.
-const HIDDEN = /(?![\n\t]|\r\n)[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
+const HIDDEN = /(?![\n\t]|\r\n)[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/u;
+// Those, and blanks that read as a space without being one.
+const MISLEADING = /(?![\n\t ]|\r\n)[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Zs}\u2028\u2029\u2800]/gu;
+const DIRECTION = /\p{Bidi_Control}/u;
 
-export const hasHiddenText = (text: string) => text.search(HIDDEN) !== -1;
+const misleads = (text: string) => text.search(MISLEADING) !== -1;
 
 const escaped = (character: string) =>
   Array.from({ length: character.length }, (_, i) => `\\u${character.charCodeAt(i).toString(16).padStart(4, "0")}`).join("");
 
-// The whole request as JSON, with hidden characters written out.
-export const requestText = (fields: Record<string, unknown>) => JSON.stringify(fields, null, 2).replace(HIDDEN, escaped);
+// The whole request as JSON, with hidden characters and look-alike blanks written out.
+export const requestText = (fields: Record<string, unknown>) => JSON.stringify(fields, null, 2).replace(MISLEADING, escaped);
 
 const strings = (value: unknown): string[] => {
   if (typeof value === "string") return [value];
@@ -99,13 +102,15 @@ function requestWarnings(event: EventRecord, cwd: string): string[] {
     request.permissions,
   ];
   const everywhere = [input, ...edits].some((edit) => isSet(edit?.replace_all) || isSet(edit?.replaceAll));
+  // A shell takes a carriage return as part of a word, a line break's included.
+  const returns = strings([input.command, request.command]).some((command) => command.includes("\r"));
   const checks: [string, boolean][] = [
     ["Runs outside the sandbox", isSet(input.dangerouslyDisableSandbox)],
     ["Extra permissions or network access", permissions.some(isSet)],
     ["Write access for the whole session", isSet(input.grantRoot) || isSet(request.grantRoot)],
     ["Replaces every occurrence", everywhere],
     ["Different working directory", isSet(input.isolation) || elsewhere],
-    [HIDDEN_WARNING, strings(event.metadata).some(hasHiddenText)],
+    [HIDDEN_WARNING, returns || strings(event.metadata).some(misleads)],
   ];
   return checks.filter(([, applies]) => applies).map(([warning]) => warning);
 }
@@ -157,9 +162,21 @@ function holdsContent(body: ApprovalBody, input: Record<string, unknown> | null,
   }
 }
 
-// A diff is the one view whose text the raw block does not write out.
-const hidesInDiff = (body: ApprovalBody) =>
-  body.kind === "diff" && strings(body.preview.files).some(hasHiddenText);
+// A diff is the one view whose text the raw block does not write out. A path or a
+// changed line must hide nothing; an unchanged line must not reorder what is around it.
+function hidesInDiff(body: ApprovalBody): boolean {
+  if (body.kind !== "diff") return false;
+  return body.preview.files.some(
+    (file) =>
+      [file.path, file.oldPath ?? ""].some((path) => HIDDEN.test(path)) ||
+      buildPlainDiffLines(file.diff).some((line) => {
+        // The carriage return of a CR LF file is its line break.
+        const text = line.tokens.map((token) => token.text).join("").replace(/\r$/, "");
+        if (line.kind === "context") return DIRECTION.test(text);
+        return (line.kind === "add" || line.kind === "del") && HIDDEN.test(text);
+      }),
+  );
+}
 
 function lockReason(body: ApprovalBody, input: Record<string, unknown> | null, tool: string | null): string | null {
   if (!holdsContent(body, input, tool)) return body.kind === "plan" ? NO_PLAN : MISSING;
@@ -173,7 +190,7 @@ export function shownPlan(plan: string): ShownRequest {
   return {
     body,
     fields: { plan },
-    warnings: hasHiddenText(plan) ? [HIDDEN_WARNING] : [],
+    warnings: misleads(plan) ? [HIDDEN_WARNING] : [],
     unverified: false,
     whole: lockNote === null,
     lockNote,

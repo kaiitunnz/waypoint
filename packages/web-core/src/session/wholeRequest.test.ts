@@ -121,25 +121,66 @@ describe("hidden characters", () => {
     expect(asAsked(approve("Bash", { command: "ls\u001b[8mrm -rf a" })).warnings).toEqual([hidden]);
     const preview = { phase: "proposed", truncated: false, files: [{ path: "a.ts", diff: "@@ -1 +1 @@\n-a\n+b\u2066\n" }] };
     expect(asAsked(ev(1, "approval_request", "Approve", { diff_preview: preview })).warnings).toEqual([hidden]);
-    expect(asAsked(approve("Bash", { command: "a\r\n\tb\nc" })).warnings).toEqual([]);
+    expect(asAsked(approve("Bash", { command: "a\n\tb c" })).warnings).toEqual([]);
+    expect(asAsked(approve("Write", { file_path: "a.txt", content: "a\r\nb\r\n" })).warnings).toEqual([]);
   });
 
-  it("lock a diff, whose text the raw request does not write out", () => {
-    const changed = (file: Record<string, unknown>) => {
-      const preview = { phase: "proposed", truncated: false, files: [{ path: "a.ts", diff: "@@ -1 +1 @@\n-a\n+b\n", ...file }] };
-      return asAsked(ev(1, "approval_request", "Approve", { diff_preview: preview }));
-    };
+  it("include blanks that read as a space, written out in a command that is still decided", () => {
+    // No word ends at a no-break space, so `#` starts no comment and the rest runs.
+    for (const [blank, written] of [
+      ["\u00a0", "\\u00a0"],
+      ["\u3000", "\\u3000"],
+      ["\u2800", "\\u2800"],
+    ]) {
+      const shown = asAsked(approve("Bash", { command: `echo cleanup${blank}#; rm -rf build` }));
+      expect(shown).toMatchObject({ warnings: [hidden], whole: true });
+      expect(requestText(shown.fields)).toContain(`cleanup${written}#`);
+    }
+  });
+
+  it("include any carriage return in a command, a CR LF's too", () => {
+    // The backslash escapes the return, so the next line is a command of its own.
+    const command = "echo would run: \\\r\nrm -rf build";
+    for (const request of [approve("Bash", { command }), approve("bash", null, { request: { command } })]) {
+      const shown = asAsked(request);
+      expect(shown).toMatchObject({ warnings: [hidden], whole: true });
+      expect(requestText(shown.fields)).toContain("\\\\\\r\\nrm");
+    }
+  });
+
+  const changed = (file: Record<string, unknown>) => {
+    const preview = { phase: "proposed", truncated: false, files: [{ path: "a.ts", diff: "@@ -1 +1 @@\n-a\n+b\n", ...file }] };
+    return asAsked(ev(1, "approval_request", "Approve", { diff_preview: preview }));
+  };
+  // Unchanged first line, then one line changed.
+  const under = (line: string) => ({ diff: `@@ -1,2 +1,2 @@\n ${line}\n-a\n+b\n` });
+
+  it("lock a diff that hides them in a path or a changed line", () => {
     const locked = { whole: false, lockNote: "The diff can't show its hidden characters", warnings: [hidden] };
     for (const file of [
       { diff: "@@ -1 +1 @@\n-a\n+if (x) {\u202e} \u2066// admin\u2069\n" },
-      // An unchanged line, which the request itself does not carry.
-      { diff: "@@ -1,2 +1,2 @@\n a\u200b\n-a\n+b\n" },
+      { diff: "@@ -1 +1 @@\n-a\u200b\n+a\n" },
+      { diff: "@@ -1 +1 @@\n-a\n+\u26a0\ufe0f a\n" },
+      { diff: "@@ -1 +1 @@\n-a\n+\ufeffa\n" },
+      { diff: "@@ -1 +1 @@\n-a\n+a\rb\n" },
       { path: "a\u202egnp.ts" },
       { old_path: "b\u3164.ts" },
     ]) {
       expect([file, changed(file)]).toMatchObject([file, locked]);
     }
-    expect(changed({ diff: "@@ -1 +1 @@\r\n-a\r\n+\tb\r\n" })).toMatchObject({ whole: true, lockNote: null });
+  });
+
+  it("lock a diff whose unchanged line can reorder what is around it", () => {
+    for (const control of ["\u202e", "\u2066", "\u200f", "\u061c"]) expect(changed(under(`x${control}y`)).whole).toBe(false);
+  });
+
+  it("leave a diff to be decided where they neither change nor reorder it", () => {
+    for (const file of [under("\ufeffimport os"), under("\u26a0\ufe0f Warning"), under("a\u200bb")]) {
+      expect([file, changed(file)]).toMatchObject([file, { whole: true, lockNote: null, warnings: [hidden] }]);
+    }
+    // A blank that reads as a space is warned of only.
+    expect(changed({ diff: "@@ -1 +1 @@\n-a\n+a\u00a0b\n" })).toMatchObject({ whole: true, warnings: [hidden] });
+    expect(changed({ diff: "@@ -1 +1 @@\r\n-a\r\n+\tb\r\n" })).toMatchObject({ whole: true, warnings: [] });
   });
 
   it("leave a request the raw block writes out to be decided", () => {

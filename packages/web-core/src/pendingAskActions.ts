@@ -1,7 +1,7 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
 import { toggleSelection } from "./session/askQuestion";
-import { hasHiddenText, shownPlan, shownRequest, type AskSession, type ShownRequest } from "./session/wholeRequest";
+import { shownPlan, shownRequest, type AskSession, type ShownRequest } from "./session/wholeRequest";
 import type {
   EventRecord,
   PendingApprovalAsk,
@@ -178,6 +178,9 @@ export const fitsListing = (text: string) =>
 
 // All a shell call may carry for a row to decide it.
 const INLINE_INPUT = new Set(["command", "description", "timeout", "run_in_background"]);
+// All a command decided on a row may hold: printable ASCII, line breaks and tabs.
+// Anything else may read other than it runs.
+const PLAIN_COMMAND = /^[\x20-\x7e\n\t]*$/;
 
 // The command a row or card takes a decision on, or null: a shell call whose input the
 // ask carries whole, with nothing else of consequence, and whose command lists whole.
@@ -188,7 +191,7 @@ export function inlineCommand(ask: PendingAsk, fromScreen: boolean): string | nu
   if (normalizeToolName(tool) !== "Bash" || !input || cut) return null;
   if (!Object.keys(input).every((key) => INLINE_INPUT.has(key))) return null;
   const { command } = input;
-  if (typeof command !== "string" || command.trim() === "" || hasHiddenText(command)) return null;
+  if (typeof command !== "string" || command.trim() === "" || !PLAIN_COMMAND.test(command)) return null;
   return fitsListing(command) ? command : null;
 }
 

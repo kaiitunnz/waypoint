@@ -213,11 +213,30 @@ describe("deciding outside the detail", () => {
     expect(inline("mcp__sh__run", { command: "ls" })).toBeNull();
     // Cut by the server.
     expect(inlineCommand(approval("Bash", { command: "git pu" }, true), false)).toBeNull();
-    // It would not read as it runs.
-    expect(inline("Bash", { command: "ls # \u202e/ fr- mr ;" })).toBeNull();
-    expect(inline("Bash", { command: "rm\u200b -rf a" })).toBeNull();
-    for (const blank of ["\ufe0f", "\u{e0100}", "\u034f", "\u3164"]) expect(inline("Bash", { command: `ls${blank}` })).toBeNull();
     expect(inlineCommand(plan("# Plan", "approve"), false)).toBeNull();
+  });
+
+  it("decides only a command of printable ASCII, line breaks and tabs", () => {
+    expect(inline("Bash", { command: "a\t~ !\nb" })).toBe("a\t~ !\nb");
+    for (const command of [
+      // `#` after a no-break space starts no comment, so what follows runs.
+      "echo cleanup\u00a0#; rm -rf build",
+      // A backslash before CR LF escapes the return, so the next line runs by itself.
+      "echo would run: \\\r\nrm -rf build",
+      "a\r\nb",
+      "ls # \u202e/ fr- mr ;",
+      "rm\u200b -rf a",
+      "ls\ufe0f",
+      "ls\u{e0100}",
+      "ls\u3164",
+      "ls\u3000",
+      "ls\u2800",
+      "ls\x7f",
+      "ls\x1b[8m",
+      "echo \u00e9",
+    ]) {
+      expect([command, inline("Bash", { command })]).toEqual([command, null]);
+    }
   });
 
   it("shows a request from its transcript", () => {

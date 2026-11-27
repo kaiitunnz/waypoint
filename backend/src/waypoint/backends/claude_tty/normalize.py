@@ -18,7 +18,7 @@ Key invariants (all verified against real transcripts in Phase 0):
   ``tool_use``) and contains no ``tool_use`` blocks.
 - An interrupted, cut-off or declined turn writes no terminal assistant record;
   its interrupt marker emits the result instead. A marker answering Waypoint's
-  own interrupt emits none, as the runtime has noted that one.
+  own interrupt emits none: whoever asked for that one notes it.
 - A queued prompt's ``user`` record sets RUNNING; a ``queueTranscriptOnly``
   record was never sent to the model and sets no status.
 - ``thinking`` blocks stay hidden, except the TUI's progress updates (thinking
@@ -41,7 +41,6 @@ Key invariants (all verified against real transcripts in Phase 0):
 
 import json
 import re
-import time
 import uuid
 from collections import Counter
 from typing import Any
@@ -49,6 +48,8 @@ from typing import Any
 from waypoint.backends.claude_code.normalize import (
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
+    ExpectedInterrupt,
+    InterruptOrigin,
     TaskListTracker,
     TurnAbortTracker,
     build_peer_message_metadata,
@@ -56,12 +57,12 @@ from waypoint.backends.claude_code.normalize import (
     claim_peer_message,
     classify_injected_user_turn,
     deferred_result_metadata,
+    delivery_status,
     extract_created_task_id,
     format_task_snapshot,
     is_human_prompt,
     is_interrupt_marker,
     is_queued_prompt,
-    is_transcript_only,
     is_user_rejection,
     iter_content_blocks,
     parse_peer_message,
@@ -92,9 +93,6 @@ SYNTHETIC_MODEL_ID = "<synthetic>"
 # a fixed CLI constant, and a synthetic message carrying exactly this text is
 # always the phantom — an interrupted partial or error notice has other text.
 RESUME_NOOP_TEXT = "No response requested."
-# How long after Waypoint's Esc its interrupt marker is still expected. Covers a
-# slow remote tail; an Esc that cancels nothing writes no marker at all.
-_EXPECTED_INTERRUPT_SECONDS = 30.0
 
 
 class NormalizedEvent:
@@ -155,26 +153,15 @@ class TranscriptNormalizer:
         # diff preview. The TUI records the change on the result, not the call.
         self._file_edit_tool_use_ids: set[str] = set()
         self._abort = TurnAbortTracker()
-        # Monotonic deadline for the marker of Waypoint's own interrupt, or 0.
-        self._interrupt_expected_until = 0.0
-        # Set once Waypoint has sent input past that interrupt, so its marker
-        # may not move the status of the turn that follows.
-        self._interrupt_superseded = False
+        self._interrupt = ExpectedInterrupt()
 
     def expect_interrupt(self) -> None:
         """Waypoint is about to press Esc; the marker that answers is its own."""
-        self._interrupt_expected_until = time.monotonic() + _EXPECTED_INTERRUPT_SECONDS
-        self._interrupt_superseded = False
+        self._interrupt.arm()
 
     def supersede_interrupt(self) -> None:
         """Waypoint is about to send input after an interrupt."""
-        if self._interrupt_expected_until:
-            self._interrupt_superseded = True
-
-    def _take_expected_interrupt(self) -> bool:
-        expected = time.monotonic() < self._interrupt_expected_until
-        self._interrupt_expected_until = 0.0
-        return expected
+        self._interrupt.supersede()
 
     def process_record(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         rec_type = record.get("type")
@@ -413,7 +400,6 @@ class TranscriptNormalizer:
             and not already_noted
             and not thinking_only
         ):
-            self._abort.reset()
             if message_id:
                 self._result_emitted_ids.add(message_id)
             usage_payload: dict[str, Any] = usage if first_seen else {}
@@ -483,7 +469,7 @@ class TranscriptNormalizer:
         A delivered (``user``) record starts a turn, so it sets RUNNING even when
         the card was already shown.
         """
-        status = _delivery_status(record) if operation == "user" else None
+        status = delivery_status(record) if operation == "user" else None
         parsed = parse_peer_message(content)
         if parsed is None:
             return _status_only(status)
@@ -527,12 +513,11 @@ class TranscriptNormalizer:
         message: dict[str, Any] = record.get("message") or {}
         content = message.get("content")
 
+        self._abort.observe_user_record(record, content)
         injected = classify_injected_user_turn(record, content)
-        if injected != "none" and not is_transcript_only(record):
-            self._abort.reset()
         if injected == "task_notification" and isinstance(content, str):
             return self._task_notification_events(
-                content, record.get("uuid"), _delivery_status(record)
+                content, record.get("uuid"), delivery_status(record)
             )
         if injected == "peer_message" and isinstance(content, str):
             return self._peer_message_events(content, "user", record)
@@ -620,25 +605,19 @@ class TranscriptNormalizer:
 
     def _human_prompt_events(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         # The prompt's text is already recorded at the input boundary.
-        self._abort.reset()
-        # A superseded interrupt's marker precedes the prompt that superseded it,
-        # so one still expected here was never written.
-        if self._interrupt_superseded:
-            self._interrupt_expected_until = 0.0
-            self._interrupt_superseded = False
+        self._interrupt.forget_superseded()
         # Only a queued prompt reports a turn start: an Esc before any output
         # records nothing, which would strand a typed one as running.
         return _status_only(SessionStatus.RUNNING if is_queued_prompt(record) else None)
 
     def _interrupt_marker_events(self) -> list[NormalizedEvent]:
         resolution = self._abort.resolve()
-        expected = self._take_expected_interrupt()
-        if expected:
-            if self._interrupt_superseded:
-                self._interrupt_superseded = False
+        match self._interrupt.take():
+            case InterruptOrigin.SUPERSEDED:
                 return []
-            # Re-assert it over any of the turn's records read since.
-            return _status_only(SessionStatus.INTERRUPTED)
+            case InterruptOrigin.WAYPOINT:
+                # Re-assert it over any of the turn's records read since.
+                return _status_only(SessionStatus.INTERRUPTED)
         if resolution is None:
             # A sibling's result may have landed after the dismissal.
             return _status_only(SessionStatus.IDLE)
@@ -663,11 +642,6 @@ class TranscriptNormalizer:
                 status=SessionStatus.RUNNING,
             )
         ]
-
-
-def _delivery_status(record: dict[str, Any]) -> SessionStatus | None:
-    """The status an injected ``user`` record sets as it is delivered."""
-    return None if is_transcript_only(record) else SessionStatus.RUNNING
 
 
 def _status_only(status: SessionStatus | None) -> list[NormalizedEvent]:

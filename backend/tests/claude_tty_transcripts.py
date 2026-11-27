@@ -10,6 +10,7 @@ from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     SubagentTranscript,
     Tail,
+    TranscriptRead,
     transcript_path,
 )
 
@@ -121,3 +122,24 @@ class NoTranscriptTree:
 
     def home_dir(self) -> str | None:
         return None
+
+
+class FedSource(NoTranscriptTree):
+    """A byte source that hands over fed bytes once, modeling a growing file."""
+
+    def __init__(self) -> None:
+        self._pending = b""
+        self._size = 0
+
+    def feed(self, data: bytes) -> None:
+        self._pending += data
+
+    def read_from(
+        self, offset: int, *, metadata_only: bool = False, force: bool = False
+    ) -> TranscriptRead:
+        data = b"" if metadata_only else self._pending
+        self._pending = b""
+        self._size += len(data)
+        return TranscriptRead(
+            observed=True, data=data, size=self._size, identity=(1, 1)
+        )

@@ -85,6 +85,21 @@ async def test_drawn_composer_takes_the_message() -> None:
     assert tmux.type_input.await_count + tmux.send_input.await_count == 1
 
 
+@pytest.mark.parametrize("holds_input", [True, False])
+async def test_resume_supersedes_an_interrupt_only_when_it_submits(
+    holds_input: bool,
+) -> None:
+    ready = (FIXTURES / "ready.txt").read_text()
+    # The prompt is followed by a no-break space.
+    typed = ready.replace('❯\xa0Try "fix typecheck errors"', "❯\xa0msg")
+    transport, _tmux, session = _transport(typed if holds_input else ready)
+    plugin = transport._plugin
+    plugin.supersede_interrupt = MagicMock()  # type: ignore[method-assign]
+
+    assert await transport.resume(session) is holds_input
+    assert plugin.supersede_interrupt.call_count == int(holds_input)
+
+
 async def test_the_submit_budget_outlasts_image_ingestion() -> None:
     # The TUI drops Enters while it turns pasted image paths into chips.
     ready = (FIXTURES / "ready.txt").read_text()

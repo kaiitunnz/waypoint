@@ -27,6 +27,8 @@ from waypoint.backends.claude_code.normalize import (
     INTERRUPTED_NOTE,
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
+    ExpectedInterrupt,
+    InterruptOrigin,
     TaskListTracker,
     extract_created_task_id,
     format_approval_text,
@@ -34,9 +36,11 @@ from waypoint.backends.claude_code.normalize import (
     format_rate_limit,
     format_status_event,
     format_task_snapshot,
+    is_interrupted_result,
     iter_content_blocks,
     sent_user_file_paths,
     stringify_tool_result,
+    turn_activity_status,
 )
 
 # Re-exported from the backend plugin so legacy imports keep resolving;
@@ -296,8 +300,6 @@ LaunchFactory = Callable[
 
 
 STDERR_TAIL_LINES = 50
-# ``terminal_reason`` values of a result that an interrupt cut short.
-_INTERRUPTED_TERMINAL_REASONS = frozenset({"aborted_streaming", "aborted_tools"})
 
 
 @dataclass
@@ -363,10 +365,7 @@ class ClaudeSessionState:
     last_plan_path: str | None = None
     last_plan_content: str | None = None
     closing: bool = False
-    # Waypoint asked to interrupt and the interrupted turn's result is still due.
-    stop_requested: bool = False
-    # Input was sent since, so that result may not move the new turn's status.
-    stop_superseded: bool = False
+    expected_interrupt: ExpectedInterrupt = field(default_factory=ExpectedInterrupt)
     model: str | None = None
     # The raw concrete model id the CLI last reported resolving to (e.g.
     # ``claude-sonnet-5``), mirrored from the persisted
@@ -412,20 +411,6 @@ def _control_response_line(request_id: str, response_body: dict[str, Any]) -> by
         "response": {"request_id": request_id, **response_body},
     }
     return (json.dumps(envelope) + "\n").encode("utf-8")
-
-
-def _turn_activity_status(event: dict[str, Any]) -> SessionStatus | None:
-    """The status a model or tool message sets. A subagent's keeps the session's:
-    a background one goes on after the turn that launched it has ended.
-    """
-    return None if event.get("parent_tool_use_id") else SessionStatus.RUNNING
-
-
-def _is_interrupted_result(event: dict[str, Any], stop_requested: bool) -> bool:
-    if (reason := event.get("terminal_reason")) is not None:
-        return reason in _INTERRUPTED_TERMINAL_REASONS
-    # CLI versions that report no ``terminal_reason``.
-    return stop_requested and event.get("subtype") == "error_during_execution"
 
 
 def _process_writable(state: ClaudeSessionState) -> bool:
@@ -708,8 +693,7 @@ class ClaudeCliAdapter:
             raise ClaudeCliError(
                 self._format_dead_process_error(state, state.process.returncode)
             )
-        if state.stop_requested:
-            state.stop_superseded = True
+        state.expected_interrupt.supersede()
         envelope = {
             "type": "user",
             "message": {"role": "user", "content": _user_content(text, attachments)},
@@ -730,8 +714,7 @@ class ClaudeCliAdapter:
         # behaviour. Fall back to SIGINT only if the request fails — that
         # ends the process (rc=0 in `-p` mode), so the session would have to
         # be resumed.
-        state.stop_requested = True
-        state.stop_superseded = False
+        state.expected_interrupt.arm()
         request_id = f"interrupt-{uuid.uuid4()}"
         try:
             await self._send_control_request(
@@ -1715,8 +1698,8 @@ class ClaudeCliAdapter:
             self._drop_ask_questions(
                 state, lambda entry: entry.request_id == request_id
             )
-            if await self._withdraw_approval(state, request_id):
-                return
+            await self._withdraw_approval(state, request_id)
+            return
         if event_type == "rate_limit_event":
             await self._emit_event(
                 state.session_id,
@@ -1736,27 +1719,32 @@ class ClaudeCliAdapter:
         )
 
     async def _withdraw_approval(
-        self, state: ClaudeSessionState, request_id: object
-    ) -> bool:
+        self, state: ClaudeSessionState, request_id: Any
+    ) -> None:
         """Forget the approval whose request the binary withdrew, and post the
         note that closes its card."""
-        for tool_use_id, entry in list(state.pending.items()):
-            if entry.request_id != request_id:
-                continue
-            state.pending.pop(tool_use_id, None)
-            await self._emit_event(
-                state.session_id,
-                EventKind.SYSTEM_NOTE,
-                (
-                    "Pending approval cleared by interrupt"
-                    if state.stop_requested
-                    else "Pending approval withdrawn by Claude"
-                ),
-                {"method": "approval.invalidated", "approval_id": tool_use_id},
-                None,
-            )
-            return True
-        return False
+        tool_use_id = next(
+            (
+                key
+                for key, entry in state.pending.items()
+                if entry.request_id == request_id
+            ),
+            None,
+        )
+        if tool_use_id is None:
+            return
+        del state.pending[tool_use_id]
+        await self._emit_event(
+            state.session_id,
+            EventKind.SYSTEM_NOTE,
+            (
+                "Pending approval cleared by interrupt"
+                if state.expected_interrupt.pending
+                else "Pending approval withdrawn by Claude"
+            ),
+            {"method": "approval.invalidated", "approval_id": tool_use_id},
+            None,
+        )
 
     async def _handle_system(
         self, state: ClaudeSessionState, event: dict[str, Any]
@@ -1819,12 +1807,19 @@ class ClaudeCliAdapter:
         if subtype == "status":
             # /compact and similar CLI commands surface their lifecycle here.
             if text := format_status_event(event):
+                # The turn of a queued /compact starts here: ``init`` follows
+                # only once the compaction is done.
+                status = (
+                    SessionStatus.RUNNING
+                    if event.get("status") == "compacting"
+                    else None
+                )
                 await self._emit_event(
                     state.session_id,
                     EventKind.SYSTEM_NOTE,
                     text,
-                    {"method": "system.status", "payload": event},
-                    None,
+                    {"method": "system.status", "payload": event, "status": status},
+                    status,
                 )
             return
         if subtype == "compact_boundary":
@@ -1859,7 +1854,7 @@ class ClaudeCliAdapter:
         message = event.get("message") or {}
         message_id = str(message.get("id") or "")
         usage = message.get("usage") or event.get("usage") or {}
-        activity = _turn_activity_status(event)
+        activity = turn_activity_status(event)
         for block in iter_content_blocks(message.get("content")):
             block_type = block.get("type")
             if block_type == "text":
@@ -1955,7 +1950,7 @@ class ClaudeCliAdapter:
         self, state: ClaudeSessionState, event: dict[str, Any]
     ) -> None:
         message = event.get("message") or {}
-        status = _turn_activity_status(event)
+        status = turn_activity_status(event)
         for block in iter_content_blocks(message.get("content")):
             if block.get("type") != "tool_result":
                 continue
@@ -2085,8 +2080,8 @@ class ClaudeCliAdapter:
     async def _handle_result(
         self, state: ClaudeSessionState, event: dict[str, Any]
     ) -> None:
-        if _is_interrupted_result(event, state.stop_requested):
-            await self._handle_interrupted_result(state)
+        if is_interrupted_result(event):
+            await self._handle_interrupted_result(state, event)
             return
         subtype = event.get("subtype", "")
         is_error = bool(event.get("is_error"))
@@ -2113,28 +2108,32 @@ class ClaudeCliAdapter:
             SessionStatus.ERROR if is_error else SessionStatus.IDLE,
         )
 
-    async def _handle_interrupted_result(self, state: ClaudeSessionState) -> None:
-        requested, superseded = state.stop_requested, state.stop_superseded
-        state.stop_requested = state.stop_superseded = False
-        if not requested:
-            await self._emit_event(
-                state.session_id,
-                EventKind.SYSTEM_NOTE,
-                INTERRUPTED_NOTE,
-                {
-                    "method": "result",
-                    "stop_reason": "interrupted",
-                    "status": SessionStatus.IDLE,
-                },
-                SessionStatus.IDLE,
-            )
-            return
-        # The runtime notes Waypoint's own interrupt. Re-assert its status over
-        # any of the turn's records read since.
-        if not superseded and self._on_session_update is not None:
-            await self._on_session_update(
-                state.session_id, {"status": SessionStatus.INTERRUPTED}, True
-            )
+    async def _handle_interrupted_result(
+        self, state: ClaudeSessionState, event: dict[str, Any]
+    ) -> None:
+        origin = state.expected_interrupt.take()
+        # The binary ended this turn itself, whatever Waypoint asked for before.
+        if event.get("stopped_by_permission_check"):
+            origin = InterruptOrigin.OTHER
+        match origin:
+            case InterruptOrigin.OTHER:
+                await self._emit_event(
+                    state.session_id,
+                    EventKind.SYSTEM_NOTE,
+                    INTERRUPTED_NOTE,
+                    {
+                        "method": "result",
+                        "stop_reason": "interrupted",
+                        "status": SessionStatus.IDLE,
+                    },
+                    SessionStatus.IDLE,
+                )
+            case InterruptOrigin.WAYPOINT if self._on_session_update is not None:
+                # Whoever asked notes it. Re-assert the status over any of the
+                # turn's records read since.
+                await self._on_session_update(
+                    state.session_id, {"status": SessionStatus.INTERRUPTED}, True
+                )
 
     async def _publish_context_usage(
         self, state: ClaudeSessionState, snapshot: SessionContextUsage

@@ -6,31 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from claude_tty_transcripts import NoTranscriptTree
+from claude_tty_transcripts import FedSource, NoTranscriptTree
 from waypoint.backends.claude_tty.byte_source import TranscriptRead, transcript_path
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
-
-
-class _FakeSource(NoTranscriptTree):
-    """A byte source that hands over fed bytes once, modeling a growing file."""
-
-    def __init__(self) -> None:
-        self._pending = b""
-        self._size = 0
-
-    def feed(self, data: bytes) -> None:
-        self._pending = data
-
-    def read_from(
-        self, offset: int, *, metadata_only: bool = False, force: bool = False
-    ) -> TranscriptRead:
-        data = b"" if metadata_only else self._pending
-        self._pending = b""
-        self._size += len(data)
-        return TranscriptRead(
-            observed=True, data=data, size=self._size, identity=(1, 1)
-        )
 
 
 def test_transcript_path_honors_config_dir() -> None:
@@ -100,9 +79,9 @@ def _context_usage_calls(runtime: MagicMock) -> list:
 
 def _make_tailer(
     runtime: MagicMock, session_id: str = "sess-1"
-) -> tuple[TranscriptTailer, _FakeSource]:
+) -> tuple[TranscriptTailer, FedSource]:
     plugin = MagicMock()
-    source = _FakeSource()
+    source = FedSource()
     tailer = TranscriptTailer(
         session_id=session_id,
         source=source,
@@ -484,7 +463,7 @@ async def test_observe_skips_plan_switching_selection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_observe_emits_note_with_current_session_status() -> None:
+async def test_the_model_change_note_keeps_the_status() -> None:
     session = _make_session(model="opus")
     session.status = SessionStatus.RUNNING
     runtime = _make_runtime(session)
@@ -498,8 +477,7 @@ async def test_observe_emits_note_with_current_session_status() -> None:
         for call in runtime._emit_adapter_event.call_args_list
         if call.args[3].get("method") == "model.change"
     )
-    # session.status keeps the event-insert COALESCE a no-op mid-turn.
-    assert change_call.args[4] is SessionStatus.RUNNING
+    assert change_call.args[4] is None
 
 
 async def test_queued_notification_keeps_status_until_delivered() -> None:

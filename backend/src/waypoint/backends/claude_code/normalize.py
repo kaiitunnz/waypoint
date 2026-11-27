@@ -15,9 +15,11 @@ import json
 import os
 import re
 import textwrap
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum, auto
 from typing import Any
 
 from waypoint.backends.claude_code.thinking_signature import is_narration_signature
@@ -27,6 +29,7 @@ from waypoint.backends.task_notifications import (
     TaskNotification,
     task_notification_event,
 )
+from waypoint.schemas import SessionStatus
 
 
 def format_status_event(event: dict[str, Any]) -> str:
@@ -155,18 +158,19 @@ def is_injected_user_turn(content: Any) -> bool:
     return False
 
 
-# ─── Turn boundaries (Claude Code native transcript) ─────────────────────────
+# ─── Turn boundaries ─────────────────────────────────────────────────────────
 #
-# An interrupt writes no assistant record: the CLI appends a ``user`` record
-# whose only block is one of these markers, after a rejection result when a tool
-# call was cut off or declined.
+# An interrupt writes no assistant record. The native transcript gets a ``user``
+# record whose only block is one of these markers, after a rejection result when
+# a tool call was cut off or declined; stream-json reports an aborted result.
 
 _INTERRUPT_MARKERS = frozenset(
-    {
-        "[Request interrupted by user]",
-        "[Request interrupted by user for tool use]",
-    }
+    {"[Request interrupted by user]", "[Request interrupted by user for tool use]"}
 )
+_INTERRUPTED_TERMINAL_REASONS = frozenset({"aborted_streaming", "aborted_tools"})
+# How long Waypoint expects the trace of its own interrupt. Covers a slow remote
+# tail; an interrupt that cancels nothing leaves none.
+_EXPECTED_INTERRUPT_SECONDS = 30.0
 
 INTERRUPTED_NOTE = "Interrupted"
 DECLINED_NOTE = "Turn ended — tool use declined"
@@ -201,14 +205,28 @@ def is_human_prompt(record: dict[str, Any]) -> bool:
     return isinstance(origin, dict) and origin.get("kind") == "human"
 
 
+def is_interrupted_result(event: dict[str, Any]) -> bool:
+    """Whether an interrupt cut this stream-json result's turn short."""
+    return event.get("terminal_reason") in _INTERRUPTED_TERMINAL_REASONS
+
+
+def turn_activity_status(event: dict[str, Any]) -> SessionStatus | None:
+    """The status a stream-json model or tool message sets. A subagent's keeps the
+    session's: a background one goes on after the turn that launched it has ended.
+    """
+    return None if event.get("parent_tool_use_id") else SessionStatus.RUNNING
+
+
 def is_queued_prompt(record: dict[str, Any]) -> bool:
     """A prompt the human queued mid-turn, delivered now: it starts a turn."""
     return is_human_prompt(record) and record.get("promptSource") == "queued"
 
 
-def is_transcript_only(record: dict[str, Any]) -> bool:
-    """A record kept in the transcript but never sent to the model: no turn."""
-    return bool(record.get("queueTranscriptOnly"))
+def delivery_status(record: dict[str, Any]) -> SessionStatus | None:
+    """The status an injected ``user`` record sets: none for one flagged as kept in
+    the transcript only, which is never sent to the model.
+    """
+    return None if record.get("queueTranscriptOnly") else SessionStatus.RUNNING
 
 
 @dataclass
@@ -220,6 +238,14 @@ class TurnAbortTracker:
 
     _dismissed_question: bool = False
     _declined: bool = False
+
+    def observe_user_record(self, record: dict[str, Any], content: Any) -> None:
+        """Forget an aborted turn's reasons once a later turn is under way."""
+        if is_human_prompt(record) or (
+            classify_injected_user_turn(record, content) != "none"
+            and delivery_status(record) is not None
+        ):
+            self.reset()
 
     def rejected(self, record: dict[str, Any]) -> None:
         # Absent when the call was already running as the human cut it off.
@@ -244,6 +270,52 @@ class TurnAbortTracker:
         if declined:
             return DECLINED_NOTE, "tool_rejected"
         return INTERRUPTED_NOTE, "interrupted"
+
+
+class InterruptOrigin(Enum):
+    """Whose interrupt a marker or aborted result answers."""
+
+    # Waypoint's own, noted by whoever asked for it.
+    WAYPOINT = auto()
+    # Waypoint's own, with input sent since: it may not move the new turn.
+    SUPERSEDED = auto()
+    # Anyone else's, such as an Esc in the pane.
+    OTHER = auto()
+
+
+@dataclass
+class ExpectedInterrupt:
+    """Waypoint's own interrupt, until its marker or aborted result answers it."""
+
+    _deadline: float = 0.0
+    _superseded: bool = False
+
+    @property
+    def pending(self) -> bool:
+        return time.monotonic() < self._deadline
+
+    def arm(self) -> None:
+        self._deadline = time.monotonic() + _EXPECTED_INTERRUPT_SECONDS
+        self._superseded = False
+
+    def supersede(self) -> None:
+        """Waypoint is sending input past the interrupt."""
+        self._superseded = self.pending
+
+    def forget_superseded(self) -> None:
+        """A prompt was delivered. A superseded interrupt's marker precedes the
+        prompt that superseded it, so one still pending was never written.
+        """
+        if self._superseded:
+            self._deadline = 0.0
+
+    def take(self) -> InterruptOrigin:
+        if not self.pending:
+            return InterruptOrigin.OTHER
+        self._deadline = 0.0
+        return (
+            InterruptOrigin.SUPERSEDED if self._superseded else InterruptOrigin.WAYPOINT
+        )
 
 
 # ─── Task notifications (Claude Code native transcript) ──────────────────────

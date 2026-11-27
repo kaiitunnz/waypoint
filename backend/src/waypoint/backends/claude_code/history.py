@@ -9,7 +9,7 @@ events carry metadata shaped like the live normalizers' output
 ``TranscriptCard`` on the frontend key off of to render and pair
 tool_call/tool_result cards.
 
-Each event carries the status the live claude_tty normalizer would record, and
+Each event carries the status its record gives a live claude_tty session, and
 an interrupt marker becomes the same note. The other turn-end notes the live
 path records (turn complete, compaction, command output) are not imported.
 
@@ -43,9 +43,8 @@ from waypoint.backends.claude_code.normalize import (
     claim_peer_message,
     classify_injected_user_turn,
     deferred_result_metadata,
-    is_human_prompt,
+    delivery_status,
     is_interrupt_marker,
-    is_transcript_only,
     is_user_rejection,
     iter_content_blocks,
     parse_peer_message,
@@ -88,10 +87,11 @@ def convert_transcript_records(
 ) -> list[EventRecord]:
     """Convert ordered raw transcript records into ordered EventRecords.
 
-    Only ``assistant`` text/tool_use/progress-update and ``user``
-    text/tool_result records produce events; other record types (system
-    notes, compact boundaries, summaries) carry no chat content worth
-    replaying and are dropped.
+    ``assistant`` text, tool_use and progress-update records, ``user`` text,
+    tool_result and interrupt-marker records, and task notifications and peer
+    messages produce events. Other record types (system notes, compact
+    boundaries, summaries) carry no chat content worth replaying and are
+    dropped.
     """
     events: list[EventRecord] = []
     last_ts = datetime.now(UTC)
@@ -303,17 +303,21 @@ def _convert_user(
 ) -> list[EventRecord]:
     message: dict[str, Any] = record.get("message") or {}
     content = message.get("content")
+    state.abort.observe_user_record(record, content)
     injected = classify_injected_user_turn(record, content)
-    delivered = None if is_transcript_only(record) else SessionStatus.RUNNING
-    if (injected != "none" and delivered) or is_human_prompt(record):
-        state.abort.reset()
     if injected == "task_notification" and isinstance(content, str):
         return _task_notification_event(
-            session_id, content, record.get("uuid"), ts, state, delivered
+            session_id, content, record.get("uuid"), ts, state, delivery_status(record)
         )
     if injected == "peer_message" and isinstance(content, str):
         return _peer_message_event(
-            session_id, content, "user", record.get("uuid"), ts, state, delivered
+            session_id,
+            content,
+            "user",
+            record.get("uuid"),
+            ts,
+            state,
+            delivery_status(record),
         )
     if injected == "continuation":
         return []

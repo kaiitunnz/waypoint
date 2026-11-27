@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.base import PaneSubmitConfirming
+from waypoint.backends.claude_code.transport import note_restart_interrupt
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty.dialog_watch import PendingTtyApproval
 from waypoint.backends.tmux.adapter import TmuxError
@@ -162,13 +163,17 @@ class ClaudeTtyTransport(TmuxTransport):
             self._runtime, session.id, "Pending approval cleared by interrupt"
         )
         target = self._target(session)
-        # Before the Esc, so the tailer cannot read its marker first. The runtime
+        # Before the Esc, so the tailer cannot read its marker first. The caller
         # notes this interrupt, so the marker adds no note of its own.
         self._plugin.expect_interrupt(session.id)
         await self.adapter.send_bytes(target, b"\x1b")
         # Retried here: the tailer takes several polls to raise a dialog that
         # outlived its card.
         await self._ensure_dialog_dismissed(target)
+
+    async def flush_before_restart(self, session: SessionRecord) -> None:
+        await super().flush_before_restart(session)
+        await note_restart_interrupt(self._runtime, session.id)
 
     async def _ensure_dialog_dismissed(self, target: str) -> None:
         for _ in range(_INTERRUPT_ESC_RETRIES):

@@ -1279,7 +1279,7 @@ def test_failed_edit_result_has_no_diff_preview() -> None:
     assert "diff_preview" not in result.metadata
 
 
-def test_rejected_file_edit_has_no_diff_preview_and_aborts_turn() -> None:
+def test_rejected_file_edit_has_no_diff_preview() -> None:
     norm = TranscriptNormalizer()
     norm.process_record(
         _assistant_record(

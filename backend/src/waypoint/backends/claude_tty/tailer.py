@@ -285,8 +285,6 @@ class TranscriptTailer:
             text = f"Running {current} (selected {selection})"
         else:
             text = f"Model changed to {current}"
-        # session.status keeps the event-insert COALESCE a no-op; this note fires
-        # mid-turn and must not flip the lifecycle.
         await self._runtime._emit_adapter_event(
             self._session_id,
             EventKind.SYSTEM_NOTE,
@@ -298,7 +296,7 @@ class TranscriptTailer:
                 "current_model": current,
                 "selection": selection,
             },
-            session.status,
+            None,
         )
 
     async def _maybe_publish_context_usage(self, record: dict[str, Any]) -> None:

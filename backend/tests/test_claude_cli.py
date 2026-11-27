@@ -754,7 +754,7 @@ async def test_set_model_refreshes_context_window_immediately() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_system_status_compacting_notes_without_status() -> None:
+async def test_dispatch_system_status_compacting_emits_running_note() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
     state, _ = _attach_state(adapter)
@@ -771,7 +771,7 @@ async def test_dispatch_system_status_compacting_notes_without_status() -> None:
     item = emitted[-1]
     assert item[1] == EventKind.SYSTEM_NOTE
     assert "Compacting" in item[2]
-    assert item[4] is None
+    assert item[4] == SessionStatus.RUNNING
 
 
 @pytest.mark.asyncio

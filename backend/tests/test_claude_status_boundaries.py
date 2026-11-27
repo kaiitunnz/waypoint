@@ -6,7 +6,7 @@ The fixtures in ``fixtures/claude_status/`` are trimmed records from Claude Code
 
 import asyncio
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,15 +15,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from claude_tty_transcripts import NoTranscriptTree
+from claude_tty_transcripts import FedSource, jsonl, result, use
+from waypoint.backends.claude_code import normalize as claude_normalize
 from waypoint.backends.claude_code.adapter import (
     ClaudeCliAdapter,
     ClaudePendingApproval,
     ClaudeSessionState,
 )
 from waypoint.backends.claude_code.history import convert_transcript_records
-from waypoint.backends.claude_tty import normalize as tty_normalize
-from waypoint.backends.claude_tty.byte_source import TranscriptRead
+from waypoint.backends.claude_code.transport import ClaudeTransport
 from waypoint.backends.claude_tty.normalize import NormalizedEvent, TranscriptNormalizer
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
@@ -52,10 +52,7 @@ def records(name: str) -> list[dict[str, Any]]:
 
 
 def marker(text: str = MARKER) -> dict[str, Any]:
-    return {
-        "type": "user",
-        "message": {"content": [{"type": "text", "text": text}]},
-    }
+    return {"type": "user", "message": {"content": [{"type": "text", "text": text}]}}
 
 
 def human_prompt(text: str, source: str = "typed") -> dict[str, Any]:
@@ -68,44 +65,37 @@ def human_prompt(text: str, source: str = "typed") -> dict[str, Any]:
 
 
 def tool_use(tool_use_id: str, name: str = "Bash") -> dict[str, Any]:
+    return use(tool_use_id, name, {}, msg=f"msg-{tool_use_id}")
+
+
+def rejection(tool_use_id: str, *, before_run: bool = False) -> dict[str, Any]:
     return {
-        "type": "assistant",
-        "message": {
-            "id": f"msg-{tool_use_id}",
-            "stop_reason": "tool_use",
-            "content": [
-                {"type": "tool_use", "id": tool_use_id, "name": name, "input": {}}
-            ],
-        },
+        **result(tool_use_id),
+        "toolUseResult": "User rejected tool use",
+        **({"toolDenialBeforeRun": True} if before_run else {}),
     }
 
 
-def tool_result(
-    tool_use_id: str, *, rejected: bool = False, before_run: bool = False
-) -> dict[str, Any]:
-    record: dict[str, Any] = {
-        "type": "user",
-        "message": {
-            "content": [
-                {"type": "tool_result", "tool_use_id": tool_use_id, "content": "x"}
-            ]
-        },
-    }
-    if rejected:
-        record["toolUseResult"] = "User rejected tool use"
-    if before_run:
-        record["toolDenialBeforeRun"] = True
-    return record
-
-
-def notification(task_id: str = "a1", **extra: Any) -> dict[str, Any]:
+def notification(key: str = "a1", **extra: Any) -> dict[str, Any]:
     return {
         "type": "user",
         "origin": {"kind": "task-notification"},
         "message": {
-            "content": f"<task-notification><task-id>{task_id}</task-id>"
+            "content": f"<task-notification><task-id>{key}</task-id>"
             '<status>completed</status><summary>Agent "x" finished</summary>'
             "</task-notification>"
+        },
+        **extra,
+    }
+
+
+def peer(key: str = "hi", **extra: Any) -> dict[str, Any]:
+    return {
+        "type": "user",
+        "origin": {"kind": "peer"},
+        "message": {
+            "content": '<cross-session-message from="uds:/tmp/peer.sock" '
+            f'from-name="peer" from-mode="prompting">\n{key}\n</cross-session-message>'
         },
         **extra,
     }
@@ -117,6 +107,14 @@ def enqueued(record: dict[str, Any]) -> dict[str, Any]:
         "operation": "enqueue",
         "content": record["message"]["content"],
     }
+
+
+def through_marker(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``rows`` up to and including the first interrupt marker."""
+    cut = next(
+        i for i, row in enumerate(rows) if "Request interrupted" in json.dumps(row)
+    )
+    return rows[: cut + 1]
 
 
 def feed(
@@ -177,8 +175,8 @@ def test_parallel_rejections_end_the_turn_with_one_note() -> None:
         [
             tool_use("a"),
             tool_use("b"),
-            tool_result("a", rejected=True),
-            tool_result("b", rejected=True),
+            rejection("a"),
+            rejection("b"),
             marker(TOOL_MARKER),
         ],
     )
@@ -200,8 +198,8 @@ def test_a_sibling_result_after_a_dismissal_cannot_leave_it_running() -> None:
         [
             tool_use("q", "AskUserQuestion"),
             tool_use("b"),
-            tool_result("q", rejected=True, before_run=True),
-            tool_result("b", rejected=True, before_run=True),
+            rejection("q", before_run=True),
+            rejection("b", before_run=True),
             marker(TOOL_MARKER),
         ],
     )
@@ -213,9 +211,54 @@ def test_a_sibling_result_after_a_dismissal_cannot_leave_it_running() -> None:
 def test_a_dismissal_does_not_swallow_a_later_interrupt() -> None:
     norm = TranscriptNormalizer()
     feed(norm, records("tty_question_dismissed"))
-    later = feed(norm, [notification(), marker()])
 
-    assert notes(later)[-1] == (INTERRUPTED, SessionStatus.IDLE)
+    assert notes(feed(norm, [marker()])) == [(INTERRUPTED, SessionStatus.IDLE)]
+
+
+def _live_note_texts(rows: list[dict[str, Any]]) -> list[str]:
+    return [text for text, _ in notes(feed(TranscriptNormalizer(), rows))]
+
+
+def _imported_note_texts(rows: list[dict[str, Any]]) -> list[str]:
+    return [
+        e.text
+        for e in convert_transcript_records("s1", rows)
+        if e.kind is EventKind.SYSTEM_NOTE
+    ]
+
+
+READERS = pytest.mark.parametrize("read", [_live_note_texts, _imported_note_texts])
+
+
+@READERS
+@pytest.mark.parametrize("tool_name", ["Bash", "AskUserQuestion"])
+@pytest.mark.parametrize(
+    "later", [human_prompt("again"), notification(), peer()], ids=["typed", "n", "p"]
+)
+def test_a_later_turn_forgets_why_an_earlier_one_was_aborted(
+    read: Callable[[list[dict[str, Any]]], list[str]],
+    tool_name: str,
+    later: dict[str, Any],
+) -> None:
+    aborted = [tool_use("a", tool_name), rejection("a", before_run=True)]
+
+    assert read([*aborted, later, marker()])[-1] == INTERRUPTED
+
+
+@READERS
+@pytest.mark.parametrize("injected", [notification, peer])
+def test_a_transcript_only_record_keeps_why_the_turn_was_aborted(
+    read: Callable[[list[dict[str, Any]]], list[str]],
+    injected: Callable[..., dict[str, Any]],
+) -> None:
+    rows = [
+        tool_use("a"),
+        rejection("a", before_run=True),
+        injected(queueTranscriptOnly=True),
+        marker(TOOL_MARKER),
+    ]
+
+    assert read(rows)[-1] == DECLINED
 
 
 # ── claude_tty: Waypoint's own interrupt ─────────────────────────────────────
@@ -225,14 +268,11 @@ def test_a_dismissal_does_not_swallow_a_later_interrupt() -> None:
     "fixture", ["tty_interrupt_tool", "tty_declined_dialog", "tty_interrupt_queued"]
 )
 def test_the_marker_of_a_waypoint_interrupt_adds_no_note(fixture: str) -> None:
-    rows = records(fixture)
-    cut = next(
-        i for i, row in enumerate(rows) if "Request interrupted" in json.dumps(row)
-    )
+    rows = through_marker(records(fixture))
     norm = TranscriptNormalizer()
     feed(norm, rows[:1])
     norm.expect_interrupt()
-    events = feed(norm, rows[1 : cut + 1])
+    events = feed(norm, rows[1:])
 
     assert notes(events) == []
     assert events[-1].kind is EventKind.STATUS_UPDATE
@@ -285,7 +325,7 @@ def test_input_with_no_interrupt_pending_supersedes_nothing() -> None:
 
 def test_an_expected_interrupt_expires(monkeypatch: pytest.MonkeyPatch) -> None:
     clock = [100.0]
-    monkeypatch.setattr(tty_normalize.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(claude_normalize.time, "monotonic", lambda: clock[0])
     norm = TranscriptNormalizer()
     norm.expect_interrupt()
     clock[0] += 31.0
@@ -296,27 +336,39 @@ def test_an_expected_interrupt_expires(monkeypatch: pytest.MonkeyPatch) -> None:
 # ── claude_tty: records that start no turn ───────────────────────────────────
 
 
-def test_a_transcript_only_notification_sets_no_status() -> None:
-    late = notification(queueTranscriptOnly=True, promptSource="system")
+INJECTED = pytest.mark.parametrize("injected", [notification, peer])
+
+
+@INJECTED
+def test_a_transcript_only_record_sets_no_status(
+    injected: Callable[..., dict[str, Any]],
+) -> None:
+    late = injected(queueTranscriptOnly=True, promptSource="system")
 
     [note] = feed(TranscriptNormalizer(), [late])
     assert note.kind is EventKind.SYSTEM_NOTE
     assert note.status is None
 
 
-def test_its_transcript_only_copy_moves_nothing_after_the_enqueue() -> None:
+@INJECTED
+def test_its_transcript_only_copy_moves_nothing_after_the_enqueue(
+    injected: Callable[..., dict[str, Any]],
+) -> None:
     norm = TranscriptNormalizer()
-    [queued] = feed(norm, [enqueued(notification())])
+    [queued] = feed(norm, [enqueued(injected())])
     assert queued.status is None
 
-    assert feed(norm, [notification(queueTranscriptOnly=True)]) == []
+    assert feed(norm, [injected(queueTranscriptOnly=True)]) == []
 
 
-def test_a_delivered_notification_starts_a_turn() -> None:
+@INJECTED
+def test_a_delivered_record_starts_a_turn(
+    injected: Callable[..., dict[str, Any]],
+) -> None:
     norm = TranscriptNormalizer()
-    feed(norm, [enqueued(notification())])
+    feed(norm, [enqueued(injected())])
 
-    assert statuses(feed(norm, [notification()])) == [SessionStatus.RUNNING]
+    assert statuses(feed(norm, [injected()])) == [SessionStatus.RUNNING]
 
 
 def test_a_manual_compact_ends_idle_and_an_auto_one_is_ignored() -> None:
@@ -345,6 +397,18 @@ def _imported(rows: list[dict[str, Any]]) -> list[EventRecord]:
     return convert_transcript_records("s1", rows)
 
 
+def _assert_shared_events_match(rows: list[dict[str, Any]]) -> None:
+    live = _live_statuses(rows)
+    for event in _imported(rows):
+        key = (event.kind, str(event.metadata.get("item_id") or event.text))
+        if key in live:
+            assert event.metadata.get("status") == live[key], key
+
+
+def _last_status(seen: Iterable[SessionStatus | None]) -> SessionStatus | None:
+    return [status for status in seen if status is not None][-1]
+
+
 @pytest.mark.parametrize(
     "fixture",
     [
@@ -356,13 +420,13 @@ def _imported(rows: list[dict[str, Any]]) -> list[EventRecord]:
 )
 def test_imported_statuses_match_the_live_ones(fixture: str) -> None:
     rows = records(fixture)
-    live = _live_statuses(rows)
     imported = _imported(rows)
 
-    for event in imported:
-        key = (event.kind, str(event.metadata.get("item_id") or event.text))
-        if key in live:
-            assert event.metadata.get("status") == live[key], key
+    _assert_shared_events_match(rows)
+    cut = through_marker(rows)
+    assert _last_status(e.metadata.get("status") for e in _imported(cut)) is (
+        _last_status(e.status for e in feed(TranscriptNormalizer(), cut))
+    )
     assert [
         (e.text, e.metadata.get("status"))
         for e in imported
@@ -379,8 +443,25 @@ def test_imported_statuses_match_the_live_ones(fixture: str) -> None:
     ]
 
 
-def test_imported_notifications_that_started_no_turn_set_no_status() -> None:
-    queued, late, delivered = notification("q"), notification("l"), notification("d")
+def test_an_imported_result_beside_a_dismissed_question_matches_the_live_one() -> None:
+    # Live ends this turn with a status-only update, which stores no event; an
+    # import ends with its own ``idle`` note.
+    _assert_shared_events_match(
+        [
+            tool_use("q", "AskUserQuestion"),
+            tool_use("b"),
+            rejection("q", before_run=True),
+            rejection("b", before_run=True),
+            marker(TOOL_MARKER),
+        ]
+    )
+
+
+@INJECTED
+def test_imported_records_that_started_no_turn_set_no_status(
+    injected: Callable[..., dict[str, Any]],
+) -> None:
+    queued, late, delivered = injected("q"), injected("l"), injected("d")
     imported = _imported(
         [enqueued(queued), {**late, "queueTranscriptOnly": True}, delivered]
     )
@@ -445,30 +526,12 @@ def note_texts(runtime: SessionRuntime) -> list[str]:
     ]
 
 
-class _Transcript(NoTranscriptTree):
-    def __init__(self) -> None:
-        self._pending = b""
-        self._size = 0
-
-    def append(self, rows: Iterable[dict[str, Any]]) -> None:
-        self._pending += b"".join(json.dumps(row).encode() + b"\n" for row in rows)
-
-    def read_from(
-        self, offset: int, *, metadata_only: bool = False, force: bool = False
-    ) -> TranscriptRead:
-        data, self._pending = self._pending, b""
-        self._size += len(data)
-        return TranscriptRead(
-            observed=True, data=data, size=self._size, identity=(1, 1)
-        )
-
-
 class _Tty:
     """A claude_tty session whose pane is faked and transcript fed by hand."""
 
     def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self.runtime = make_runtime(tmp_path, "claude_tty")
-        self.transcript = _Transcript()
+        self.transcript = FedSource()
         plugin = ClaudeTtyPlugin()
         self.tailer = TranscriptTailer("s1", self.transcript, self.runtime, plugin)
         plugin._tailers["s1"] = SimpleNamespace(tailer=self.tailer)  # type: ignore[assignment]
@@ -481,7 +544,7 @@ class _Tty:
         )
 
     async def read(self, rows: Iterable[dict[str, Any]]) -> None:
-        self.transcript.append(rows)
+        self.transcript.feed(jsonl(*rows))
         await self.tailer._drain()
 
 
@@ -494,11 +557,7 @@ def tty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Tty:
 async def test_an_esc_in_the_pane_leaves_the_session_idle(
     tty: _Tty, fixture: str
 ) -> None:
-    rows = records(fixture)
-    cut = next(
-        i for i, row in enumerate(rows) if "Request interrupted" in json.dumps(row)
-    )
-    await tty.read(rows[: cut + 1])
+    await tty.read(through_marker(records(fixture)))
 
     assert status_of(tty.runtime) is SessionStatus.IDLE
     assert note_texts(tty.runtime) == [INTERRUPTED]
@@ -547,6 +606,27 @@ async def test_a_send_after_stop_keeps_the_new_turn_running(
     assert note_texts(tty.runtime) == ["Sent interrupt"]
 
 
+async def test_a_restart_mid_turn_records_one_turn_end(
+    tty: _Tty, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settle = AsyncMock()
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.transport.TmuxTransport.flush_before_restart", settle
+    )
+    rows = records("tty_interrupt_tool")
+    await tty.read(rows[:3])
+    session = tty.runtime.get_session("s1")
+
+    # What the runtime's restart paths call.
+    await tty.transport.interrupt(session)
+    await tty.read(rows[3:])
+    await tty.transport.flush_before_restart(session)
+
+    settle.assert_awaited_once()
+    assert status_of(tty.runtime) is SessionStatus.INTERRUPTED
+    assert note_texts(tty.runtime) == [INTERRUPTED]
+
+
 async def test_a_late_notification_leaves_an_idle_session_idle(tty: _Tty) -> None:
     done = {
         "type": "assistant",
@@ -584,7 +664,7 @@ class _Pipe:
 class _Structured:
     """A structured session fed stream-json records by hand."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self.runtime = make_runtime(tmp_path, "claude_cli")
         self.adapter = ClaudeCliAdapter(
             self.runtime._emit_adapter_event,
@@ -601,6 +681,13 @@ class _Structured:
             wait_task=asyncio.create_task(asyncio.sleep(0)),
         )
         self.adapter._sessions["s1"] = self.state
+        plugin = SimpleNamespace(adapter=self.adapter)
+        self.transport = ClaudeTransport(self.runtime, plugin)  # type: ignore[arg-type]
+        monkeypatch.setattr(
+            self.runtime, "transport_for", lambda session: self.transport
+        )
+        # The faked binary never answers a control request.
+        self.adapter._send_control_request = AsyncMock()  # type: ignore[method-assign]
 
     async def read(self, rows: Iterable[dict[str, Any]]) -> list[SessionStatus]:
         """Dispatch ``rows``, returning the session's status after each."""
@@ -613,17 +700,27 @@ class _Structured:
     def set_status(self, status: SessionStatus) -> None:
         self.runtime.storage.update_session("s1", status=status)
 
-    async def stop(self) -> None:
-        # What runtime.interrupt does around the transport, without the control
-        # response the faked binary never sends.
-        self.adapter._send_control_request = AsyncMock()  # type: ignore[method-assign]
-        await self.adapter.interrupt("s1")
+    async def stop(self, answered_by: Iterable[dict[str, Any]] = ()) -> None:
+        """Waypoint's Stop; ``answered_by`` is read before the runtime notes it."""
 
-    async def note_stop(self) -> None:
-        await self.runtime._record_system_event(
-            "s1", "Sent interrupt", status=SessionStatus.INTERRUPTED
-        )
-        self.set_status(SessionStatus.INTERRUPTED)
+        async def interrupt_request(*_args: Any) -> None:
+            await self.read(answered_by)
+
+        self.adapter._send_control_request.side_effect = interrupt_request  # type: ignore[attr-defined]
+        await self.runtime.interrupt("s1")
+
+    def turn_ends(self) -> list[str]:
+        ended = {"idle", "interrupted", "error", "exited"}
+        return [
+            e.text
+            for e in self.runtime.storage.list_events("s1")
+            if e.metadata.get("status") in ended
+        ]
+
+
+@pytest.fixture
+async def structured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Structured:
+    return _Structured(tmp_path, monkeypatch)
 
 
 def system(subtype: str, **extra: Any) -> dict[str, Any]:
@@ -639,7 +736,6 @@ def system(subtype: str, **extra: Any) -> dict[str, Any]:
         system("thinking_tokens"),
         system("task_started"),
         system("task_notification", status="completed"),
-        system("status", status="compacting"),
         system("status", status=None, compact_result="success"),
         system("status", status=None, compact_result="failed"),
         system("compact_boundary", compact_metadata={"trigger": "auto"}),
@@ -648,28 +744,26 @@ def system(subtype: str, **extra: Any) -> dict[str, Any]:
     ],
 )
 async def test_a_record_that_marks_no_boundary_keeps_the_status(
-    tmp_path: Path, status: SessionStatus, record: dict[str, Any]
+    structured: _Structured, status: SessionStatus, record: dict[str, Any]
 ) -> None:
-    session = _Structured(tmp_path)
-    session.set_status(status)
+    structured.set_status(status)
 
-    assert await session.read([record]) == [status]
-    assert len(note_texts(session.runtime)) == 1
+    assert await structured.read([record]) == [status]
+    assert len(note_texts(structured.runtime)) == 1
 
 
-async def test_commands_changed_after_a_turn_keeps_it_idle(tmp_path: Path) -> None:
-    session = _Structured(tmp_path)
-
-    seen = await session.read(records("stream_commands_changed"))
+async def test_commands_changed_after_a_turn_keeps_it_idle(
+    structured: _Structured,
+) -> None:
+    seen = await structured.read(records("stream_commands_changed"))
 
     assert seen[-2:] == [SessionStatus.IDLE, SessionStatus.IDLE]
 
 
-async def test_a_manual_compact_ends_idle(tmp_path: Path) -> None:
-    session = _Structured(tmp_path)
+async def test_a_manual_compact_ends_idle(structured: _Structured) -> None:
     rows = records("stream_manual_compact")
 
-    seen = await session.read(rows)
+    seen = await structured.read(rows)
 
     boundary = next(
         i for i, row in enumerate(rows) if row.get("subtype") == "compact_boundary"
@@ -679,24 +773,37 @@ async def test_a_manual_compact_ends_idle(tmp_path: Path) -> None:
     assert seen[-1] is SessionStatus.IDLE
 
 
-async def test_auto_compaction_stays_running_until_the_result(
-    tmp_path: Path,
+async def test_a_queued_compact_reads_running_once_it_starts(
+    structured: _Structured,
 ) -> None:
-    session = _Structured(tmp_path)
+    # The turn it was queued behind ends before the compaction begins.
+    ahead = {"type": "result", "subtype": "success", "is_error": False}
 
-    seen = await session.read(records("stream_auto_compact"))
+    seen = await structured.read([ahead, *records("stream_manual_compact")])
+
+    assert seen[:3] == [
+        SessionStatus.IDLE,
+        SessionStatus.RUNNING,
+        SessionStatus.RUNNING,
+    ]
+    assert seen[-1] is SessionStatus.IDLE
+
+
+async def test_auto_compaction_stays_running_until_the_result(
+    structured: _Structured,
+) -> None:
+    seen = await structured.read(records("stream_auto_compact"))
 
     assert set(seen[:-1]) == {SessionStatus.RUNNING}
     assert seen[-1] is SessionStatus.IDLE
 
 
 async def test_a_background_subagent_does_not_wake_an_idle_session(
-    tmp_path: Path,
+    structured: _Structured,
 ) -> None:
-    session = _Structured(tmp_path)
     rows = records("stream_background_agent")
 
-    seen = await session.read(rows)
+    seen = await structured.read(rows)
 
     first_result = next(i for i, row in enumerate(rows) if row["type"] == "result")
     follow_up = next(
@@ -710,112 +817,141 @@ async def test_a_background_subagent_does_not_wake_an_idle_session(
 
 
 async def test_a_subagent_edit_and_todo_keep_an_idle_session_idle(
-    tmp_path: Path,
+    structured: _Structured,
 ) -> None:
-    session = _Structured(tmp_path)
-    session.set_status(SessionStatus.IDLE)
+    structured.set_status(SessionStatus.IDLE)
     parent = {"parent_tool_use_id": "agent-1"}
 
-    def assistant(tool_use_id: str, name: str, tool_input: dict) -> dict[str, Any]:
-        block = {"type": "tool_use", "id": tool_use_id, "name": name}
-        return {
-            "type": "assistant",
-            "message": {"id": "m1", "content": [{**block, "input": tool_input}]},
-            **parent,
-        }
+    def subagent_call(tool_use_id: str, name: str, tool_input: dict) -> dict[str, Any]:
+        return {**use(tool_use_id, name, tool_input), **parent}
 
-    def result(tool_use_id: str, content: str) -> dict[str, Any]:
-        block = {"type": "tool_result", "tool_use_id": tool_use_id}
-        return {
-            "type": "user",
-            "message": {"content": [{**block, "content": content}]},
-            **parent,
-        }
-
-    seen = await session.read(
+    seen = await structured.read(
         [
-            assistant("t1", "TaskCreate", {"subject": "step"}),
-            result("t1", "Task #1 created successfully: step"),
-            assistant("t2", "TaskUpdate", {"taskId": "1", "status": "completed"}),
+            subagent_call("t1", "TaskCreate", {"subject": "step"}),
+            {**result("t1", "Task #1 created successfully: step"), **parent},
+            subagent_call("t2", "TaskUpdate", {"taskId": "1", "status": "completed"}),
         ]
     )
-    await session.adapter._emit_tool_diff_preview(
-        session.state,
+    await structured.adapter._emit_tool_diff_preview(
+        structured.state,
         {"tool_use_id": "e1", "tool_name": "Edit", "diff_preview": {"files": []}},
     )
 
     assert set(seen) == {SessionStatus.IDLE}
-    assert status_of(session.runtime) is SessionStatus.IDLE
-    assert len(session.runtime.storage.list_events("s1")) == 3
+    assert status_of(structured.runtime) is SessionStatus.IDLE
+    assert len(structured.runtime.storage.list_events("s1")) == 3
 
 
 # ── structured: Stop ─────────────────────────────────────────────────────────
+
+ABORTED = {
+    "type": "result",
+    "subtype": "error_during_execution",
+    "is_error": True,
+    "terminal_reason": "aborted_streaming",
+}
+SUCCEEDED = {"type": "result", "subtype": "success", "is_error": False}
 
 
 @pytest.mark.parametrize(
     "fixture", ["stream_interrupt_streaming", "stream_interrupt_tool"]
 )
 @pytest.mark.parametrize("result_first", [True, False])
-async def test_a_stopped_turn_ends_interrupted_with_one_note(
-    tmp_path: Path, fixture: str, result_first: bool
+async def test_a_stopped_turn_ends_interrupted_once(
+    structured: _Structured, fixture: str, result_first: bool
 ) -> None:
-    session = _Structured(tmp_path)
-    await session.stop()
+    rows = records(fixture)
 
+    await structured.stop(answered_by=rows if result_first else ())
     if not result_first:
-        await session.note_stop()
-    await session.read(records(fixture))
-    if result_first:
-        await session.note_stop()
+        await structured.read(rows)
 
-    assert status_of(session.runtime) is SessionStatus.INTERRUPTED
-    assert [
-        text
-        for text in note_texts(session.runtime)
-        if not text.startswith(("system/", "Claude"))
-    ] == ["Sent interrupt"]
+    assert status_of(structured.runtime) is SessionStatus.INTERRUPTED
+    assert structured.turn_ends() == ["Sent interrupt"]
+    assert INTERRUPTED not in note_texts(structured.runtime)
 
 
 async def test_a_result_read_after_the_next_send_moves_nothing(
-    tmp_path: Path,
+    structured: _Structured,
 ) -> None:
-    session = _Structured(tmp_path)
-    await session.stop()
-    await session.adapter.send_input("s1", "next")
-    session.set_status(SessionStatus.RUNNING)
+    await structured.stop()
+    await structured.adapter.send_input("s1", "next")
+    structured.set_status(SessionStatus.RUNNING)
 
-    await session.read([records("stream_interrupt_streaming")[-1]])
+    await structured.read([ABORTED])
 
-    assert status_of(session.runtime) is SessionStatus.RUNNING
-    assert note_texts(session.runtime) == []
-    assert not session.state.stop_requested
+    assert status_of(structured.runtime) is SessionStatus.RUNNING
+    assert note_texts(structured.runtime) == ["Sent interrupt"]
+
+
+async def test_a_second_stop_answers_for_the_turn_sent_after_the_first(
+    structured: _Structured,
+) -> None:
+    await structured.stop()
+    await structured.adapter.send_input("s1", "next")
+    await structured.stop()
+    structured.set_status(SessionStatus.RUNNING)
+
+    await structured.read([ABORTED])
+
+    assert status_of(structured.runtime) is SessionStatus.INTERRUPTED
+    assert INTERRUPTED not in note_texts(structured.runtime)
 
 
 async def test_a_finished_turns_result_leaves_the_stop_pending(
-    tmp_path: Path,
+    structured: _Structured,
 ) -> None:
     # The CLI applies the interrupt to the queued turn behind it.
-    session = _Structured(tmp_path)
-    await session.stop()
-    await session.read([{"type": "result", "subtype": "success", "is_error": False}])
+    await structured.stop()
+    await structured.read([SUCCEEDED])
 
-    await session.read([records("stream_interrupt_streaming")[-1]])
+    await structured.read([ABORTED])
 
-    assert status_of(session.runtime) is SessionStatus.INTERRUPTED
-    assert INTERRUPTED not in note_texts(session.runtime)
-
-
-async def test_an_abort_waypoint_did_not_ask_for_is_noted(tmp_path: Path) -> None:
-    session = _Structured(tmp_path)
-
-    await session.read([records("stream_interrupt_streaming")[-1]])
-
-    assert status_of(session.runtime) is SessionStatus.IDLE
-    assert note_texts(session.runtime) == [INTERRUPTED]
+    assert status_of(structured.runtime) is SessionStatus.INTERRUPTED
+    assert INTERRUPTED not in note_texts(structured.runtime)
 
 
+async def test_an_abort_waypoint_did_not_ask_for_is_noted(
+    structured: _Structured,
+) -> None:
+    await structured.read([ABORTED])
+
+    assert status_of(structured.runtime) is SessionStatus.IDLE
+    assert note_texts(structured.runtime) == [INTERRUPTED]
+
+
+async def test_the_binarys_own_abort_is_noted_after_a_stale_stop(
+    structured: _Structured,
+) -> None:
+    await structured.stop()
+    await structured.adapter.send_input("s1", "next")
+    structured.set_status(SessionStatus.RUNNING)
+
+    await structured.read([{**ABORTED, "stopped_by_permission_check": True}])
+
+    assert status_of(structured.runtime) is SessionStatus.IDLE
+    assert note_texts(structured.runtime) == ["Sent interrupt", INTERRUPTED]
+
+
+async def test_a_stop_that_cut_nothing_short_lapses(
+    structured: _Structured, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(claude_normalize.time, "monotonic", lambda: clock[0])
+    await structured.stop()
+    clock[0] += 31.0
+    await structured.adapter.send_input("s1", "next")
+    structured.set_status(SessionStatus.RUNNING)
+
+    await structured.read([ABORTED])
+
+    assert status_of(structured.runtime) is SessionStatus.IDLE
+    assert note_texts(structured.runtime) == ["Sent interrupt", INTERRUPTED]
+
+
+@pytest.mark.parametrize("stopped", [True, False])
 @pytest.mark.parametrize(
-    "result",
+    "error",
     [
         {"subtype": "success", "is_error": True, "terminal_reason": "api_error"},
         {
@@ -823,50 +959,75 @@ async def test_an_abort_waypoint_did_not_ask_for_is_noted(tmp_path: Path) -> Non
             "is_error": True,
             "terminal_reason": "model_error",
         },
+        {"subtype": "error_during_execution", "is_error": True},
         {"subtype": "error_max_turns", "is_error": True},
     ],
 )
-async def test_a_genuine_error_stays_an_error_after_a_stop(
-    tmp_path: Path, result: dict[str, Any]
+async def test_a_genuine_error_stays_an_error(
+    structured: _Structured, stopped: bool, error: dict[str, Any]
 ) -> None:
-    session = _Structured(tmp_path)
-    await session.stop()
+    if stopped:
+        await structured.stop()
 
-    await session.read([{"type": "result", **result}])
+    await structured.read([{"type": "result", **error}])
 
-    assert status_of(session.runtime) is SessionStatus.ERROR
+    assert status_of(structured.runtime) is SessionStatus.ERROR
 
 
-async def test_a_stop_is_recognized_without_a_terminal_reason(
-    tmp_path: Path,
-) -> None:
-    session = _Structured(tmp_path)
-    await session.stop()
-
-    await session.read(
-        [{"type": "result", "subtype": "error_during_execution", "is_error": True}]
+def _park(structured: _Structured, tool_name: str) -> None:
+    structured.state.pending["tool-1"] = ClaudePendingApproval(
+        tool_use_id="tool-1", payload={"tool_name": tool_name}, request_id="req-1"
     )
 
-    assert status_of(session.runtime) is SessionStatus.INTERRUPTED
+
+WITHDRAWN = {"type": "control_cancel_request", "request_id": "req-1"}
 
 
-async def test_a_stop_clears_the_approval_the_binary_withdraws(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("stopped", "note"),
+    [
+        (True, "Pending approval cleared by interrupt"),
+        (False, "Pending approval withdrawn by Claude"),
+    ],
+)
+async def test_a_withdrawn_approval_is_cleared(
+    structured: _Structured, stopped: bool, note: str
 ) -> None:
-    session = _Structured(tmp_path)
-    session.state.pending["tool-1"] = ClaudePendingApproval(
-        tool_use_id="tool-1", payload={"tool_name": "Bash"}, request_id="req-1"
-    )
-    await session.stop()
+    _park(structured, "Bash")
+    if stopped:
+        await structured.stop()
 
-    await session.read([{"type": "control_cancel_request", "request_id": "req-1"}])
+    await structured.read([WITHDRAWN])
 
-    assert not session.adapter.has_pending_approval("s1")
-    [event] = session.runtime.storage.list_events("s1")
-    assert event.text == "Pending approval cleared by interrupt"
+    assert not structured.adapter.has_pending_approval("s1")
+    event = structured.runtime.storage.list_events("s1")[-1]
+    assert event.text == note
     assert event.metadata["method"] == "approval.invalidated"
     assert event.metadata["approval_id"] == "tool-1"
     assert "status" not in event.metadata
+
+
+async def test_a_withdrawn_question_records_nothing(structured: _Structured) -> None:
+    _park(structured, "AskUserQuestion")
+
+    await structured.read([WITHDRAWN])
+
+    assert not structured.state.pending
+    assert note_texts(structured.runtime) == []
+
+
+async def test_a_restart_mid_turn_records_one_turn_end_on_a_structured_session(
+    structured: _Structured,
+) -> None:
+    session = structured.runtime.get_session("s1")
+
+    # What the runtime's restart paths call.
+    await structured.transport.interrupt(session)
+    await structured.transport.flush_before_restart(session)
+    await structured.read([ABORTED])
+
+    assert status_of(structured.runtime) is SessionStatus.INTERRUPTED
+    assert structured.turn_ends() == [INTERRUPTED]
 
 
 # ── claude_tty transport ─────────────────────────────────────────────────────

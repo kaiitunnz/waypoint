@@ -1,7 +1,7 @@
 "use client";
 
 import { gateHeadline, gateKey, gateTime, gateView } from "@waypoint/web-core/board";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
 
 import { SourceLine } from "@/components/sessions/SourceLine";
@@ -16,7 +16,7 @@ import styles from "./GateDetail.module.css";
 // A gate with no inbox item of its own.
 export function GateDetail({ id }: { id: string }) {
   const { gates, gatesFailed, retryGates } = useShellData();
-  const now = useNow(30_000);
+  const now = useServerNow(30_000);
   const gate = gates?.find((entry) => gateKey(entry) === id);
   // A gate that was not read may well be waiting still.
   if (!gate && gatesFailed) {

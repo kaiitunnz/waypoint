@@ -1,5 +1,6 @@
 import { humaniseBackend, type BackendCatalog } from "./backends";
 import { isIdle, isRecurring } from "./recurrence";
+import { serverNow } from "./serverClock";
 import type {
   BoardChannel,
   MessageSchedule,
@@ -56,7 +57,7 @@ export function bucketSourceLabel(bucket: UsageDashboardBucket, catalog: Backend
 
 // "1h 12m", "42m", "3d 4h": how long until a window resets; null once it has, or
 // when the time is unknown.
-export function formatResetsIn(iso: string | null | undefined, now: number = Date.now()): string | null {
+export function formatResetsIn(iso: string | null | undefined, now: number = serverNow()): string | null {
   if (!iso) return null;
   const target = Date.parse(iso);
   if (!Number.isFinite(target) || target <= now) return null;
@@ -89,7 +90,7 @@ function readWindow(kind: UsageWindowKind, window: UsageWindow | null, now: numb
   };
 }
 
-export function accountWindows(bucket: UsageDashboardBucket, now: number = Date.now()): WindowReading[] {
+export function accountWindows(bucket: UsageDashboardBucket, now: number = serverNow()): WindowReading[] {
   return (["5h", "weekly"] as const)
     .map((kind) => readWindow(kind, findUsageWindow(bucket, kind), now))
     .filter((reading): reading is WindowReading => reading !== null);
@@ -102,7 +103,7 @@ export interface ConstrainedWindow extends WindowReading {
 // The window closest to its limit across every account; the 5-hour window wins a tie.
 export function mostConstrainedWindow(
   buckets: UsageDashboardBucket[],
-  now: number = Date.now(),
+  now: number = serverNow(),
 ): ConstrainedWindow | null {
   let best: ConstrainedWindow | null = null;
   for (const bucket of buckets) {
@@ -193,7 +194,7 @@ export interface ScheduledItem {
   recurring: boolean;
 }
 
-export function formatShortWhen(iso: string | null | undefined, now: number = Date.now()): string {
+export function formatShortWhen(iso: string | null | undefined, now: number = serverNow()): string {
   if (!iso) return "queued";
   const target = Date.parse(iso);
   if (!Number.isFinite(target)) return "queued";
@@ -219,7 +220,7 @@ export function summarizeScheduled(
   messageSchedules: MessageSchedule[],
   titleById: ReadonlyMap<string, string>,
   limit = 3,
-  now: number = Date.now(),
+  now: number = serverNow(),
 ): ScheduledSummary {
   const pendingSessions = schedules.filter((schedule) => schedule.status === "pending");
   const pendingMessages = messageSchedules.filter((message) => message.status === "pending");

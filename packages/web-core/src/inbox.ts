@@ -1,4 +1,5 @@
 import type { InboxBlockSubmit, InboxListPage } from "./api";
+import { serverNow } from "./serverClock";
 import { toggleSelection } from "./session/askQuestion";
 import type {
   InboxApprovalAnswer,
@@ -99,14 +100,14 @@ export async function fetchInboxUpTo(
 }
 
 // The items last changed today, in the local time zone.
-export function updatedToday(items: InboxItem[], now: number = Date.now()): InboxItem[] {
+export function updatedToday(items: InboxItem[], now: number = serverNow()): InboxItem[] {
   const today = new Date(now).toDateString();
   return items.filter((item) => new Date(item.updated_at).toDateString() === today);
 }
 
 // ─── Display ───
 
-export function inboxRelativeTime(value: string, now: number = Date.now()): string {
+export function inboxRelativeTime(value: string, now: number = serverNow()): string {
   const then = new Date(value).getTime();
   if (Number.isNaN(then)) return "";
   const sec = Math.round((now - then) / 1000);
@@ -125,7 +126,7 @@ export function inboxRelativeTime(value: string, now: number = Date.now()): stri
 const MONTH_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
 
 // "Today at 08:30", "Yesterday at 17:05", "Nov 3 at 09:00".
-export function formatInboxTime(value: string, now: number = Date.now()): string {
+export function formatInboxTime(value: string, now: number = serverNow()): string {
   const at = new Date(value);
   if (Number.isNaN(at.getTime())) return "";
   const clock = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;

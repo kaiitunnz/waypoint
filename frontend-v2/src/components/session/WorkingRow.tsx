@@ -1,6 +1,6 @@
 "use client";
 
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { formatElapsed } from "@waypoint/web-core/session/workingRow";
 
 import { StatusLamp } from "@/components/ui/StatusLamp";
@@ -14,7 +14,7 @@ export interface WorkingTurn {
 }
 
 function Elapsed({ since }: { since: number }) {
-  const now = useNow(1000);
+  const now = useServerNow(1000);
   return (
     <>
       <span className={styles.sep} aria-hidden="true">

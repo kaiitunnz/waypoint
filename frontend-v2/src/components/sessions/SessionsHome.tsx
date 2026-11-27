@@ -7,7 +7,7 @@ import { useBoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
 import { useLaunchContext } from "@waypoint/web-core/hooks/useLaunchContext";
 import { seedRecentCwdsFromHistory } from "@waypoint/web-core/launch/folders";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { useScheduleTargetSessions } from "@waypoint/web-core/hooks/useScheduleTargetSessions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { useUsageSummary } from "@waypoint/web-core/hooks/useUsageSummary";
@@ -50,7 +50,7 @@ export function SessionsHome() {
   const { onAction, openDialog, dialogs } = useSessionMenuActions();
   const switcher = useSwitcher();
   const catalog = useBackendCatalog(host, token, null);
-  const now = useNow(30_000);
+  const now = useServerNow(30_000);
   const usage = useUsageSummary(host, token, handleAuthFailure);
   const board = useBoardSummary(host, token, feed.boardRevision, handleAuthFailure);
 

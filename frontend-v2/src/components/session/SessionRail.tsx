@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 
 import type { BackendCatalog } from "@waypoint/web-core/backends";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useLongPress } from "@waypoint/web-core/hooks/useLongPress";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
@@ -136,7 +136,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
   const { host, token } = useShellData();
   const feed = useSessionsData();
   const switcher = useSwitcher();
-  const now = useNow();
+  const now = useServerNow();
   const [showExited, setShowExited] = useShowExited();
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {

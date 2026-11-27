@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { useBackendCatalog } from "@waypoint/web-core/backends";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import {
   agentModelLabel,
   formatSessionTime,
@@ -61,7 +61,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const { host, token } = useShellData();
   const feed = useSessionsData();
   const catalog = useBackendCatalog(host, token, null);
-  const now = useNow();
+  const now = useServerNow();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const list = useRef<HTMLUListElement>(null);

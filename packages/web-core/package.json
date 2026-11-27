@@ -35,6 +35,7 @@
     "./scheduleTime": "./src/scheduleTime.ts",
     "./scheduledSheet": "./src/scheduledSheet.ts",
     "./search": "./src/search.ts",
+    "./serverClock": "./src/serverClock.ts",
     "./sessionActions": "./src/sessionActions.ts",
     "./sessionDelivery": "./src/sessionDelivery.ts",
     "./sessionHistory": "./src/sessionHistory.ts",

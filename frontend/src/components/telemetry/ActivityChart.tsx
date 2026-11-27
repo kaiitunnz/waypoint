@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 
 import { ChartTooltip, ChartTooltipState } from "@/components/telemetry/ChartTooltip";
+import { serverNow } from "@waypoint/web-core/serverClock";
 import { DOW_LABELS, formatDayLabel, formatHourLabel } from "@waypoint/web-core/telemetry";
 import { ActivityDaily, TelemetryActivity } from "@waypoint/web-core/types";
 
@@ -186,7 +187,7 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
   const offsetMinutes = activity?.range.utc_offset_minutes ?? 0;
   useEffect(() => {
     const tick = () => {
-      const shifted = new Date(Date.now() + offsetMinutes * 60_000);
+      const shifted = new Date(serverNow() + offsetMinutes * 60_000);
       setNow({ day: shifted.toISOString().slice(0, 10), hour: shifted.getUTCHours() });
     };
     tick();

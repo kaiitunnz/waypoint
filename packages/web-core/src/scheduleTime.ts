@@ -1,6 +1,7 @@
 /** Clock and countdown formatting for scheduled sessions and messages. */
 
 import { WEEKDAY_LABELS } from "./recurrence";
+import { serverNow } from "./serverClock";
 
 const DAY_MS = 86_400_000;
 
@@ -27,7 +28,7 @@ export function countdown(target: Date, now: Date): string {
 }
 
 export function formatClock(target: Date): string {
-  const sameDay = new Date().toDateString() === target.toDateString();
+  const sameDay = new Date(serverNow()).toDateString() === target.toDateString();
   return target.toLocaleString(undefined, {
     month: sameDay ? undefined : "short",
     day: sameDay ? undefined : "numeric",
@@ -37,7 +38,7 @@ export function formatClock(target: Date): string {
 }
 
 export function formatRelative(target: Date): string {
-  const diff = target.getTime() - Date.now();
+  const diff = target.getTime() - serverNow();
   if (diff <= 0) {
     return "any moment";
   }

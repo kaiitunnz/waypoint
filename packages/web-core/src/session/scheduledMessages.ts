@@ -1,5 +1,6 @@
 import { isIdle } from "../recurrence";
 import { formatRelative } from "../scheduleTime";
+import { serverNow } from "../serverClock";
 import type { MessageSchedule } from "../types";
 
 export function describeScheduledDelivery(schedule: MessageSchedule): string {
@@ -60,6 +61,6 @@ export function schedulePollIntervalMs(messages: MessageSchedule[]): number {
     }
     return Math.min(min, new Date(m.scheduled_at).getTime());
   }, Number.POSITIVE_INFINITY);
-  const dueSoon = soonest - Date.now() <= 30_000;
+  const dueSoon = soonest - serverNow() <= 30_000;
   return dueSoon ? 4_000 : 15_000;
 }

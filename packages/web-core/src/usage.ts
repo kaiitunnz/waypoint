@@ -1,3 +1,4 @@
+import { serverNow } from "./serverClock";
 import { UsageWindow } from "./types";
 
 const TOKEN_FORMATTER = new Intl.NumberFormat("en-US");
@@ -21,7 +22,7 @@ function relativeTimeParts(
   if (!Number.isFinite(timestamp)) {
     return null;
   }
-  const diffSeconds = Math.round((timestamp - Date.now()) / 1000);
+  const diffSeconds = Math.round((timestamp - serverNow()) / 1000);
   const absSeconds = Math.abs(diffSeconds);
   if (absSeconds < 60) {
     return { value: diffSeconds, unit: "second" };

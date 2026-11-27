@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import {
   heldCount,
   queueItemView,
@@ -35,7 +35,7 @@ const ACTION_LABEL: Record<QueueAction, string> = {
 
 export function QueueList({ items, focus, onAction, onReleaseAll, onCancelAll }: QueueListProps) {
   // Ages and countdowns move on.
-  useNow(30_000);
+  useServerNow(30_000);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);

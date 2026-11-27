@@ -1,5 +1,6 @@
 import { humaniseBackend, displayAgentFor, type BackendCatalog } from "./backends";
 import { CLAUDE_MODEL_FAMILY_LABELS, formatResolvedModelLabel } from "./modelDisplay";
+import { serverNow } from "./serverClock";
 import { connectionLabel, type ConnectionState } from "./session/connection";
 import type { SessionRecord, SessionStatus } from "./types";
 
@@ -96,7 +97,7 @@ const MONTH_DAY = new Intl.DateTimeFormat("en", { month: "short", day: "numeric"
 const MONTH_DAY_YEAR = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" });
 
 // A row's time: "now", "2m", "08:40", "Yesterday", "Mon", "Nov 12".
-export function formatSessionTime(iso: string, now: number = Date.now()): string {
+export function formatSessionTime(iso: string, now: number = serverNow()): string {
   const at = new Date(iso);
   const ms = at.getTime();
   if (!Number.isFinite(ms)) return "";

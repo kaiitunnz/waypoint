@@ -1,5 +1,6 @@
 import type { createMessageSchedule } from "../api";
 import { cronFromState, type RecurrenceState, type TimingMode } from "../recurrence";
+import { serverNow, toServerTime } from "../serverClock";
 import type { IdleBatchMode } from "./sendModes";
 
 export type OneTimeTiming = "delay" | "datetime";
@@ -26,7 +27,7 @@ export function defaultScheduledAt(now: Date = new Date()): string {
   );
 }
 
-export function relativeFromNow(target: Date, now: number = Date.now()): string {
+export function relativeFromNow(target: Date, now: number = serverNow()): string {
   const diff = target.getTime() - now;
   if (diff <= 0) {
     return "now";
@@ -75,7 +76,9 @@ export function schedulePreview(
     hour: "numeric",
     minute: "2-digit",
   });
-  return { absolute, relative: relativeFromNow(target, now.getTime()) };
+  // The server sends a picked time when its own clock reaches it; a delay runs from now.
+  const from = timing === "delay" ? now.getTime() : toServerTime(now.getTime());
+  return { absolute, relative: relativeFromNow(target, from) };
 }
 
 export interface ScheduleMessageForm {

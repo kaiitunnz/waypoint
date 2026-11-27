@@ -127,6 +127,27 @@ describe("syncServerClock", () => {
     expect(serverClockOffset()).toBe(held);
   });
 
+  it("gives up on a request that never answers, so a later connection measures", async () => {
+    // AbortSignal.timeout runs outside the fake timers.
+    const expired = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(expired.signal);
+    const fetch = vi.fn(
+      (_: string, init: RequestInit) =>
+        new Promise((_, reject) => init.signal?.addEventListener("abort", () => reject(new Error("timed out")))),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const host = freshHost();
+    const hung = syncServerClock(host);
+    expect(timeout).toHaveBeenCalledWith(5_000);
+    expired.abort();
+    await hung;
+    timeout.mockRestore();
+    serve(SERVER);
+    vi.setSystemTime(SERVER + MINUTES_3);
+    await syncServerClock(host);
+    expect(serverClockOffset()).not.toBe(0);
+  });
+
   it("keeps the offset when the same host cannot be reached", async () => {
     vi.setSystemTime(SERVER + MINUTES_3);
     serve(SERVER);

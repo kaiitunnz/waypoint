@@ -17,6 +17,7 @@ function press(onLongPress: () => void) {
 }
 
 const down = { pointerType: "touch", clientX: 0, clientY: 0, currentTarget: {} } as unknown as PointerEvent;
+const moved = (clientX: number) => ({ clientX, clientY: 0 }) as PointerEvent;
 const release = () => ({ cancelable: true, preventDefault: vi.fn() });
 const click = () => ({ preventDefault: vi.fn(), stopPropagation: vi.fn() });
 
@@ -54,6 +55,34 @@ describe("useLongPress", () => {
     handlers.onClickCapture(swallowed as unknown as MouseEvent);
     expect(swallowed.preventDefault).toHaveBeenCalledOnce();
     expect(swallowed.stopPropagation).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["a drift past the slop", (handlers: ReturnType<typeof useLongPress>) => handlers.onPointerMove(moved(11))],
+    ["a scroll taking the touch over", (handlers: ReturnType<typeof useLongPress>) => handlers.onPointerCancel()],
+  ])("gives up the hold on %s", (_, interrupt) => {
+    const onLongPress = vi.fn();
+    const handlers = press(onLongPress);
+    handlers.onPointerDown(down);
+    interrupt(handlers);
+    vi.advanceTimersByTime(HOLD_MS);
+    expect(onLongPress).not.toHaveBeenCalled();
+  });
+
+  it("holds through a drift within the slop", () => {
+    const onLongPress = vi.fn();
+    const handlers = press(onLongPress);
+    handlers.onPointerDown(down);
+    handlers.onPointerMove(moved(10));
+    vi.advanceTimersByTime(HOLD_MS);
+    expect(onLongPress).toHaveBeenCalledOnce();
+  });
+
+  it("ignores a mouse", () => {
+    const onLongPress = vi.fn();
+    press(onLongPress).onPointerDown({ ...down, pointerType: "mouse" } as PointerEvent);
+    vi.advanceTimersByTime(HOLD_MS);
+    expect(onLongPress).not.toHaveBeenCalled();
   });
 
   it("leaves a tap alone", () => {

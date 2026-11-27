@@ -26,6 +26,7 @@ from waypoint.backends.claude_tty.plugin import (
     _validate_custom_args,
 )
 from waypoint.backends.tmux.adapter import TmuxError
+from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     CommandCompletion,
     SessionCreateRequest,
@@ -1001,6 +1002,25 @@ async def test_import_thread_persists_resolving_agent_backend(
     assert result.backend == "claude_code"
     assert result.transport == "claude_tty"
     assert result.transport_state["thread_id"] == "imp-2"
+
+
+async def test_import_thread_refuses_a_missing_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    info = _thread_info("imp-gone")
+    info.cwd = str(tmp_path / "gone")
+    monkeypatch.setattr(
+        plugin_mod, "find_local_claude_thread", lambda thread_id, config_dir=None: info
+    )
+    runtime = MagicMock()
+    runtime._require_pane_folder = SessionRuntime._require_pane_folder
+
+    with pytest.raises(HTTPException, match="working folder does not exist"):
+        await ClaudeTtyPlugin().import_thread(
+            runtime, ClaudeThreadImportRequest(thread_id="imp-gone")
+        )
+
+    runtime.tmux.start_managed_session.assert_not_called()
 
 
 async def test_import_thread_missing_raises_404(

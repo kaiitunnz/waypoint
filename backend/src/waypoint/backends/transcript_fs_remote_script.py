@@ -20,7 +20,7 @@ Output schema (always one line, ``SENTINEL`` immediately followed by JSON,
     {"paths": [str, ...]}                       # glob
     {"ids": [str, ...]} | {"error": str}        # find_clear_successors
     {"size": int, "device": int, "inode": int,  # read_range
-     "data_b64": str} | {"error": str}
+     "data_b64": str} | {"missing": true} | {"error": str}
 
 and mutating ops (mkdir, chmod, rmdir, symlink, copy_file):
 
@@ -222,6 +222,9 @@ def op_read_range(path, offset, limit):
                 st = os.fstat(fh.fileno())
                 fh.seek(want_offset)
                 data = fh.read(want_limit)
+    except FileNotFoundError:
+        emit({"missing": True})
+        return
     except OSError as exc:
         emit({"error": str(exc)})
         return

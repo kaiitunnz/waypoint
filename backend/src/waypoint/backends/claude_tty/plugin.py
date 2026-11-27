@@ -92,8 +92,8 @@ from waypoint.backends.claude_tty.byte_source import (
     ClaudeTranscriptSource,
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
+    find_local_transcript,
     resolve_remote_config_root,
-    transcript_path,
 )
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
@@ -1152,12 +1152,9 @@ class ClaudeTtyPlugin:
         launch_target: SshLaunchTargetConfig | None,
     ) -> bool:
         if launch_target is None:
-            src = transcript_path(session.cwd, src_thread_id, config_dir)
-            if not src.exists():
-                artifacts = local_claude_thread_artifacts(src_thread_id, config_dir)
-                if len(artifacts) != 1:
-                    return False
-                src = artifacts[0]
+            src = find_local_transcript(session.cwd, src_thread_id, config_dir)
+            if src is None:
+                return False
             # ``--resume`` finds the copy by id from any folder.
             shutil.copy2(src, src.parent / f"{new_thread_id}.jsonl")
             return True
@@ -1261,9 +1258,7 @@ class ClaudeTtyPlugin:
         if launch_target is None:
             # Past the kill, a launch refused for a missing folder strands the
             # session.
-            runtime._require_pane_folder(
-                launch_target, await relaunch_folder(runtime, session)
-            )
+            runtime._require_pane_folder(None, await relaunch_folder(runtime, session))
         old_tmux_session = state.get("tmux_session")
         if old_tmux_session:
             with suppress(TmuxError):
@@ -1645,18 +1640,13 @@ class ClaudeTtyPlugin:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="claude thread not found",
             )
-        cwd_path = Path(info.cwd).expanduser()
-        if not cwd_path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"claude thread cwd {info.cwd} no longer exists; cannot resume",
-            )
+        runtime._require_pane_folder(None, info.cwd)
         if request.thread_id in self._imported_thread_ids(runtime, backend):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude thread already imported",
             )
-        cwd = str(cwd_path)
+        cwd = str(Path(info.cwd).expanduser())
         # Durable effective model — request choice, else the configured default.
         # Pin it on the resume command so the relaunched CLI is deterministic,
         # and persist it as the authoritative context-window denominator.

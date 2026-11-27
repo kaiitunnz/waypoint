@@ -236,6 +236,10 @@ WAKE_INPUT_TEXT = "Board/inbox changed — run your cycle."
 log = logging.getLogger("waypoint.runtime")
 
 
+def local_dir_exists(path: str) -> bool:
+    return Path(path).expanduser().is_dir()
+
+
 def require_existing_local_dir(cwd: str) -> str:
     """Expand ``~`` and return the resolved local cwd, raising 400 if it is not
     an existing directory.
@@ -246,7 +250,7 @@ def require_existing_local_dir(cwd: str) -> str:
     leaving an empty transcript. Failing fast surfaces the typo instead.
     """
     resolved = str(Path(cwd).expanduser())
-    if not Path(resolved).is_dir():
+    if not local_dir_exists(resolved):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=CWD_NOT_FOUND_DETAIL,
@@ -6077,11 +6081,7 @@ class SessionRuntime:
     ) -> None:
         """Refuse a local pane launch into a missing folder, where tmux would
         silently start the pane in $HOME."""
-        if (
-            launch_target is None
-            and cwd is not None
-            and not Path(cwd).expanduser().is_dir()
-        ):
+        if launch_target is None and cwd is not None and not local_dir_exists(cwd):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"working folder does not exist: {cwd}",

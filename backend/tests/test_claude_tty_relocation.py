@@ -622,6 +622,31 @@ async def test_fork_copies_a_moved_transcript_beside_it(tmp_path: Path) -> None:
     assert (moved.parent / f"{NEW_TID}.jsonl").read_text() == moved.read_text()
 
 
+async def test_fork_with_no_folder_left_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _removed_worktree_session(tmp_path / "gone", SessionStatus.IDLE)
+    runtime = _runtime(source)
+    plugin = ClaudeTtyPlugin()
+    _stub(plugin, monkeypatch)
+    materialize = AsyncMock()
+    monkeypatch.setattr(plugin, "_materialize_forked_transcript", materialize)
+
+    with pytest.raises(HTTPException, match="working folder does not exist") as raised:
+        await plugin.fork_session(
+            runtime,
+            source,
+            "fork-1",
+            "forked",
+            tmp_path / "raw.log",
+            tmp_path / "events.jsonl",
+        )
+
+    assert raised.value.status_code == 400
+    materialize.assert_not_awaited()
+    runtime.tmux.start_managed_session.assert_not_awaited()
+
+
 async def test_fork_of_a_removed_folder_records_where_it_launched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

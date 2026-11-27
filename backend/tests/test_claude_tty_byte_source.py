@@ -9,7 +9,7 @@ from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
 )
-from waypoint.backends.transcript_fs_remote import RemoteRead
+from waypoint.backends.transcript_fs_remote import RemoteMissing, RemoteRead
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
@@ -243,7 +243,7 @@ class _FakeFs:
     def __init__(self) -> None:
         self.glob_result: list[str] = []
         self.read_result: RemoteRead | None = None
-        # When set, reads are answered per path (a missing path reads as None).
+        # When set, reads are answered per path (a path not in it is missing).
         self.by_path: dict[str, RemoteRead] | None = None
         self.glob_calls = 0
         self.read_calls: list[tuple[str, int, int]] = []
@@ -255,10 +255,12 @@ class _FakeFs:
         self.last_pattern = pattern
         return list(self.glob_result)
 
-    def read_range(self, path: str, offset: int, limit: int) -> RemoteRead | None:
+    def read_range(
+        self, path: str, offset: int, limit: int
+    ) -> RemoteRead | RemoteMissing | None:
         self.read_calls.append((path, offset, limit))
         if self.by_path is not None:
-            return self.by_path.get(path)
+            return self.by_path.get(path, RemoteMissing())
         return self.read_result
 
     def expanduser(self, path: str) -> str:
@@ -411,6 +413,22 @@ def test_remote_config_root_relative_joins_remote_cwd(monkeypatch) -> None:
     src = _remote_source(fs, _session(cwd="~/repo"), config_dir=".claude-rel")
     src.read_from(0)
     assert fs.last_config_dir == "/home/u/repo/.claude-rel"
+
+
+def test_remote_failed_read_does_not_search_again(monkeypatch) -> None:
+    monkeypatch.setattr(bs.time, "monotonic", lambda: 0.0)
+    fs = _FakeFs()
+    fs.glob_result = [f"/p/{TID}.jsonl"]
+    fs.read_result = RemoteRead(data=b"one\n", size=4, device=1, inode=2)
+    src = _remote_source(fs, _session())
+    src.read_from(0)
+
+    fs.read_result = None  # the host could not be asked
+    src._next_read_at = 0.0
+    assert src.read_from(4).observed is False
+
+    assert fs.glob_calls == 1
+    assert len(fs.read_calls) == 2
 
 
 def test_remote_follows_a_moved_transcript(monkeypatch) -> None:

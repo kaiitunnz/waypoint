@@ -33,7 +33,7 @@ import { HomeHeader } from "./HomeHeader";
 import { NeedsYouSection } from "./NeedsYouSection";
 import { SearchResults } from "./SearchResults";
 import { SessionMenu } from "./SessionMenu";
-import { CompactRow, LiveRow, LiveTile, ResultRow } from "./SessionRows";
+import { CompactRow, LiveTile, ResultRow } from "./SessionRows";
 import { useExitedSessions } from "./useExitedSessions";
 import { useSessionMenuActions } from "./useSessionMenuActions";
 import { useSwitcher } from "./SwitcherProvider";
@@ -118,24 +118,17 @@ export function SessionsHome() {
       menu: menuFor(session),
     };
   };
-  // Pinned and Live read alike: a serif title, the lamp, the time and, unless turned off, the preview line.
+  // Pinned and Live read alike: a card of the title, time, lamp, state, agent and, unless
+  // turned off, the preview line.
   const previewGroup = (title: string, group: SessionRecord[]) =>
     group.length > 0 ? (
       <section>
         <SectionHeading title={title} count={group.length} dense={phone} />
-        {phone ? (
-          <List>
-            {group.map((session) => (
-              <LiveRow key={session.id} {...rowProps(session)} previews={previews} activity={activities.get(session.id)} />
-            ))}
-          </List>
-        ) : (
-          <ul className={styles.tiles}>
-            {group.map((session) => (
-              <LiveTile key={session.id} {...rowProps(session)} previews={previews} activity={activities.get(session.id)} />
-            ))}
-          </ul>
-        )}
+        <ul className={styles.tiles}>
+          {group.map((session) => (
+            <LiveTile key={session.id} {...rowProps(session)} previews={previews} activity={activities.get(session.id)} />
+          ))}
+        </ul>
       </section>
     ) : null;
 

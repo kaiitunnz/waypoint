@@ -23,8 +23,6 @@ interface ListRowProps {
   selected?: boolean;
   // One-line row (exited): no status line.
   compact?: boolean;
-  // One line that keeps the title's type.
-  single?: boolean;
   // A session's read state; a row without it keeps the default type.
   unread?: boolean;
   dimmed?: boolean;
@@ -43,7 +41,6 @@ export function ListRow({
   trailing,
   selected,
   compact,
-  single,
   unread,
   dimmed,
   href,
@@ -54,7 +51,6 @@ export function ListRow({
     styles.row,
     !lamp && styles.noLamp,
     compact && styles.compact,
-    single && styles.single,
     unread === true && styles.unread,
     unread === false && styles.read,
     dimmed && styles.dimmed,

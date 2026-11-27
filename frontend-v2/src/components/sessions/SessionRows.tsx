@@ -16,7 +16,7 @@ import { ListRow } from "@/components/ui/List";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 
 import { ActivityLine } from "./ActivityLine";
-import { PinMark } from "./PinMark";
+import { SessionTime } from "./SessionTime";
 import styles from "./SessionRows.module.css";
 import { cx } from "@/lib/cx";
 
@@ -38,41 +38,9 @@ interface PreviewProps {
 const href = (session: SessionRecord) => sessionHref(session.id);
 const time = (session: SessionRecord, now: number) => formatSessionTime(session.last_event_at, now);
 
-function RowTime({ session, now }: { session: SessionRecord; now: number }) {
-  if (!session.pinned_at) return time(session, now);
-  return (
-    <span className={styles.pinned}>
-      <PinMark />
-      {time(session, now)}
-    </span>
-  );
-}
-
-export function LiveRow({
-  session,
-  lamp,
-  word,
-  now,
-  menu,
-  previews,
-  activity,
-}: Omit<RowProps, "agent"> & PreviewProps) {
-  const unread = showsUnread(session);
-  return (
-    <ListRow
-      href={href(session)}
-      lamp={lamp}
-      lampLabel={spokenStatus(word, unread)}
-      title={session.title}
-      single={!previews}
-      unread={unread}
-      status={
-        previews ? <ActivityLine fallback={word} activity={activity} bright={brightPreview(session, lamp)} /> : undefined
-      }
-      trailing={time(session, now)}
-      actions={menu}
-    />
-  );
+// A result or exited row's time, marking a pin no heading names.
+function RowTime({ session, now, unread }: { session: SessionRecord; now: number; unread?: boolean }) {
+  return <SessionTime time={time(session, now)} pinned={Boolean(session.pinned_at)} unread={unread} />;
 }
 
 export function CompactRow({
@@ -108,6 +76,8 @@ export function CompactRow({
   );
 }
 
+// A two-line card: title and time, then the lamp, the state and the agent. The
+// preview, when on, adds a line.
 export function LiveTile({
   session,
   lamp,
@@ -124,17 +94,24 @@ export function LiveTile({
       <Link href={href(session)} className={cx(styles.tile, unread && styles.unread)}>
         <span className={styles.head}>
           <span className={styles.name}>{session.title}</span>
-          <span className={styles.time}>{time(session, now)}</span>
+          <span className={styles.time}>
+            <SessionTime time={time(session, now)} unread={unread} />
+          </span>
         </span>
-        <span className={styles.step}>
+        <span className={styles.state}>
           <StatusLamp state={lamp} size="sm" label={spokenStatus(word, unread)} />
-          {previews ? (
-            <ActivityLine fallback={word} activity={activity} bright={brightPreview(session, lamp)} progressStyle="long" />
-          ) : (
-            word
-          )}
+          <span>{word}</span>
+          <span className={styles.sep} aria-hidden="true">
+            ·
+          </span>
+          <span className={styles.stateAgent}>{agent}</span>
         </span>
-        <span className={styles.agentLine}>{agent}</span>
+        {previews ? (
+          // The line above says the state, so an empty preview stays empty.
+          <span className={styles.preview}>
+            <ActivityLine fallback="" activity={activity} bright={brightPreview(session, lamp)} progressStyle="long" />
+          </span>
+        ) : null}
       </Link>
       <span className={styles.menu}>{menu}</span>
     </li>
@@ -153,7 +130,7 @@ export function ResultRow({ session, lamp, word, now, agent, menu }: RowProps) {
       unread={unread}
       dimmed={lamp === "exited"}
       status={where}
-      trailing={<RowTime session={session} now={now} />}
+      trailing={<RowTime session={session} now={now} unread={unread} />}
       actions={menu}
     />
   );

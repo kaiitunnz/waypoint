@@ -25,6 +25,7 @@ import { composerAvailability, isExitedSession } from "@waypoint/web-core/sessio
 import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
 import { workingStep } from "@waypoint/web-core/session/workingRow";
 import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
+import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { Composer } from "@/components/composer/Composer";
 import { FocusPill } from "@/components/composer/FocusPill";
@@ -102,7 +103,16 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
     setPaneBesideTerminal(false);
   };
   const goHome = useCallback(() => router.replace("/"), [router]);
-  const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
+  // The rail's menus act on any session; only this screen's own one changes it.
+  const { setSession } = stream;
+  const onRemoved = useCallback((removed: string) => (removed === id ? goHome() : undefined), [id, goHome]);
+  const onUpdated = useCallback(
+    (updated: SessionRecord) => {
+      if (updated.id === id) setSession(updated);
+    },
+    [id, setSession],
+  );
+  const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved, onUpdated });
   // A second reattach, from the menu or the question form, would restart the session the
   // first one restored; the ref stops a second tap before the next render.
   const [reconnecting, setReconnecting] = useState(false);
@@ -320,7 +330,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
     <SessionContextProvider value={context}>
       <AskControllerProvider value={askController}>
         <div className={cx(styles.screen, railColumn && styles.railOpen, paneColumn && styles.paneOpen)}>
-          {railColumn ? <SessionRail currentId={id} /> : null}
+          {railColumn ? <SessionRail currentId={id} catalog={catalog} onAction={onAction} /> : null}
           <section ref={conversationRef} className={cx(styles.conv, terminalView && styles.terminal)} aria-label="Conversation">
             {pointer ? (
               <SessionHeader
@@ -407,7 +417,13 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
           {paneColumn ? <SidePane /> : null}
           {panels.drawer === "rail" ? (
             <SideDrawer side="left" label="Sessions" onClose={panels.closeDrawer}>
-              <SessionRail currentId={id} onClose={panels.closeDrawer} onPick={panels.pickFromDrawer} />
+              <SessionRail
+                currentId={id}
+                catalog={catalog}
+                onAction={onAction}
+                onClose={panels.closeDrawer}
+                onPick={panels.pickFromDrawer}
+              />
             </SideDrawer>
           ) : null}
           {panels.drawer === "pane" ? (

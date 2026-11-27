@@ -56,6 +56,10 @@
   list-style: none;
 }
 
+.row {
+  position: relative;
+}
+
 .item {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) auto;
@@ -68,15 +72,47 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .item:hover {
+  .row:hover .item {
     background: var(--fill-quiet);
   }
 }
 
 /* The open session takes the plane's colour so it joins the conversation like a tab. */
 .on,
-.on:hover {
+.row:hover .on {
   background: var(--plane);
+}
+
+/* The menu button takes the time's place at the end of the title's line. */
+.actions {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  height: 34px;
+}
+
+.single .actions {
+  height: 100%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .actions {
+    opacity: 0;
+  }
+
+  .row:hover .actions,
+  .row:has(:focus-visible) .actions,
+  .row:has([aria-expanded="true"]) .actions {
+    opacity: 1;
+  }
+
+  .row:hover .time,
+  .row:has(:focus-visible) .time,
+  .row:has([aria-expanded="true"]) .time {
+    visibility: hidden;
+  }
 }
 
 .name {
@@ -114,7 +150,7 @@
   white-space: nowrap;
 }
 
-.single {
+.single .item {
   min-height: 36px;
 }
 
@@ -127,8 +163,25 @@
   color: var(--faint);
 }
 
+/* Touch opens the menu by a long press; the button stays for a screen reader. */
 @media not all and (hover: hover) and (pointer: fine) {
-  .single {
+  .single .item {
     min-height: 44px;
+  }
+
+  .item {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+
+  .actions {
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .single .actions {
+    height: 1px;
   }
 }

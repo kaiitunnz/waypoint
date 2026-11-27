@@ -42,10 +42,13 @@ class PendingCall:
 class CallSource(Protocol):
     """Where a dialog's call is looked up. Neither method raises.
 
-    The matcher relies on two things of the calls a source returns. Their
+    Three things are relied on of the calls a source returns. Their
     ``transcript`` groups calls that prompt in submission order: of identical
     calls of one transcript the oldest is named. Their ``home`` is set wherever a
-    dialog may print the call's path under ``~``.
+    dialog may print the call's path under ``~``. Their ``made_at`` says when
+    Claude made them: after a request answered unnamed, only calls made before
+    the answer are excluded, and one without ``made_at`` counts as made before
+    it, so a source that leaves it unset has every similar call excluded.
     """
 
     def candidates(self, agent: str | None) -> list[PendingCall]:
@@ -157,10 +160,10 @@ class _Followed:
     def read(self, reader: TranscriptTreeReader, path: str) -> bool:
         """Take in what was appended. False when the file can't be read."""
         if self._identity is not None:
-            if (chunk := reader.read_range(path, self._offset, _GAP_LIMIT)) is None:
-                return False
+            chunk = reader.read_range(path, self._offset, _GAP_LIMIT)
             if (
-                chunk.identity == self._identity
+                chunk is not None
+                and chunk.identity == self._identity
                 and self._offset <= chunk.size <= self._offset + len(chunk.data)
             ):
                 self._take(chunk.data)
@@ -168,8 +171,9 @@ class _Followed:
         return self.restart(reader, path)
 
     def restart(self, reader: TranscriptTreeReader, path: str) -> bool:
-        """Read the file's end afresh: on first sight, and when it was replaced
-        or has grown too far to catch up."""
+        """Read the file's end afresh: on first sight, when it was replaced or
+        grew too far, and when a catch-up read failed. A slow link can fail a
+        large read every time, so it must not be repeated."""
         if (size := reader.file_size(path)) is None:
             return False
         start = max(0, size - _FIRST_WINDOW)

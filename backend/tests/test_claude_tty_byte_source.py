@@ -4,8 +4,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from claude_tty_transcripts import jsonl, use
+import pytest
+
+from claude_tty_transcripts import jsonl, prompt, use
 from waypoint.backends.claude_tty import byte_source as bs
+from waypoint.backends.claude_tty import pending_calls as pending_calls_mod
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
@@ -268,6 +271,8 @@ class _FakeFs:
         self.unreachable: set[str] = set()
         # Modification times by path; 0 when not set.
         self.mtimes: dict[str, int] = {}
+        # The most bytes a read can carry before it fails, as a slow link does.
+        self.max_read: int | None = None
 
     def glob(self, root: str, pattern: str) -> list[str]:
         self.glob_calls += 1
@@ -295,6 +300,8 @@ class _FakeFs:
             if (data := self.files.get(path)) is None:
                 return RemoteMissing()
             window = data[offset : offset + limit]
+            if self.max_read is not None and len(window) > self.max_read:
+                return None
             return RemoteRead(data=window, size=len(data), device=1, inode=1)
         if self.by_path is not None:
             return self.by_path.get(path, RemoteMissing())
@@ -670,3 +677,26 @@ def test_a_remote_look_reads_only_what_changed() -> None:
         f"{done}.jsonl",
     }
     assert seen < len(fs.files[f"{done}.jsonl"])
+
+
+def test_a_catch_up_the_link_cannot_carry_starts_from_the_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_calls_mod, "_FIRST_WINDOW", 4096)
+    main = f"/home/u/.claude/projects/p/{TID}.jsonl"
+    fs = _FakeFs()
+    fs.files = {main: jsonl(use("a", "Bash", {"command": "ls"}))}
+    fs.globs = {f"projects/*/{TID}.jsonl": [main]}
+    calls = TranscriptCalls(_remote_source(fs, _session()))
+    assert [c.tool_use_id for c in calls.candidates(None)] == ["a"]
+
+    fs.max_read = 8192
+    fs.files[main] += jsonl(
+        prompt("p" * 20000), use("b", "Bash", {"command": "ls"}, msg="msg-2")
+    )
+    assert [c.tool_use_id for c in calls.candidates(None)] == ["b"]
+
+    # Caught up: only what follows is asked for again.
+    fs.read_calls.clear()
+    assert [c.tool_use_id for c in calls.candidates(None)] == ["b"]
+    assert [offset for _, offset, _ in fs.read_calls] == [len(fs.files[main])]

@@ -857,19 +857,25 @@ verification](pending_asks.md#call-verification)):
   subagent's. A tool approval is verified when those consistent with everything
   the dialog draws are a single call, or identical calls of one transcript, of
   which the oldest is named. `tool_input` is that call's whole input.
-- Diffs and commands are compared line by line; runs of whitespace within a line
-  are not told apart.
+- Commands, diffs and new files are compared line by line. A run of whitespace
+  within a line reads as one space, so its length is not compared, nor is a run
+  at a line's end or a command line's indentation. Words are joined across
+  wrapped rows without a space only where the upper row is filled to the
+  dialog's edge. Other tools' arguments are compared more loosely: a line break
+  reads as a space, and a wrap may or may not stand for one.
 - Claude draws the `Bash command (unsandboxed)` heading only while sandboxing is
   on. It matches a call with `dangerouslyDisableSandbox`, and the plain heading
   one without.
 - A plan approval is verified when its text is the content of the plan file the
   dialog names. An unreadable file gives no text.
 - A call Claude has not written to its transcript while the dialog is up, which
-  is common on the main thread, stays unverified, as does a heading too narrow a
-  pane to read whole.
-- An answered call is not named again. When a request is answered while
-  unverified, a call that reads like it, was made before the answer by its
-  transcript timestamp, and is recorded only afterwards is not named either.
+  is common on the main thread, stays unverified. So does a dialog on a pane too
+  narrow for its heading to be read whole.
+- A call Waypoint saw answered, by a reply or by its dialog closing or giving
+  way to another, is not named again. After a request answered while unverified,
+  the first look that finds pending calls reading like it and made before the
+  answer, by their transcript timestamps, excludes those calls, and the request
+  is then forgotten.
 
 A reply presses the option's digit only while the pane still shows the request,
 and messages are typed only while the composer is drawn.

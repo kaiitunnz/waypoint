@@ -70,7 +70,7 @@ whether they name the call a reply answers:
 
 | Field | Meaning |
 | --- | --- |
-| `call_verified` | `true`: `tool_name` and `tool_input` name the pending call the reply answers, or the plan `text` is the plan being approved. `false`: they are the screen's reading, which may be partial or wrong |
+| `call_verified` | `true`: `tool_name` and `tool_input` are a pending call consistent with what the screen shows, or the plan `text` is the content of the plan file the screen names. `false`: they are the screen's reading, which may be partial or wrong |
 | `tool_use_id` | The matched call, when one was matched |
 | `subagent` | The type or name of the Claude subagent asking, when the request is one's |
 

@@ -1,0 +1,22 @@
+
+❯ Read nb.ipynb, then use the NotebookEdit tool to change cell c1 source to: y = 2
+
+  Read 1 file (ctrl+o to expand)
+
+● Edit Notebook(nb.ipynb@c1)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Edit notebook
+ /tmp/probe/repo/a_notebook_folder_name_that_is_long_enough_to_wrap_the_path_across_two_dialog_lines_for_the_test/
+ nb.ipynb
+ Replace cell contents for cell c1
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 -x = 1
+  1 +y = 2
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to nb.ipynb?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

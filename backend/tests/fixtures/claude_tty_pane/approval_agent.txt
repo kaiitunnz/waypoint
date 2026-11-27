@@ -1,0 +1,22 @@
+ ▝▝   ▝▝   /tmp/probe/repo
+
+
+❯ Use the Agent tool (general-purpose) with the prompt "Say hello and stop".
+
+● Agent(Say hello greeting)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Tool use
+ │ Launch a new agent
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Agent(Say hello greeting)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Rule Agent from command line arguments says to ask.
+ /permissions to update rules
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for Agent commands in /tmp/probe/repo from this project
+   3. No
+
+ Esc to cancel · Tab to amend

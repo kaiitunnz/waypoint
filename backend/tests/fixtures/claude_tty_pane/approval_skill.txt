@@ -1,0 +1,17 @@
+
+❯ Run the probe skill with the Skill tool.
+
+● Skill(probe-skill)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Use skill "probe-skill"?
+ Claude may use instructions, code, or files from this Skill.
+ Rule Skill from command line arguments says to ask.
+ /permissions to update rules
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for probe-skill in /tmp/probe/repo from this project
+   3. No
+
+ Esc to cancel · Tab to amend

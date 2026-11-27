@@ -8,10 +8,15 @@ These functions are deliberately side-effect free: they take the text of a
 layout-coupled parsing is unit-testable against captured fixtures without a live
 TUI. Keystroke delivery and pane polling live in the (not-yet-wired) caller.
 
-Verified against fixtures captured from Claude Code 2.1.177 in
+A permission dialog is a ruled block: a solid rule, a heading naming the tool
+(with `` · from the <name> agent`` for a subagent's), then the call between dashed
+rules, a "Do you want to …?" question, numbered options and, usually, a footer.
+
+Verified against fixtures captured from Claude Code 2.1.177 to 2.1.332 in
 ``tests/fixtures/claude_tty_pane/``.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -76,7 +81,6 @@ _TRUST_OPTION = "Yes, I trust this folder"
 _TRUST_FOOTER = "Enter to confirm"
 
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
-_TOOL_HEADER_RE = re.compile(r"^\s*●\s*([A-Za-z][\w-]*)\((.*)\)\s*$")
 _QUESTION_RE = re.compile(r"^\s*(Do you want to .*\?)\s*$", re.MULTILINE)
 _PLAN_QUESTION_RE = re.compile(r"Would you like to proceed\?")
 # The saved-plan path the dialog footer names ("… · ~/.claude/plans/<slug>.md").
@@ -101,10 +105,24 @@ _OPTION_PROMPT_RE = re.compile(r"^\s*❯\s*\d+\.")
 # output, not the composer. "Esc to cancel" ends every inline dialog `classify`
 # recognizes; the plan dialog is a full-pane overlay with nothing below its footer,
 # so it needs no token.
-_DIALOG_FOOTER_TOKENS = ("Esc to cancel",)
+# The fetch dialog has no footer; its last option ends "(esc)".
+_DIALOG_FOOTER_TOKENS = ("Esc to cancel", "(esc)")
+# Key hints an interactive popup shows, for popups no marker above names.
+_INTERACTIVE_HINTS = (
+    "Esc to cancel",
+    "Enter to confirm",
+    "Enter to select",
+    "Enter to continue",
+    "(esc)",
+)
 # The composer's top and bottom borders: full-width rules of this character.
 _RULE_CHAR = "─"
 _MIN_RULE_WIDTH = 20
+_DASHED_RULE_RE = re.compile(r"[╌─]{20,}")
+_AGENT_SUFFIX_RE = re.compile(r"^(.*?)\s+· from the (.+?) agent$")
+_SKILL_HEADING_RE = re.compile(r'^Use skill "(.+)"\?$')
+# A line the options block ends with when the dialog is scrolled.
+_MORE_LINES_PREFIX = "↑"
 
 
 def _strip_ansi(text: str) -> str:
@@ -119,6 +137,11 @@ def _contains(screen: str, screen_compact: str, marker: str) -> bool:
     return marker in screen or _compact(marker) in screen_compact
 
 
+def unboxed(line: str) -> str:
+    """A dialog line without the bar that marks wrapped or multi-line text."""
+    return re.sub(r"^\s*│", "", line)
+
+
 @dataclass
 class DialogOption:
     number: int
@@ -128,10 +151,46 @@ class DialogOption:
 
 @dataclass
 class ApprovalDialog:
+    """A permission dialog as drawn.
+
+    ``tool_name`` and ``target`` are what the dialog itself reads as, which is
+    not proof of the call behind it.
+    """
+
     tool_name: str | None
     target: str | None
     question: str
     options: list[DialogOption]
+    # The heading naming the tool; None when the top of the dialog is cut off.
+    heading: str | None
+    # The subagent the heading says is asking.
+    agent: str | None
+    # Lines above the first dashed rule, between the dashed rules (None without
+    # them), and between the last one and the question.
+    header: list[str]
+    body: list[str] | None
+    extra: list[str]
+    # False when the dialog does not show enough to say which call it asks
+    # about: its top is cut off, or its heading cannot be read.
+    matchable: bool = True
+
+    @property
+    def identity(self) -> str:
+        """A digest of the lines on screen, apart from the highlight and the
+        auto-mode tip. Spacing counts: ``rm -rf a /`` is not ``rm -rf a/``."""
+        parts = [
+            self.heading or "",
+            self.agent or "",
+            *(line for line in self.header if not line.strip().startswith("Tip:")),
+            "|",
+            *(self.body or []),
+            "|",
+            *self.extra,
+            self.question,
+            *(f"{option.number}.{option.label}" for option in self.options),
+        ]
+        shown = "\n".join(part.rstrip() for part in parts)
+        return hashlib.sha256(shown.encode()).hexdigest()[:16]
 
     @property
     def approve_option(self) -> DialogOption | None:
@@ -345,7 +404,95 @@ def classify(screen: str) -> PaneScreen:
         region, compact, _AUTO_MODE_TEACHING_FOOTER
     ):
         return PaneScreen.AUTO_MODE_TEACHING
+    if _is_footerless_approval(region.split("\n")):
+        return PaneScreen.APPROVAL
     return PaneScreen.OTHER
+
+
+def _question_index(lines: list[str]) -> int | None:
+    # The live dialog is the lowest block, so a question quoted higher in the
+    # transcript must not be parsed in place of the real prompt.
+    return next(
+        (i for i in range(len(lines) - 1, -1, -1) if _QUESTION_RE.match(lines[i])),
+        None,
+    )
+
+
+def _is_footerless_approval(lines: list[str]) -> bool:
+    """A ruled block ending in a question and its Yes/No options, with nothing
+    else below them but queued messages: the fetch dialog has no footer."""
+    if (question := _question_index(lines)) is None:
+        return False
+    if not any(_is_column0_rule(line) for line in lines[:question]):
+        return False
+    below = [line for line in lines[question + 1 :] if line.strip()]
+    options = _parse_options(below)
+    labels = [option.label.lower() for option in options]
+    return (
+        any(option.selected for option in options)
+        and any(label.startswith("yes") for label in labels)
+        and any(label.startswith("no") for label in labels)
+        and all(
+            _OPTION_RE.match(line)
+            or _is_composer_line(line)
+            or line.startswith("     ")
+            or line.strip().startswith(_MORE_LINES_PREFIX)
+            for line in below
+        )
+    )
+
+
+def composer_drawn(screen: str) -> bool:
+    """Whether the composer's bordered input box is on screen.
+
+    A dialog or panel replaces it, so no composer means keystrokes would land in
+    something else. Borders may carry a label, and shell mode prompts with ``!``.
+    """
+    lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
+    for top in range(len(lines) - 3, -1, -1):
+        if not (
+            _is_border(lines[top])
+            and lines[top + 1].startswith((_COMPOSER_PROMPT, "!"))
+        ):
+            continue
+        # The typed text wraps onto indented lines until the bottom border.
+        bottom = top + 2
+        while bottom < len(lines) and (
+            not lines[bottom].strip() or lines[bottom].startswith(" ")
+        ):
+            bottom += 1
+        if bottom < len(lines) and _is_border(lines[bottom]):
+            # A popup below the box has taken its place: the box is left over
+            # from earlier in the scrollback.
+            return not any(_is_popup_line(line) for line in lines[bottom + 1 :])
+    return False
+
+
+def _is_popup_line(line: str) -> bool:
+    return bool(
+        _is_border(line)
+        or _OPTION_PROMPT_RE.match(line)
+        or _QUESTION_RE.match(line)
+        or any(hint in line for hint in _INTERACTIVE_HINTS)
+    )
+
+
+def _is_border(line: str) -> bool:
+    stripped = line.rstrip()
+    return (
+        len(stripped) >= _MIN_RULE_WIDTH
+        and stripped.startswith(_RULE_CHAR * 2)
+        and stripped.endswith(_RULE_CHAR)
+    )
+
+
+def _looks_interactive(screen: str) -> bool:
+    return any(
+        _OPTION_PROMPT_RE.match(line)
+        or _QUESTION_RE.match(line)
+        or any(hint in line for hint in _INTERACTIVE_HINTS)
+        for line in _active_region(_strip_ansi(screen).splitlines())
+    )
 
 
 def trust_option_offset(screen: str) -> int | None:
@@ -387,9 +534,12 @@ def shows_blocking_dialog(screen: str) -> bool:
     approval/trust dialog, so a snapshot showing a dialog looks "ready" to the
     composer probes. The tmux transport consults this to avoid pasting or
     submitting a message into a dialog (which would select an option — e.g.
-    auto-approve a tool).
+    auto-approve a tool). A popup `classify` does not know counts too, by its
+    options or key hints standing where the composer should be.
     """
-    return classify(screen) is not PaneScreen.OTHER
+    if classify(screen) is not PaneScreen.OTHER:
+        return True
+    return not composer_drawn(screen) and _looks_interactive(screen)
 
 
 def _parse_options(lines: list[str]) -> list[DialogOption]:
@@ -409,26 +559,16 @@ def _parse_options(lines: list[str]) -> list[DialogOption]:
 
 
 def parse_approval(screen: str) -> ApprovalDialog | None:
-    """Parse a tool-permission dialog, or None if the screen is not one.
-
-    The question, options, and footer form the dialog; the ``● Tool(arg)`` line
-    nearest above it carries the tool name and target.
-    """
+    """Parse a tool-permission dialog, or None if the screen is not one."""
     screen = _strip_ansi(screen)
     if classify(screen) is not PaneScreen.APPROVAL:
         return None
-    # Scope to the active region and take the bottom-most question: the live
-    # dialog is the lowest block, so a "Do you want to …?" an agent quoted higher
-    # in the transcript must not be parsed in place of the real prompt.
     lines = _active_region(screen.splitlines())
-    question_idx: int | None = None
-    question = ""
-    for i, line in enumerate(lines):
-        match = _QUESTION_RE.match(line)
-        if match is not None:
-            question_idx, question = i, match.group(1)
-    if question_idx is None:
+    if (question_idx := _question_index(lines)) is None:
         return None
+    match = _QUESTION_RE.match(lines[question_idx])
+    assert match is not None
+    question = match.group(1)
 
     # Options live between the question and the footer; bounding the slice keeps
     # diff-preview lines like "  1 waypoint-probe" (no dot) and numbered list
@@ -442,14 +582,71 @@ def parse_approval(screen: str) -> ApprovalDialog | None:
         len(lines),
     )
     options = _parse_options(lines[question_idx + 1 : footer_idx])
-    tool_name, target = _extract_tool_target(lines[:question_idx], question)
+    heading, agent, matchable, header, body, extra = _split_dialog(lines[:question_idx])
+    tool_name, target = _read_tool_target(heading, header, body, question)
 
     return ApprovalDialog(
         tool_name=tool_name,
         target=target or None,
         question=question,
         options=options,
+        heading=heading,
+        agent=agent,
+        header=header,
+        body=body,
+        extra=extra,
+        matchable=matchable,
     )
+
+
+def _read_heading(lines: list[str], start: int) -> tuple[str, str | None, int, bool]:
+    """The heading at ``start``, the agent it names, the line after it, and
+    whether it was fully read."""
+    joined = lines[start].strip()
+    for end in range(start + 1, min(start + 3, len(lines)) + 1):
+        if suffixed := _AGENT_SUFFIX_RE.match(joined):
+            return suffixed.group(1), suffixed.group(2), end, True
+        if end < len(lines):
+            # A narrow pane wraps the agent suffix onto the following lines.
+            joined = f"{joined} {lines[end].strip()}"
+    near = " ".join(line.strip() for line in lines[start : start + 3])
+    return lines[start].strip(), None, start + 1, "· from" not in near
+
+
+def _split_dialog(
+    lines: list[str],
+) -> tuple[str | None, str | None, bool, list[str], list[str] | None, list[str]]:
+    """Split the lines above a dialog's question into its parts."""
+    top = next(
+        (i for i in range(len(lines) - 1, -1, -1) if _is_column0_rule(lines[i])),
+        None,
+    )
+    heading: str | None = None
+    agent: str | None = None
+    matchable = False
+    if top is not None:
+        start = next(
+            (i for i in range(top + 1, len(lines)) if lines[i].strip()), len(lines)
+        )
+        if start < len(lines):
+            heading, agent, end, matchable = _read_heading(lines, start)
+            lines = lines[end:]
+    rules = [
+        i for i, line in enumerate(lines) if _DASHED_RULE_RE.fullmatch(line.strip())
+    ]
+    header, body, extra = lines, None, []
+    if len(rules) >= 2:
+        first, last = rules[0], rules[-1]
+        header, body, extra = lines[:first], lines[first + 1 : last], lines[last + 1 :]
+    elif rules and heading is None:
+        # Only the bottom rule is left of a dialog whose top scrolled away.
+        header, body, extra = [], lines[: rules[0]], lines[rules[0] + 1 :]
+    return heading, agent, matchable, _trim(header), body, _trim(extra)
+
+
+def _trim(lines: list[str]) -> list[str]:
+    kept = [i for i, line in enumerate(lines) if line.strip()]
+    return lines[kept[0] : kept[-1] + 1] if kept else []
 
 
 def parse_plan_dialog(screen: str) -> PlanDialog | None:
@@ -494,30 +691,36 @@ def parse_plan_dialog(screen: str) -> PlanDialog | None:
     return PlanDialog(options=options, plan_path=plan_path)
 
 
-# Dialog-body labels Claude renders above the question. These are the reliable
-# source of the tool + target: the `● Tool(arg)` header line is often absent
-# (e.g. a Bash dialog shows a "Running…" spinner there instead), so it is only
-# a fallback.
-_BODY_TOOL_LABELS: dict[str, str] = {
+# Dialog headings that name the tool by themselves.
+_HEADING_TOOLS: dict[str, str] = {
     "Bash command": "Bash",
     "Create file": "Write",
     "Write file": "Write",
+    "Overwrite file": "Write",
     "Edit file": "Edit",
     "Update file": "Edit",
+    "Edit notebook": "NotebookEdit",
+    "Read file": "Read",
+    "Fetch": "WebFetch",
 }
+# The shared "Tool use" heading names its tool in the lines below it.
+_TOOL_USE_HEADING = "Tool use"
+_FILE_QUESTION_RE = re.compile(
+    r"Do you want to (create|overwrite|write to|make this edit to|edit|update)"
+    r" (.+?)\?$"
+)
+_NOTEBOOK_CHANGE_RE = re.compile(r"^\s*(Replace|Insert|Delete) ")
 
 
 def _extract_bash_command(lines: list[str]) -> str | None:
     rules = [
-        i for i, line in enumerate(lines) if re.fullmatch(r"[╌─]{20,}", line.strip())
+        i for i, line in enumerate(lines) if _DASHED_RULE_RE.fullmatch(line.strip())
     ]
     if rules:
         if len(rules) < 2:
             return None
         # Hints and descriptions sit outside the ruled command body.
-        command = "\n".join(
-            re.sub(r"^\s*│", "", line) for line in lines[rules[0] + 1 : rules[1]]
-        )
+        command = "\n".join(unboxed(line) for line in lines[rules[0] + 1 : rules[1]])
         return dedent(command).strip() or None
     if _compact("\n".join(lines)).startswith(
         _compact("Tip: auto mode handles these prompts for you")
@@ -526,37 +729,60 @@ def _extract_bash_command(lines: list[str]) -> str | None:
     return next((line.strip() for line in lines if line.strip()), None)
 
 
-def _extract_tool_target(
-    head_lines: list[str], question: str
+def _joined(lines: list[str]) -> str:
+    return "".join(line.strip() for line in lines)
+
+
+def _read_tool_target(
+    heading: str | None,
+    header: list[str],
+    body: list[str] | None,
+    question: str,
 ) -> tuple[str | None, str | None]:
-    stripped = [line.strip() for line in head_lines]
-
-    # 1. The lowest labelled block is the active dialog.
-    for i in range(len(stripped) - 1, -1, -1):
-        tool = _BODY_TOOL_LABELS.get(stripped[i])
-        if tool is None:
-            continue
-        if tool == "Bash":
-            return tool, _extract_bash_command(head_lines[i + 1 :])
-        return tool, next((s for s in stripped[i + 1 :] if s), None)
-
-    # 2. File operations name the path in the question itself.
-    qmatch = re.match(
-        r"Do you want to (create|write to|edit|update) (.+?)\?$", question
-    )
-    if qmatch is not None:
-        verb = qmatch.group(1)
-        tool = "Write" if verb in {"create", "write to"} else "Edit"
-        return tool, qmatch.group(2)
-
-    # 3. Fallback: the `● Tool(arg)` header line, if present.
-    header_tool: str | None = None
-    header_target: str | None = None
-    for line in head_lines:
-        header = _TOOL_HEADER_RE.match(line)
-        if header is not None:
-            header_tool, header_target = header.group(1), header.group(2)
-    return header_tool, header_target
+    """The tool and target the dialog reads as. Nothing above the dialog is
+    consulted: a call echoed there may be another one."""
+    shown = [*header, *(body or [])]
+    text = "\n".join(line.strip() for line in shown if line.strip())
+    if heading is not None:
+        if skill := _SKILL_HEADING_RE.match(heading):
+            return "Skill", skill.group(1)
+        match _HEADING_TOOLS.get(heading):
+            case "Bash":
+                ruled = ["╌" * _MIN_RULE_WIDTH]
+                lines = header
+                if body is not None:
+                    lines = [*header, *ruled, *body, *ruled]
+                return "Bash", _extract_bash_command(lines)
+            case "Write" | "Edit" as tool:
+                return tool, next((s.strip() for s in header if s.strip()), None)
+            case "NotebookEdit":
+                path = next(
+                    (
+                        i
+                        for i, line in enumerate(header)
+                        if _NOTEBOOK_CHANGE_RE.match(line)
+                    ),
+                    len(header),
+                )
+                return "NotebookEdit", _joined(header[:path])
+            case "Read":
+                call = _joined(body or [])
+                return "Read", call.removeprefix("Read(").removesuffix(")")
+            case "WebFetch":
+                return "WebFetch", text
+        if heading == _TOOL_USE_HEADING:
+            first = _joined(body or [])
+            if first.startswith("Web Search("):
+                return "WebSearch", text
+            if first.startswith("Agent("):
+                return "Agent", text
+            return None, text
+    # File operations name the path in the question itself.
+    if file_question := _FILE_QUESTION_RE.match(question):
+        verb = file_question.group(1)
+        tool = "Write" if verb in {"create", "overwrite", "write to"} else "Edit"
+        return tool, file_question.group(2)
+    return None, text if heading is not None else None
 
 
 def parse_model_selector(screen: str) -> list[DialogOption] | None:

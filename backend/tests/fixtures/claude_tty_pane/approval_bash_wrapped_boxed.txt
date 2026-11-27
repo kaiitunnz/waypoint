@@ -1,0 +1,23 @@
+  probe_wrapped_alpha_beta_gamma_delta_epsilon_zeta_eta_theta_iota_kappa.txt && echo "this is a long probe line that
+  must wrap in the dialog box because it keeps going and going and going past one hundred and twenty columns for sure"
+
+● Bash(touch probe_wrapped_alpha_beta_gamma_delta_epsilon_zeta_eta_theta_iota_kappa.txt && echo "this is a long probe
+      line that must wrap in the dialog box because it…)
+  ⎿  Waiting…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+ Create probe file and echo long line
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ touch probe_wrapped_alpha_beta_gamma_delta_epsilon_zeta_eta_theta_iota_kappa.txt && echo "this is a long probe line
+ │ that must wrap in the dialog box because it keeps going and going and going past one hundred and twenty columns for
+ │ sure"
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /tmp/probe/repo from this project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend

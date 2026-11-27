@@ -11,6 +11,7 @@ import pytest
 from waypoint.backends.claude_tty.pane_dialog import (
     PaneScreen,
     classify,
+    composer_drawn,
     composer_holds_input,
     composer_is_empty,
     composer_ready,
@@ -774,3 +775,197 @@ def test_composer_not_ready_while_booting() -> None:
     # A freshly relaunched pane has no prompt yet; the transport must wait
     # rather than paste into the boot screen.
     assert composer_ready("loading Claude...\nno prompt yet") is False
+
+
+_COMMAND_WRAPPED = (
+    "touch probe_wrapped_alpha_beta_gamma_delta_epsilon_zeta_eta_theta_iota_kappa.txt"
+    ' && echo "this is a long probe line\nthat must wrap in the dialog box because it'
+    " keeps going and going and going past one hundred and twenty columns for\n"
+    'sure"'
+)
+
+
+@pytest.mark.parametrize(
+    "fixture, heading, agent, tool, target",
+    [
+        (
+            "approval_bash_wrapped_boxed.txt",
+            "Bash command",
+            None,
+            "Bash",
+            _COMMAND_WRAPPED,
+        ),
+        (
+            "approval_subagent_bash_decoy.txt",
+            "Bash command",
+            "general-purpose",
+            "Bash",
+            "mkdir -p sub_probe_dir_xyz && echo from-subagent",
+        ),
+        ("approval_overwrite.txt", "Overwrite file", None, "Write", "notes.txt"),
+        ("approval_edit.txt", "Edit file", None, "Edit", "notes.txt"),
+        (
+            "approval_read_wrapped.txt",
+            "Read file",
+            None,
+            "Read",
+            "/tmp/probe/outside/a_folder_name_long_enough_to_force_the_read_dialog_to_"
+            "hard_wrap_the_path_midway_through_it-here/readme_outside.txt",
+        ),
+        (
+            "approval_notebook.txt",
+            "Edit notebook",
+            None,
+            "NotebookEdit",
+            "/tmp/probe/repo/a_notebook_folder_name_that_is_long_enough_to_wrap_the_"
+            "path_across_two_dialog_lines_for_the_test/nb.ipynb",
+        ),
+        ("approval_fetch_subagent.txt", "Fetch", "web-fetch", "WebFetch", None),
+        ("approval_websearch.txt", "Tool use", None, "WebSearch", None),
+        ("approval_agent.txt", "Tool use", None, "Agent", None),
+        ("approval_mcp.txt", "Tool use", None, None, None),
+        (
+            "approval_skill.txt",
+            'Use skill "probe-skill"?',
+            None,
+            "Skill",
+            "probe-skill",
+        ),
+    ],
+)
+def test_parse_dialog_heading_and_pane_reading(
+    fixture: str,
+    heading: str,
+    agent: str | None,
+    tool: str | None,
+    target: str | None,
+) -> None:
+    screen = _load(fixture)
+    assert classify(screen) is PaneScreen.APPROVAL
+    assert shows_blocking_dialog(screen)
+    assert not composer_drawn(screen)
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert (dialog.heading, dialog.agent, dialog.tool_name) == (heading, agent, tool)
+    if target is not None:
+        assert dialog.target == target
+    assert dialog.approve_option is not None and dialog.approve_option.number == 1
+    assert dialog.decline_option is not None
+
+
+def test_pane_reading_never_names_a_call_above_the_dialog() -> None:
+    screen = _load("approval_subagent_bash_decoy.txt").replace(
+        " mkdir -p sub_probe_dir_xyz && echo from-subagent\n", ""
+    )
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert "sleep 60" not in (dialog.target or "")
+
+
+def test_footerless_fetch_dialog_is_an_approval() -> None:
+    screen = _load("approval_fetch_subagent.txt")
+    assert "Esc to cancel" not in screen
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert dialog.question == "Do you want to allow Claude to fetch this content?"
+    assert dialog.decline_option is not None and dialog.decline_option.number == 3
+
+
+def test_identity_ignores_the_highlight_but_not_the_spacing() -> None:
+    screen = _load("approval_bash_wrapped_boxed.txt")
+    original = parse_approval(screen)
+    moved = parse_approval(
+        screen.replace(" ❯ 1. Yes", "   1. Yes").replace("   4. No", " ❯ 4. No")
+    )
+    spaced = parse_approval(screen.replace("alpha_beta", "alpha _beta"))
+    assert original is not None and moved is not None and spaced is not None
+    assert original.identity == moved.identity
+    assert original.identity != spaced.identity
+
+
+@pytest.mark.parametrize(
+    "wrapped",
+    [
+        " Bash command\n · from the general-purpose agent",
+        " Bash command · from the\n general-purpose agent",
+        " Bash command · from the general-purpose\n agent",
+    ],
+)
+def test_wrapped_agent_suffix_is_rejoined(wrapped: str) -> None:
+    screen = _load("approval_subagent_bash_decoy.txt").replace(
+        " Bash command · from the general-purpose agent", wrapped
+    )
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert (dialog.heading, dialog.agent, dialog.matchable) == (
+        "Bash command",
+        "general-purpose",
+        True,
+    )
+
+
+def test_unreadable_agent_suffix_is_not_matchable() -> None:
+    screen = _load("approval_subagent_bash_decoy.txt").replace(
+        " Bash command · from the general-purpose agent", " Bash command · from the"
+    )
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert not dialog.matchable
+
+
+def test_stale_composer_above_a_popup_is_not_a_composer() -> None:
+    rule = "─" * 60
+    screen = f"{rule}\n❯ \n{rule}\n\n{rule}\n Pick one\n\n ❯ 1. This\n   2. That\n"
+    assert not composer_drawn(screen)
+    assert shows_blocking_dialog(screen)
+
+
+def test_queued_message_under_the_fetch_dialog_keeps_it_live() -> None:
+    screen = _load("approval_fetch_subagent.txt") + "\n  ❯ queued message\n"
+    assert classify(screen) is PaneScreen.APPROVAL
+
+
+@pytest.mark.parametrize(
+    "fixture, drawn",
+    [
+        ("ready.txt", True),
+        ("slash_menu.txt", True),
+        ("composer_quotes_dialog.txt", True),
+        ("approval_quoted_in_transcript.txt", True),
+        ("approval_write.txt", False),
+        ("approval_with_queued.txt", False),
+        ("plan_approval.txt", False),
+        ("question_dialog.txt", False),
+        ("trust_dialog.txt", False),
+        ("model_selector.txt", False),
+        ("effort_popup.txt", False),
+    ],
+)
+def test_composer_drawn(fixture: str, drawn: bool) -> None:
+    assert composer_drawn(_load(fixture)) is drawn
+
+
+def test_composer_border_may_carry_a_label() -> None:
+    rule = "─" * 40
+    assert composer_drawn(f"● done\n\n{rule} my-session ──\n❯ \n{rule}\n  hints")
+    assert composer_drawn(f"{rule}\n! ls\n{rule}\n  ! for shell mode")
+
+
+@pytest.mark.parametrize(
+    "popup",
+    [
+        " What do you want to do?\n\n ❯ 1. Stop and wait\n   2. Switch plan\n",
+        " Resume from summary?\n\n ❯ Resume from summary\n   Start over\n\n"
+        " Enter to confirm · Esc to cancel\n",
+    ],
+)
+def test_unrecognized_popup_blocks_typing(popup: str) -> None:
+    screen = "❯ earlier prompt\n\n● Done.\n\n" + "─" * 100 + "\n" + popup
+    assert classify(screen) is PaneScreen.OTHER
+    assert shows_blocking_dialog(screen)
+
+
+def test_booting_pane_is_neither_ready_nor_blocked() -> None:
+    screen = "\n  Claude Code is starting…\n"
+    assert not composer_drawn(screen)
+    assert not shows_blocking_dialog(screen)

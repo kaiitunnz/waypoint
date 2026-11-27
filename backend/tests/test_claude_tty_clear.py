@@ -179,6 +179,15 @@ def test_local_successor_missing_or_ambiguous(tmp_path: Path) -> None:
     assert src.find_clear_successor(PARENT, 60) is None
 
 
+def test_local_successor_found_in_another_project_folder(tmp_path: Path) -> None:
+    # The session moved (a worktree) after the source's folder was derived.
+    moved = tmp_path / "projects" / encode_project_dir(f"{CWD}/.claude/worktrees/w")
+    moved.mkdir(parents=True)
+    _write(moved / f"{CHILD}.jsonl", _header(CHILD, PARENT))
+    src = LocalTranscriptByteSource(CWD, PARENT, str(tmp_path))
+    assert src.find_clear_successor(PARENT, 60) == CHILD
+
+
 def test_remote_successor_searches_config_root() -> None:
     runtime = MagicMock()
     runtime.storage.get_session.return_value = _session()

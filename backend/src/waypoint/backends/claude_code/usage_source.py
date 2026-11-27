@@ -18,7 +18,7 @@ from waypoint.backends.claude_code.models import (
     ClaudeContextWindowResolver,
     claude_context_window_for_model,
 )
-from waypoint.backends.claude_tty.tailer import transcript_path
+from waypoint.backends.claude_tty.byte_source import LocalTranscriptByteSource
 from waypoint.backends.context_usage_source import ContextUsageSource
 
 if TYPE_CHECKING:
@@ -44,7 +44,7 @@ class TranscriptContextUsageSource(ContextUsageSource):
         ),
     ) -> None:
         self._session_id = session_id
-        self._path = transcript_path(cwd, session_uuid, config_dir)
+        self._source = LocalTranscriptByteSource(cwd, session_uuid, config_dir)
         self._runtime = runtime
         self._context_window_resolver = context_window_resolver
         self._offset = 0
@@ -53,14 +53,7 @@ class TranscriptContextUsageSource(ContextUsageSource):
         ) = None
 
     def _read_new_bytes(self) -> bytes:
-        if not self._path.exists():
-            return b""
-        try:
-            with self._path.open("rb") as fh:
-                fh.seek(self._offset)
-                return fh.read()
-        except OSError:
-            return b""
+        return self._source.read_from(self._offset).data
 
     async def _drain(self) -> None:
         data = await asyncio.to_thread(self._read_new_bytes)

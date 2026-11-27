@@ -46,14 +46,9 @@ const TOOL_BADGES: Record<string, ToolBadge> = {
 
 // MCP and app-plugin tools arrive namespaced (``mcp__server__tool``,
 // ``server:tool``); there is an open-ended set of them, so they are badged
-// generically with the readable ``server·tool`` tail as the label.
+// generically.
 function isPluginToolName(toolName: string): boolean {
   return toolName.includes("__") || toolName.includes(":");
-}
-
-function prettyPluginName(toolName: string): string {
-  const stripped = toolName.startsWith("mcp__") ? toolName.slice(5) : toolName;
-  return stripped.replace(/__/g, "·").replace(/:/g, "·");
 }
 
 export interface ToolNameParts {
@@ -66,6 +61,11 @@ export function toolNameParts(name: string): ToolNameParts {
   return parts ? { server: parts[1], tool: parts[2] } : { server: null, tool: name };
 }
 
+export function toolDisplayName(name: string): string {
+  const { server, tool } = toolNameParts(name);
+  return server ? `${server} · ${tool}` : tool;
+}
+
 export function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
   if (!toolName) {
     return { glyph: "→", variant: "default", label: "tool" };
@@ -75,7 +75,7 @@ export function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
     return known;
   }
   if (isPluginToolName(toolName)) {
-    return { glyph: "⧉", variant: "mcp", label: prettyPluginName(toolName) };
+    return { glyph: "⧉", variant: "mcp", label: toolDisplayName(toolName) };
   }
   // Unlisted tools stay neutral by design: badging harness plumbing (waits,
   // polling, mode toggles) would add glare, not signal.

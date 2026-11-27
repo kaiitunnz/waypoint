@@ -1,5 +1,5 @@
 import { asRecord, FILE_EDIT_TOOLS, normalizeToolName, readToolName, toolFilePath } from "./events";
-import { commandForEvent, toolNameParts } from "./session/toolPresentation";
+import { commandForEvent, toolDisplayName } from "./session/toolPresentation";
 import { isWorkingStatus } from "./sessionPresentation";
 import { readTodoEntries, summarizeTodos } from "./todos";
 import type { EventRecord, SessionStatus } from "./types";
@@ -44,11 +44,6 @@ function baseName(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
 
-function pluginName(tool: string): string {
-  const { server, tool: name } = toolNameParts(tool);
-  return server ? `${server} · ${name}` : name;
-}
-
 // "Running" with `npm run lint`, "Editing" with `runtime.py`.
 export function describeStep(event: EventRecord): Step | null {
   const tool = normalizeToolName(readToolName(event));
@@ -68,7 +63,7 @@ export function describeStep(event: EventRecord): Step | null {
           ? "Searching the web"
           : tool === "TodoWrite"
             ? "Updating the task list"
-            : tool && pluginName(tool);
+            : tool && toolDisplayName(tool);
   return plain ? { verb: plain, subject: null } : null;
 }
 

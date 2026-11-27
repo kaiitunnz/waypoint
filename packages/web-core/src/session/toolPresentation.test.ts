@@ -9,6 +9,7 @@ import {
   isFileEditToolName,
   previewForToolEvent,
   toolBadgeFor,
+  toolDisplayName,
   toolNameParts,
   toolPairAttachments,
 } from "./toolPresentation";
@@ -29,7 +30,7 @@ describe("toolBadgeFor", () => {
   });
 
   it("shortens MCP and plugin tool names", () => {
-    expect(toolBadgeFor("mcp__lumid__xp_ask")).toEqual({ glyph: "⧉", variant: "mcp", label: "lumid·xp_ask" });
+    expect(toolBadgeFor("mcp__lumid__xp_ask")).toEqual({ glyph: "⧉", variant: "mcp", label: "lumid · xp_ask" });
     expect(toolBadgeFor("server:tool").variant).toBe("mcp");
     expect(toolBadgeFor("Bash").variant).not.toBe("mcp");
   });
@@ -109,6 +110,13 @@ describe("toolNameParts", () => {
     expect(toolNameParts("mcp__local-notes__lookup_note")).toEqual({ server: "local-notes", tool: "lookup_note" });
     expect(toolNameParts("mcp__claude_ai_Drive__search__files")).toEqual({ server: "claude_ai_Drive", tool: "search__files" });
     expect(toolNameParts("docs:search")).toEqual({ server: "docs", tool: "search" });
+  });
+
+  it("displays one name for a server and its tool", () => {
+    expect(toolDisplayName("mcp__claude_ai_Drive__search__files")).toBe("claude_ai_Drive · search__files");
+    expect(toolDisplayName("docs:search")).toBe("docs · search");
+    expect(toolDisplayName("ListAgents")).toBe("ListAgents");
+    expect(toolBadgeFor("mcp__thing").label).toBe("mcp__thing");
   });
 
   it("leaves any other name whole", () => {

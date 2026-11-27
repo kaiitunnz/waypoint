@@ -1,7 +1,7 @@
 import { itemIdForEvent, readToolName } from "../events";
 import type { EventRecord } from "../types";
 import { isBlankAgentMessage } from "./cardText";
-import { toolBadgeFor } from "./toolPresentation";
+import { toolBadgeFor, toolNameParts } from "./toolPresentation";
 import { pendingCallOf } from "./toolRun";
 import { isStandaloneToolCard, isToolResultDelta, minRawSequence } from "./transcript";
 import { lastRunIndex, runCallsOf, type TranscriptTurn } from "./turns";
@@ -144,7 +144,10 @@ export function workingStep(turns: readonly TranscriptTurn[], events: readonly E
   const call = runningCall(turn);
   if (call) {
     const tool = readToolName(call);
-    return tool ? `Running ${toolBadgeFor(tool).label.toLowerCase()}` : null;
+    if (!tool) return null;
+    const { label } = toolBadgeFor(tool);
+    // A server and its tool keep their case.
+    return `Running ${toolNameParts(tool).server ? label : label.toLowerCase()}`;
   }
   const last = turn.findLast(isTurnContent);
   if (last?.kind === "agent_output" && last.metadata?.item_kind !== "reasoning") return null;

@@ -292,8 +292,7 @@ def test_a_queued_prompt_written_ahead_of_the_marker(
     if sent_since:
         norm.expected_interrupt.supersede()
     events = feed(
-        norm,
-        [human_prompt("next", "queued"), rejection("a"), marker(TOOL_MARKER)],
+        norm, [human_prompt("next", "queued"), rejection("a"), marker(TOOL_MARKER)]
     )
 
     assert [text for text, _ in notes(events)] == noted
@@ -389,6 +388,21 @@ def test_imported_records_that_started_no_turn_set_no_status(
         SessionStatus.RUNNING,
     ]
     assert "status" not in imported[0].metadata
+
+
+def test_an_imported_decline_after_an_answered_question_is_noted() -> None:
+    imported = _imported(
+        [
+            tool_use("q", "AskUserQuestion"),
+            result("q"),
+            tool_use("b"),
+            rejection("b", before_run=True),
+            marker(TOOL_MARKER),
+        ]
+    )
+
+    last = imported[-1]
+    assert (last.text, last.metadata["status"]) == (DECLINED, SessionStatus.IDLE)
 
 
 def test_a_dismissed_question_imports_its_turn_end() -> None:
@@ -695,6 +709,7 @@ SUCCEEDED = {"type": "result", "subtype": "success", "is_error": False}
         (SessionStatus.IDLE, system("status", status=None, compact_result="failed")),
         (SessionStatus.IDLE, {"type": "rate_limit_event"}),
         (SessionStatus.IDLE, {"type": "something_new"}),
+        (SessionStatus.RUNNING, {"type": "something_new"}),
     ],
 )
 async def test_a_record_that_marks_no_boundary_keeps_the_status(

@@ -1,4 +1,3 @@
-/* A section's heading and its count; each list gives the heading its padding. */
 .sectionHead {
   display: flex;
   align-items: baseline;
@@ -62,12 +61,12 @@
   white-space: nowrap;
 }
 
-/* A search match: bright and semibold, heavier where the title already is. */
 .hit {
   font-weight: 600;
   color: var(--text-strong);
 }
 
+/* Heavier than the unread title around it. */
 .unread .hit {
   font-weight: 700;
 }

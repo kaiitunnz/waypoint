@@ -8,11 +8,7 @@ export const SWITCHER_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.switcher"
 export const LIST_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.list";
 
 // Persisted show-exited flag, `shownByDefault` until a choice is made. Every surface using one key
-// agrees wherever they share its storage: the browser's by default.
-export function useShowExitedSessions(
-  storageKey: string,
-  shownByDefault = true,
-  storage?: () => Storage | null,
-): [boolean, (next: boolean) => void] {
-  return useStoredFlag(storageKey, shownByDefault, storage);
+// agrees, in this tab and across tabs.
+export function useShowExitedSessions(storageKey: string, shownByDefault = true): [boolean, (next: boolean) => void] {
+  return useStoredFlag(storageKey, shownByDefault);
 }

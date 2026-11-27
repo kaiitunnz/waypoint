@@ -30,7 +30,7 @@ interface RowProps {
   menu: ReactNode;
 }
 
-interface PreviewProps {
+interface LiveTileProps extends RowProps {
   previews: boolean;
   activity: SessionActivity | null | undefined;
 }
@@ -76,8 +76,6 @@ export function CompactRow({
   );
 }
 
-// A two-line card: title and time, then the lamp, the state and the agent. The
-// preview, when on, adds a line.
 export function LiveTile({
   session,
   lamp,
@@ -87,7 +85,7 @@ export function LiveTile({
   menu,
   previews,
   activity,
-}: RowProps & PreviewProps) {
+}: LiveTileProps) {
   const unread = showsUnread(session);
   return (
     <li className={styles.tileItem}>

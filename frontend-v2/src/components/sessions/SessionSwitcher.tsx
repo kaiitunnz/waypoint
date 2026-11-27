@@ -26,7 +26,7 @@ import { usePointerUI } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
 import { ExitedToggle } from "./ExitedGroup";
-import { MatchedTitle, RailItem, railItemClass, useRailRows } from "./RailItem";
+import { RailItem, railItemClass, useRailRows } from "./RailItem";
 import styles from "./SessionSwitcher.module.css";
 import { EXITED_PAGE_SIZE } from "./useExitedSessions";
 
@@ -135,7 +135,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
             lamp={lamp}
             section={section}
             now={now}
-            title={<MatchedTitle title={session.title} positions={entry.positions} />}
+            positions={entry.positions}
             sub={sub}
           />
         </button>

@@ -11,7 +11,12 @@
   align-self: baseline;
 }
 
-/* Unread, beside the time and never in the lamp column. */
+.pin {
+  display: inline-flex;
+  flex: none;
+  color: var(--faint);
+}
+
 .dot {
   flex: none;
   width: 6px;

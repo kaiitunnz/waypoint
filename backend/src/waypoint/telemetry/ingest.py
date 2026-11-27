@@ -137,7 +137,7 @@ _ACCOUNT_KEY_DIGEST_LENGTH = 8
 def _pseudonymize_account_key(raw_account_key: str) -> str:
     """A stable, non-reversible grouping key for a raw account identity (FR-9).
 
-    ``raw_account_key`` (e.g. ``codex:noppanat@u.nus.edu``, ``claude_code:lumid``)
+    ``raw_account_key`` (e.g. ``codex:person@example.edu``, ``claude_code:lumid``)
     must never reach the store or the API verbatim; only this digest does.
     Stable across process restarts (plain SHA-256, no per-process salt) so the
     same account always groups under the same ``account_key``.

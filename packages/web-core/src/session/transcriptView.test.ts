@@ -43,3 +43,66 @@ describe("docked plan", () => {
     expect(sequences(2)).not.toContain('"sequence":2');
   });
 });
+
+describe("task notification reports", () => {
+  const notification = (sequence: number, callId: string | null, text: string, taskId?: string) =>
+    ev(sequence, "system_note", text, {
+      method: "task_notification",
+      visibility: "detail",
+      task_notification: { version: 1, id: text, kind: "agent", tool_use_id: callId, task_id: taskId },
+    });
+  const launch = (sequence: number, id: string) => [
+    ev(sequence, "tool_call", "", { item_id: id, tool_name: "Agent" }),
+    ev(sequence + 1, "tool_result", "launched", { item_id: id }),
+  ];
+  const reportsOf = (events: ReturnType<typeof ev>[], density: "summary" | "full") => {
+    const reports: Record<string, string | undefined> = {};
+    for (const turn of deriveTranscript(events, density).turns) {
+      if (turn.kind !== "agent") continue;
+      for (const item of turn.items) {
+        for (const leaf of item.kind === "pair" ? [item] : "items" in item ? item.items : []) {
+          if (leaf.kind === "pair") reports[leaf.pair.itemId] = leaf.pair.report?.text;
+        }
+      }
+    }
+    return reports;
+  };
+
+  it("gives a call the latest notification about it, at either density", () => {
+    const events = [
+      ...launch(1, "a"),
+      ...launch(3, "b"),
+      ...launch(5, "c"),
+      notification(7, "a", "first"),
+      notification(8, "a", "second"),
+      notification(9, "c", "stray"),
+    ];
+    for (const density of ["summary", "full"] as const) {
+      expect(reportsOf(events, density)).toEqual({ a: "second", b: undefined, c: "stray" });
+    }
+  });
+
+  it("follows a task to a later notification that names no call", () => {
+    const events = [
+      ...launch(1, "a"),
+      ...launch(3, "b"),
+      notification(5, "a", "interim", "t1"),
+      notification(6, "b", "other", "t2"),
+      notification(7, null, "final", "t1"),
+      notification(8, null, "unknown task", "t3"),
+      notification(9, null, "no task"),
+    ];
+    expect(reportsOf(events, "summary")).toEqual({ a: "final", b: "other" });
+  });
+
+  it("leaves a follow-up's reports to the call that asked for them", () => {
+    const events = [
+      ...launch(1, "a"),
+      notification(3, "a", "first", "t1"),
+      ...launch(4, "send"),
+      notification(6, "send", "second", "t1"),
+      notification(7, null, "third", "t1"),
+    ];
+    expect(reportsOf(events, "summary")).toEqual({ a: "first", send: "third" });
+  });
+});

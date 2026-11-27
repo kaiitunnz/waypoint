@@ -14,17 +14,22 @@ interface ClampedProps {
   // The disclosure's folded label.
   more?: string;
   className?: string;
+  // A box around the content; the disclosure stays outside it.
+  frame?: string;
   children: ReactNode;
 }
 
-export function Clamped({ lines, more, className, children }: ClampedProps) {
+export function Clamped({ lines, more, className, frame, children }: ClampedProps) {
   const [all, setAll] = useState(false);
   const { content, chip } = useClamp<HTMLDivElement>(all);
+  const clamped = (
+    <div className={cx(className, !all && styles.clamped)} style={{ "--lines": lines } as CSSProperties}>
+      <div ref={content}>{children}</div>
+    </div>
+  );
   return (
     <>
-      <div className={cx(className, !all && styles.clamped)} style={{ "--lines": lines } as CSSProperties}>
-        <div ref={content}>{children}</div>
-      </div>
+      {frame ? <div className={frame}>{clamped}</div> : clamped}
       <div ref={chip} className={styles.more}>
         <Disclosure open={all} label={more} onToggle={() => setAll(!all)} />
       </div>

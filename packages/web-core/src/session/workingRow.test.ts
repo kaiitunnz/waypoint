@@ -198,8 +198,14 @@ describe("workingStep", () => {
   });
 
   it("names the latest of the running calls, as its badge reads", () => {
-    const events = [message(1), call(2, "a"), call(3, "b", "mcp__files__search"), reply(4), call(5, "c", "Read"), result(6, "c")];
-    expect(step(events)).toBe("Running files·search");
+    const events = [message(1), call(2, "a"), call(3, "b", "mcp__Drive__search_files"), reply(4), call(5, "c", "Read"), result(6, "c")];
+    expect(step(events)).toBe("Running Drive · search_files");
+  });
+
+  it("does not count a deferred launch as a running call", () => {
+    const launched = result(3, "a", { result_deferred: true });
+    expect(step([message(1), call(2, "a", "Agent"), launched])).toBe("Thinking");
+    expect(step([message(1), call(2, "a", "Agent"), launched, reply(4)])).toBeNull();
   });
 
   it("ignores calls that never record a result", () => {

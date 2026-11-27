@@ -1,5 +1,5 @@
 import { asRecord, FILE_EDIT_TOOLS, normalizeToolName, readToolName, toolFilePath } from "./events";
-import { commandForEvent } from "./session/toolPresentation";
+import { commandForEvent, toolDisplayName } from "./session/toolPresentation";
 import { isWorkingStatus } from "./sessionPresentation";
 import { readTodoEntries, summarizeTodos } from "./todos";
 import type { EventRecord, SessionStatus } from "./types";
@@ -63,7 +63,7 @@ export function describeStep(event: EventRecord): Step | null {
           ? "Searching the web"
           : tool === "TodoWrite"
             ? "Updating the task list"
-            : tool;
+            : tool && toolDisplayName(tool);
   return plain ? { verb: plain, subject: null } : null;
 }
 

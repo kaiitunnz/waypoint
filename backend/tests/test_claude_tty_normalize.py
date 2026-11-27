@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -848,6 +849,26 @@ def test_user_rejected_tool_resolves_session_to_idle() -> None:
     note = next(e for e in events if e.kind == EventKind.SYSTEM_NOTE)
     assert note.status == SessionStatus.IDLE
     assert note.metadata["stop_reason"] == "tool_rejected"
+
+
+@pytest.mark.parametrize(
+    ("tool_use_result", "deferred"),
+    [
+        ({"isAsync": True, "status": "async_launched", "agentId": "a1"}, True),
+        ({"status": "completed", "agentId": "a1"}, False),
+        ("Error: it failed", False),
+        (None, False),
+    ],
+)
+def test_launch_acknowledgement_is_marked_deferred(
+    tool_use_result: Any, deferred: bool
+) -> None:
+    record = _user_record([_tool_result_block("tu9", "launched")])
+    record["toolUseResult"] = tool_use_result
+    [event] = TranscriptNormalizer().process_record(record)
+
+    assert event.kind == EventKind.TOOL_RESULT
+    assert event.metadata.get("result_deferred", False) is deferred
 
 
 # ── AskUserQuestion surfacing ───────────────────────────────────────────────

@@ -542,3 +542,14 @@ async def test_read_local_claude_token_usage_history_reads_full_file(
     assert [r.record_id for r in token_records] == ["msg1", "msg2"]
     assert [r.model for r in token_records] == ["claude-sonnet-4-5", "claude-opus-4-8"]
     assert all(r.effort is None for r in token_records)
+
+
+def test_convert_transcript_records_marks_a_launch_acknowledgement_deferred() -> None:
+    launched = _user_tool_result("tu1", "launched")
+    launched["toolUseResult"] = {"isAsync": True, "status": "async_launched"}
+    finished = _user_tool_result("tu2", "done")
+    finished["toolUseResult"] = {"status": "completed"}
+
+    events = convert_transcript_records("sess-1", [launched, finished])
+
+    assert [e.metadata.get("result_deferred", False) for e in events] == [True, False]

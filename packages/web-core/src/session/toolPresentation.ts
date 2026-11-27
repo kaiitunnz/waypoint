@@ -46,14 +46,24 @@ const TOOL_BADGES: Record<string, ToolBadge> = {
 
 // MCP and app-plugin tools arrive namespaced (``mcp__server__tool``,
 // ``server:tool``); there is an open-ended set of them, so they are badged
-// generically with the readable ``server·tool`` tail as the label.
+// generically.
 function isPluginToolName(toolName: string): boolean {
   return toolName.includes("__") || toolName.includes(":");
 }
 
-function prettyPluginName(toolName: string): string {
-  const stripped = toolName.startsWith("mcp__") ? toolName.slice(5) : toolName;
-  return stripped.replace(/__/g, "·").replace(/:/g, "·");
+export interface ToolNameParts {
+  server: string | null;
+  tool: string;
+}
+
+export function toolNameParts(name: string): ToolNameParts {
+  const parts = /^mcp__(.+?)__(.+)$/.exec(name) ?? /^([^:]+):(.+)$/.exec(name);
+  return parts ? { server: parts[1], tool: parts[2] } : { server: null, tool: name };
+}
+
+export function toolDisplayName(name: string): string {
+  const { server, tool } = toolNameParts(name);
+  return server ? `${server} · ${tool}` : tool;
 }
 
 export function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
@@ -65,7 +75,7 @@ export function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
     return known;
   }
   if (isPluginToolName(toolName)) {
-    return { glyph: "⧉", variant: "mcp", label: prettyPluginName(toolName) };
+    return { glyph: "⧉", variant: "mcp", label: toolDisplayName(toolName) };
   }
   // Unlisted tools stay neutral by design: badging harness plumbing (waits,
   // polling, mode toggles) would add glare, not signal.
@@ -99,6 +109,59 @@ export function toolInputForEvent(event: EventRecord): Record<string, unknown> |
 function startedItem(event: EventRecord): Record<string, unknown> | null {
   const meta = event.metadata as Record<string, unknown> | undefined;
   return asRecord(asRecord(meta?.item)?.item) ?? asRecord(asRecord(meta?.payload)?.item);
+}
+
+// Codex carries an MCP or plugin tool's arguments on its item.
+export function callArgumentsForEvent(event: EventRecord): Record<string, unknown> | null {
+  return toolInputForEvent(event) ?? asRecord(startedItem(event)?.arguments);
+}
+
+export const filledText = (value: unknown): string | null =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
+
+export interface Delegation {
+  prompt: string | null;
+  report: string | null;
+}
+
+export function delegationForEvent(event: EventRecord): Delegation | null {
+  if (event.metadata?.item_type !== "collabAgentToolCall") return null;
+  const item = startedItem(event);
+  const messages = Object.values(asRecord(item?.agentsStates) ?? {}).flatMap(
+    (state) => filledText(asRecord(state)?.message) ?? [],
+  );
+  // Closing a subagent repeats the report the wait gave.
+  const report = readToolName(event) === "closeAgent" ? null : messages.join("\n\n") || null;
+  return { prompt: filledText(item?.prompt), report };
+}
+
+// What a subagent call asks: its prompt, and the kind of subagent where the agent names one.
+export function subagentRequestForEvent(event: EventRecord): { prompt: string | null; agentType: string | null } {
+  const input = toolInputForEvent(event);
+  return {
+    prompt: delegationForEvent(event)?.prompt ?? filledText(input?.prompt),
+    agentType: filledText(input?.subagent_type) ?? filledText(input?.agent),
+  };
+}
+
+const carriesBytes = (block: Record<string, unknown>) => "source" in block || "data" in block || "imageUrl" in block;
+
+// Null leaves the event's own text to show. Media reads as its kind, which keeps its bytes
+// out of the transcript.
+export function resultContentForEvent(event: EventRecord): string | null {
+  const items = startedItem(event)?.contentItems;
+  const content = Array.isArray(items) ? items : asRecord(event.metadata?.payload)?.content;
+  if (!Array.isArray(content)) return null;
+  const blocks = content.flatMap((value) => {
+    const block = asRecord(value);
+    return block ? [block] : [];
+  });
+  if (!Array.isArray(items) && !blocks.some(carriesBytes)) return null;
+  return (
+    blocks
+      .map((block) => (carriesBytes(block) ? `[${block.type}]` : (filledText(block.text) ?? JSON.stringify(block))))
+      .join("\n") || null
+  );
 }
 
 // `/bin/bash -lc "npm run lint"` reads as `npm run lint`.

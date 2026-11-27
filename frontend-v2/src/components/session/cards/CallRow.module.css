@@ -44,6 +44,10 @@
   letter-spacing: -0.01em;
 }
 
+.aside {
+  color: var(--faint);
+}
+
 .status {
   font-size: var(--f-code);
   white-space: nowrap;
@@ -68,6 +72,33 @@
 .out {
   composes: block from "./FoldedText.module.css";
   color: var(--muted);
+}
+
+.caption {
+  margin-bottom: 3px;
+  font-size: var(--f-stamp);
+  color: var(--faint);
+}
+
+/* The machine-text inset, set as prose. */
+.prose {
+  composes: block from "./FoldedText.module.css";
+  font-family: inherit;
+  font-size: inherit;
+  line-height: var(--lh-bubble);
+  white-space: normal;
+  color: var(--text);
+}
+
+/* Markdown's code blocks are --sunken, like this inset. */
+.prose pre {
+  background: var(--plane);
+}
+
+.cut {
+  margin-top: 6px;
+  font-size: var(--f-stamp);
+  color: var(--faint);
 }
 
 .todos {

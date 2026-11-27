@@ -5,16 +5,30 @@ import { formatCallDuration, type CallView } from "@waypoint/web-core/session/to
 import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
+import { Clamped } from "./Clamped";
 import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
 import { CommandText, Lines } from "./CommandText";
 import { FoldedText } from "./FoldedText";
 import { Attachments } from "./Attachments";
+import { Markdown } from "./Markdown";
 import { PathLabel } from "./PathLabel";
 import { TodoItems } from "./TodoItems";
+import { FOLD_LINES } from "./useFold";
+
+function Prose({ caption, text }: { caption: string; text: string }) {
+  return (
+    <>
+      <div className={styles.caption}>{caption}</div>
+      <Clamped lines={FOLD_LINES} frame={styles.prose}>
+        <Markdown text={text} />
+      </Clamped>
+    </>
+  );
+}
 
 export function CallRow({ row }: { row: CallView }) {
-  const { todos } = row;
+  const { todos, reply } = row;
   const command = row.mono && !row.path;
 
   const status =
@@ -39,12 +53,26 @@ export function CallRow({ row }: { row: CallView }) {
         <span className={styles.glyph} role="img" aria-label={row.toolLabel}>
           {row.glyph}
         </span>
-        <div className={styles.subject} title={command || row.path ? undefined : row.title}>
-          {command ? (
+        <div className={styles.subject} title={command || row.path || row.name ? undefined : row.title}>
+          {row.name ? (
+            <div className={styles.text} title={row.title}>
+              {row.name.server ? <span className={styles.aside}>{row.name.server} · </span> : null}
+              {row.name.tool}
+            </div>
+          ) : null}
+          {!row.label ? null : command ? (
             <CommandText text={row.label} />
           ) : (
             <div className={cx(styles.text, row.mono && styles.mono)}>
-              {row.path ? <PathLabel dir={row.path.dir} base={row.path.base} full={row.title} /> : <Lines text={row.label} />}
+              {row.path ? (
+                <PathLabel dir={row.path.dir} base={row.path.base} full={row.title} />
+              ) : row.agentType ? (
+                <>
+                  {row.label} <span className={styles.aside}>{row.agentType}</span>
+                </>
+              ) : (
+                <Lines text={row.label} />
+              )}
             </div>
           )}
         </div>
@@ -56,9 +84,21 @@ export function CallRow({ row }: { row: CallView }) {
           <DiffBlock preview={row.diff} />
         </div>
       ) : null}
-      {row.output ? (
+      {row.prompt ? (
         <div className={styles.inset}>
-          <FoldedText text={row.output} className={styles.out} />
+          <Prose caption="Prompt" text={row.prompt} />
+        </div>
+      ) : null}
+      {reply ? (
+        <div className={styles.inset}>
+          {reply.kind === "report" ? (
+            <Prose caption="Result" text={reply.text} />
+          ) : (
+            <FoldedText text={reply.text} className={styles.out} />
+          )}
+          {reply.cut ? (
+            <div className={styles.cut}>{reply.kind === "report" ? "Preview of a longer report" : "Preview of longer output"}</div>
+          ) : null}
         </div>
       ) : null}
       {row.attachments.length > 0 ? (

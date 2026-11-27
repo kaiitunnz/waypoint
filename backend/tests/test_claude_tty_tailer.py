@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from waypoint.backends.claude_tty.byte_source import TranscriptRead
-from waypoint.backends.claude_tty.tailer import TranscriptTailer, transcript_path
+from waypoint.backends.claude_tty.byte_source import TranscriptRead, transcript_path
+from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.schemas import EventKind, SessionRecord, SessionSource, SessionStatus
 
 
@@ -283,6 +283,10 @@ async def test_start_at_end_skips_history_then_emits_append() -> None:
     source = _ScriptedSource(
         [
             # prime: start-at-end fetches metadata only; body (if any) discarded
+            TranscriptRead(
+                observed=True, data=history, size=len(history), identity=(1, 1)
+            ),
+            # the tail, scanned for an earlier move
             TranscriptRead(
                 observed=True, data=history, size=len(history), identity=(1, 1)
             ),

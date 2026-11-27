@@ -64,6 +64,15 @@ class RemoteRead:
     device: int
     inode: int
 
+    @property
+    def identity(self) -> tuple[int, int]:
+        return (self.device, self.inode)
+
+
+@dataclass(frozen=True)
+class RemoteMissing:
+    """The host answered, and there is no file at the path."""
+
 
 _SCRIPT_BYTES: bytes | None = None
 
@@ -97,7 +106,12 @@ class RemoteTranscriptFilesystem:
         return bool(self._run("exists", path).get("exists", False))
 
     def is_dir(self, path: str) -> bool:
-        return bool(self._run("is_dir", path).get("is_dir", False))
+        return bool(self.probe_dir(path))
+
+    def probe_dir(self, path: str) -> bool | None:
+        """``is_dir``, or ``None`` when the host could not be asked."""
+        result = self._run("is_dir", path)
+        return None if "error" in result else bool(result.get("is_dir"))
 
     def is_symlink(self, path: str) -> bool:
         return bool(self._run("is_symlink", path).get("is_symlink", False))
@@ -129,16 +143,21 @@ class RemoteTranscriptFilesystem:
             return []
         return [item for item in ids if isinstance(item, str)]
 
-    def read_range(self, path: str, offset: int, limit: int) -> RemoteRead | None:
+    def read_range(
+        self, path: str, offset: int, limit: int
+    ) -> RemoteRead | RemoteMissing | None:
         """Read up to ``limit`` bytes of ``path`` starting at ``offset``.
 
-        Read-only and never raises: any failure — transport, malformed payload,
-        undecodable base64 — degrades to ``None`` (an unavailable read). A live
+        Read-only and never raises. A missing file is ``RemoteMissing``; any
+        failure — transport, malformed payload, undecodable base64 — degrades
+        to ``None`` (an unavailable read). A live
         transcript tailer polls this on a background loop, so a raised exception
         would kill the loop; ``None`` lets it retry with backoff instead. The
         decoded payload is capped to ``limit`` defensively.
         """
         result = self._run("read_range", path, str(offset), str(limit))
+        if result.get("missing"):
+            return RemoteMissing()
         if "error" in result:
             return None
         size = result.get("size")

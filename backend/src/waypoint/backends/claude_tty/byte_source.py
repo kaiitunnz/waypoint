@@ -7,6 +7,11 @@ SSH launch target reads it over the existing ``RemoteTranscriptFilesystem``
 seam — discovering the file by the Claude thread-artifact glob (never by
 encoding a possibly non-canonical remote cwd) and reading bounded byte ranges.
 
+Claude renames a transcript into another project folder when the session's
+working folder changes (a worktree, ``/cd``). When the file at the last known
+path is missing or replaced, a source finds it again by thread id. A moved file
+keeps its identity, so the tailer's offset stays valid.
+
 Every read returns a :class:`TranscriptRead`. ``observed=False`` means "nothing
 actionable this tick" — a pre-first-turn missing file, an unresolved remote
 glob, a throttled poll, or a transport error backing off; the tailer does
@@ -18,17 +23,25 @@ modes degrade to an unobserved read that retries with backoff.
 """
 
 import logging
+import os
 import posixpath
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from waypoint.backends.claude_code.session_folder import launch_folder
 from waypoint.backends.claude_code.threads import (
     UUID_RE,
     claude_projects_root,
     encode_project_dir,
+    local_claude_thread_artifacts,
 )
-from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
+from waypoint.backends.transcript_fs_remote import (
+    RemoteMissing,
+    RemoteRead,
+    RemoteTranscriptFilesystem,
+)
 from waypoint.backends.transcript_fs_remote_script import find_clear_successors
 from waypoint.launch_targets import SshLaunchTargetConfig
 
@@ -39,12 +52,46 @@ log = logging.getLogger("waypoint.backends.claude_tty")
 
 _STEADY_INTERVAL = 1.0  # seconds between remote reads at steady state
 _MAX_BACKOFF = 10.0  # cap on the exponential error backoff
-_READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
+READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
+# Seconds before a local search that found nothing is first repeated.
+_SEARCH_BACKOFF = 1.0
+# Cap on that wait, which doubles.
+_MAX_SEARCH_BACKOFF = 10.0
 
 
 def _single(ids: list[str]) -> str | None:
     # Several successors of one thread are ambiguous; follow none.
     return ids[0] if len(ids) == 1 else None
+
+
+def _pick_moved[T](
+    candidates: list[T],
+    identity: tuple[int, int] | None,
+    identity_of: Callable[[T], tuple[int, int] | None],
+) -> T | None:
+    """The candidate holding the transcript last read: the only one there is,
+    else the one with its file identity."""
+    if len(candidates) == 1:
+        return candidates[0]
+    if identity is None:
+        return None
+    return next((c for c in candidates if identity_of(c) == identity), None)
+
+
+def _stat(path: Path) -> os.stat_result | None:
+    try:
+        return path.stat()
+    except OSError:
+        return None
+
+
+def _stat_identity(st: os.stat_result) -> tuple[int, int]:
+    return (st.st_dev, st.st_ino)
+
+
+def _path_identity(path: Path) -> tuple[int, int] | None:
+    st = _stat(path)
+    return None if st is None else _stat_identity(st)
 
 
 def resolve_remote_config_root(
@@ -83,6 +130,23 @@ def transcript_path(cwd: str, session_uuid: str, config_dir: str | None = None) 
     )
 
 
+def find_local_transcript(
+    cwd: str, thread_id: str, config_dir: str | None
+) -> Path | None:
+    """The transcript where ``cwd`` puts it, else the only one named after
+    ``thread_id`` in any project folder."""
+    path = transcript_path(cwd, thread_id, config_dir)
+    if _stat(path) is not None:
+        return path
+    candidates = local_claude_thread_artifacts(thread_id, config_dir)
+    if len(candidates) > 1:
+        log.warning(
+            "multiple transcripts matched one thread", extra={"thread_id": thread_id}
+        )
+        return None
+    return candidates[0] if candidates else None
+
+
 class TranscriptRead:
     """The result of one poll of a transcript byte source.
 
@@ -114,8 +178,8 @@ class TranscriptByteSource(Protocol):
         """Read from ``offset``.
 
         ``metadata_only`` asks for size + identity without fetching the body
-        (start-at-end priming). ``force`` bypasses a source's poll-cadence gate
-        (used by the tailer's terminal drain on session exit).
+        (start-at-end priming). ``force`` bypasses a source's poll cadence or
+        search backoff.
         """
         ...
 
@@ -134,36 +198,89 @@ class LocalTranscriptByteSource:
 
     def __init__(self, cwd: str, thread_id: str, config_dir: str | None) -> None:
         self._path = transcript_path(cwd, thread_id, config_dir)
+        self._cwd = cwd
+        self._thread_id = thread_id
+        self._config_dir = config_dir
+        self._identity: tuple[int, int] | None = None  # of the file last read
+        # Monotonic time before which a miss does not search again.
+        self._next_search_at = 0.0
+        # Backoff after an empty search, which scans every project folder.
+        self._search_delay = 0.0
 
     def read_from(
         self, offset: int, *, metadata_only: bool = False, force: bool = False
     ) -> TranscriptRead:
-        try:
-            st = self._path.stat()
-        except OSError:
+        st = self._locate(force)
+        if st is None:
             # Missing before the first turn (or a transient stat error): keep
-            # polling without disturbing the cursor. ``force`` is a no-op — a
-            # local read is already unthrottled.
+            # polling without disturbing the cursor.
             return TranscriptRead(observed=False)
-        identity = (st.st_dev, st.st_ino)
         if metadata_only:
-            return TranscriptRead(observed=True, size=st.st_size, identity=identity)
+            self._identity = _stat_identity(st)
+            return TranscriptRead(
+                observed=True, size=st.st_size, identity=self._identity
+            )
         try:
             with self._path.open("rb") as fh:
+                opened = os.fstat(fh.fileno())
+                if (identity := _stat_identity(opened)) != _stat_identity(st):
+                    # Renamed and reused since the stat: locate it again.
+                    return TranscriptRead(observed=False)
                 fh.seek(offset)
                 data = fh.read()
         except OSError:
             return TranscriptRead(observed=False)
+        self._identity = identity
         return TranscriptRead(
-            observed=True, data=data, size=st.st_size, identity=identity
+            observed=True, data=data, size=opened.st_size, identity=identity
         )
+
+    def _locate(self, force: bool) -> os.stat_result | None:
+        """Stat the transcript, searching for it when the known path lost it.
+
+        A different file at that path is returned when the transcript last read
+        is nowhere else, for the tailer to treat as a replacement.
+        """
+        st = _stat(self._path)
+        replaced = st is not None and self._identity not in (None, _stat_identity(st))
+        if st is not None and not replaced:
+            self._next_search_at = self._search_delay = 0.0
+            return st
+        if not (replaced or force or time.monotonic() >= self._next_search_at):
+            return None
+        if (moved := self._search()) is None:
+            self._search_delay = min(
+                max(self._search_delay * 2, _SEARCH_BACKOFF), _MAX_SEARCH_BACKOFF
+            )
+            self._next_search_at = time.monotonic() + self._search_delay
+            return st
+        self._path = moved
+        return _stat(moved)
+
+    def _search(self) -> Path | None:
+        try:
+            if self._identity is None:
+                return find_local_transcript(
+                    self._cwd, self._thread_id, self._config_dir
+                )
+            candidates = local_claude_thread_artifacts(
+                self._thread_id, self._config_dir
+            )
+        except OSError:
+            return None
+        return _pick_moved(candidates, self._identity, _path_identity)
 
     def find_clear_successor(
         self, parent_thread_id: str, max_age_seconds: float
     ) -> str | None:
+        # Every project folder: the session may have changed folder since the
+        # parent transcript's path was derived.
         return _single(
             find_clear_successors(
-                str(self._path.parent), "*.jsonl", parent_thread_id, max_age_seconds
+                str(claude_projects_root(self._config_dir)),
+                "*/*.jsonl",
+                parent_thread_id,
+                max_age_seconds,
             )
         )
 
@@ -171,9 +288,10 @@ class LocalTranscriptByteSource:
 class RemoteClaudeTranscriptByteSource:
     """Reads a remote Claude transcript over the SSH filesystem seam.
 
-    Discovers the transcript once by the Claude thread-artifact glob
+    Discovers the transcript by the Claude thread-artifact glob
     (``projects/*/<uuid>.jsonl``) under the session's config-dir root, then
-    services each poll with a bounded ``read_range``. Throttles to a
+    services each poll with a bounded ``read_range``, globbing again only when
+    the file at the path is missing or changes. Throttles to a
     steady-state cadence and backs off exponentially on error; the tailer loop
     keeps ticking for its own pane/dialog work while this source no-ops between
     reads, so SSH stays to roughly one request per second per active tailer.
@@ -194,6 +312,7 @@ class RemoteClaudeTranscriptByteSource:
         self._launch_target_id = launch_target.id
         self._config_dir = config_dir
         self._path: str | None = None
+        self._identity: tuple[int, int] | None = None
         self._config_root: str | None = None
         self._next_read_at = 0.0  # monotonic deadline; 0 = read immediately
         self._backoff = _STEADY_INTERVAL
@@ -219,13 +338,12 @@ class RemoteClaudeTranscriptByteSource:
     ) -> str | None:
         # A ``/clear`` before the first turn names a parent never written, so
         # there is no parent file to find the project dir from: scan them all.
-        session = self._runtime.storage.get_session(self._session_id)
-        if session is None:
-            return None
         try:
-            root = self._resolved_config_root(session.cwd)
+            root = self._resolved_config_root()
         except Exception:
             self._warn_once("clear-lookup", "remote /clear successor lookup failed")
+            return None
+        if root is None:
             return None
         return _single(
             self._fs.find_clear_successors(
@@ -242,41 +360,55 @@ class RemoteClaudeTranscriptByteSource:
                 self._schedule(error=False)
                 return TranscriptRead(observed=False)
             self._path = resolved
-        limit = 0 if metadata_only else _READ_LIMIT
+        limit = 0 if metadata_only else READ_LIMIT
         read = self._fs.read_range(self._path, offset, limit)
-        if read is None:
+        replaced = isinstance(read, RemoteRead) and self._identity not in (
+            None,
+            read.identity,
+        )
+        if replaced or isinstance(read, RemoteMissing):
+            moved = self._resolve()
+            if moved is not None and moved != self._path:
+                self._path = moved
+                read = self._fs.read_range(moved, offset, limit)
+        if not isinstance(read, RemoteRead):
             self._schedule(error=True)
             self._warn_once("read-error", "remote transcript read failed")
             return TranscriptRead(observed=False)
         self._schedule(error=False)
+        self._identity = read.identity
         return TranscriptRead(
-            observed=True,
-            data=read.data,
-            size=read.size,
-            identity=(read.device, read.inode),
+            observed=True, data=read.data, size=read.size, identity=self._identity
         )
 
     def _resolve(self) -> str | None:
-        session = self._runtime.storage.get_session(self._session_id)
-        if session is None or not UUID_RE.match(self._thread_id):
+        if not UUID_RE.match(self._thread_id):
             return None
-        config_root = self._resolved_config_root(session.cwd)
+        if (config_root := self._resolved_config_root()) is None:
+            return None
         matches = self._fs.glob(config_root, f"projects/*/{self._thread_id}.jsonl")
         if not matches:
             return None
-        if len(matches) > 1:
+        found = _pick_moved(matches, self._identity, self._remote_identity)
+        if found is None:
             # A UUID is unique under projects/; more than one match is
             # ambiguous — refuse to pick rather than tail an arbitrary file.
             self._warn_once("multi-match", "multiple transcripts matched one thread")
-            return None
-        return matches[0]
+        return found
 
-    def _resolved_config_root(self, cwd: str) -> str:
-        if self._config_root is not None:
-            return self._config_root
-        root = resolve_remote_config_root(self._config_dir, cwd, self._fs)
-        self._config_root = root
-        return root
+    def _remote_identity(self, path: str) -> tuple[int, int] | None:
+        read = self._fs.read_range(path, 0, 0)
+        return read.identity if isinstance(read, RemoteRead) else None
+
+    def _resolved_config_root(self) -> str | None:
+        if self._config_root is None:
+            session = self._runtime.storage.get_session(self._session_id)
+            if session is None:
+                return None
+            self._config_root = resolve_remote_config_root(
+                self._config_dir, launch_folder(session), self._fs
+            )
+        return self._config_root
 
     def _schedule(self, *, error: bool) -> None:
         self._backoff = (

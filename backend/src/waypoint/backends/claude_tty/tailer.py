@@ -28,12 +28,10 @@ from waypoint.backends.claude_code.models import (
     observe_claude_model,
 )
 from waypoint.backends.claude_code.normalize import format_approval_text
+from waypoint.backends.claude_code.session_folder import follow_relocation
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval
-from waypoint.backends.claude_tty.byte_source import (
-    TranscriptByteSource,
-    transcript_path,
-)
+from waypoint.backends.claude_tty.byte_source import READ_LIMIT, TranscriptByteSource
 from waypoint.backends.claude_tty.normalize import (
     SYNTHETIC_MODEL_ID,
     TranscriptNormalizer,
@@ -51,10 +49,6 @@ if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
 
 log = logging.getLogger("waypoint.backends.claude_tty")
-
-# ``transcript_path`` moved to ``byte_source`` (where the local source uses it);
-# re-exported here for callers/tests that still import it from the tailer.
-__all__ = ["TranscriptTailer", "transcript_path"]
 
 _POLL_INTERVAL = 0.5  # seconds between transcript polls
 _PANE_CHECK_INTERVAL = 10.0  # seconds between tmux pane liveness checks
@@ -77,6 +71,18 @@ _EXPIRED_NOTE = "Pending approval expired"
 # Protective cap on the unparsed trailing buffer: a JSONL record that never
 # completes past this size is dropped rather than grown without bound.
 _MAX_PARTIAL_BYTES = 8 * 1024 * 1024
+# The CLI re-appends ``relocated`` about every 32 KB it writes, so the tail of an
+# existing transcript holds the latest one. One remote read covers it.
+_RELOCATION_TAIL_BYTES = READ_LIMIT
+
+
+def _relocated_folder(record: dict[str, Any]) -> str | None:
+    """The folder Claude says it moved the transcript to. The other records'
+    ``cwd`` also follows a shell ``cd``, which moves nothing."""
+    folder = record.get("relocatedCwd")
+    if record.get("type") != "relocated" or not isinstance(folder, str):
+        return None
+    return folder or None
 
 
 class TranscriptTailer:
@@ -155,9 +161,7 @@ class TranscriptTailer:
         self._stop_requested = True
 
     async def _drain(self, *, force: bool = False) -> None:
-        # The priming tick fetches size + identity only (no body) so start-at-end
-        # never downloads history; ``force`` bypasses a remote source's poll
-        # cadence (terminal drain on exit).
+        # The priming tick fetches size + identity only (no body).
         metadata_only = self._start_at_end and not self._primed
         read = await asyncio.to_thread(
             self._source.read_from,
@@ -169,7 +173,7 @@ class TranscriptTailer:
             return
 
         # First observation: record identity and, for start-at-end, jump to the
-        # current end without parsing (records already on disk are in the DB).
+        # current end without emitting (records already on disk are in the DB).
         # This is correct regardless of whether the source resolved at
         # construction time, so a transient boot-time miss never replays history.
         if not self._primed:
@@ -178,6 +182,7 @@ class TranscriptTailer:
             if self._start_at_end:
                 self._fetch_offset = read.size or 0
                 self._partial = b""
+                await self._follow_earlier_move(self._fetch_offset)
                 return
 
         # Truncation (size shrank below the cursor) or replacement (file identity
@@ -225,6 +230,7 @@ class TranscriptTailer:
             )
             self._partial = b""
 
+        relocated: str | None = None
         for raw_line in lines:
             line = raw_line.strip()
             if not line:
@@ -237,6 +243,7 @@ class TranscriptTailer:
                     extra={"session_id": self._session_id, "line": raw_line[:200]},
                 )
                 continue
+            relocated = _relocated_folder(record) or relocated
             if record.get("type") == "assistant":
                 # Before the normalizer, so the divider precedes the new-model turn.
                 await self._maybe_observe_model(record)
@@ -255,6 +262,27 @@ class TranscriptTailer:
                 )
             if record.get("type") == "assistant":
                 await self._maybe_publish_context_usage(record)
+        # After the records: the offset is past them, so a restart during the
+        # follow would drop any not yet emitted.
+        if relocated is not None:
+            await follow_relocation(self._runtime, self._session_id, relocated)
+
+    async def _follow_earlier_move(self, end: int) -> None:
+        """Follow a move made before this tailer started, as after a restart or
+        reattach."""
+        read = await asyncio.to_thread(
+            self._source.read_from, max(0, end - _RELOCATION_TAIL_BYTES), force=True
+        )
+        for line in reversed(read.data.split(b"\n")):
+            if b'"relocated"' not in line:
+                continue
+            try:
+                record: dict[str, Any] = json.loads(line)
+            except ValueError:  # a window cut inside a character or record
+                continue
+            if folder := _relocated_folder(record):
+                await follow_relocation(self._runtime, self._session_id, folder)
+                return
 
     async def _maybe_observe_model(self, record: dict[str, Any]) -> None:
         """Record a real assistant reply's model, adopt it into the selection

@@ -851,6 +851,14 @@ moves the session's `thread_id` and tailer onto it. A `/clear` typed into the
 attached pane, or still queued behind a turn when the lookup ends, is not
 followed.
 
+Claude moves a session's transcript into another project folder when the
+session changes its working folder (`EnterWorktree`, `ExitWorktree`, `/cd`) and
+writes a `relocated` record. The transport finds the moved transcript by thread
+id, and the session's `cwd`, repo name and branch follow the recorded folder, so
+relaunches, forks and side questions start there, or in the folder the session
+was created in if that one has been removed. An SSH session keeps its repo name,
+and its branch is cleared on a move. The assistant session keeps its workspace folder.
+
 `AskUserQuestion` needs special handling because the TUI withholds the
 tool_use record from the transcript until the popup is resolved, so the
 question is invisible to the tailer while it blocks the turn. The dialog

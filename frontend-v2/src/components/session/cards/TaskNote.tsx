@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import type { TaskNotificationView } from "@waypoint/web-core/events";
 import { useReportPreview } from "@waypoint/web-core/hooks/useReportPreview";
-import { TASK_NOTIFICATION_BADGES, taskStatusLamp } from "@waypoint/web-core/session/taskNotificationView";
+import { TASK_NOTIFICATION_BADGES, TASK_NOTIFICATION_FAMILIES, taskStatusLamp } from "@waypoint/web-core/session/taskNotificationView";
 import { taskNoteBody, taskNoteReport, type ReportPreviewState } from "@waypoint/web-core/session/taskNoteBody";
 import type { EventRecord } from "@waypoint/web-core/types";
 
@@ -16,6 +16,7 @@ import { Attachments } from "./Attachments";
 import { EventTime } from "./EventTime";
 import { FoldedText } from "./FoldedText";
 import styles from "./TaskNote.module.css";
+import { ToolGlyph } from "./ToolGlyph";
 
 function ReportPreview({ state }: { state: ReportPreviewState | null }) {
   if (!state || state.status === "loading") return <p className={styles.caption}>Loading report…</p>;
@@ -52,9 +53,13 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
 
   const header = (
     <>
-      <span className={styles.glyph} role="img" aria-label={badge.label}>
-        {badge.glyph}
-      </span>
+      <ToolGlyph
+        className={styles.glyph}
+        glyph={badge.glyph}
+        family={TASK_NOTIFICATION_FAMILIES[view.kind]}
+        role="img"
+        aria-label={badge.label}
+      />
       <span className={styles.headline}>{headline}</span>
       {lamp ? <span className={cx(styles.status, styles[lamp.tone])}>{lamp.label}</span> : null}
       <EventTime ts={event.ts} className={styles.time} />

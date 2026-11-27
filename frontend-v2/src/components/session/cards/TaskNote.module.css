@@ -21,7 +21,6 @@
 .glyph {
   flex: none;
   font-weight: 400;
-  color: var(--faint);
 }
 
 .headline {
@@ -104,4 +103,16 @@
 /* The header is a button only when the note opens. */
 .tap {
   composes: hit from "../../../styles/hit.module.css";
+}
+
+/* A focused, hovered or open note lights its glyph, as a run line does. */
+.tap:focus-visible,
+.tap[aria-expanded="true"] {
+  --lit: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tap:hover {
+    --lit: 1;
+  }
 }

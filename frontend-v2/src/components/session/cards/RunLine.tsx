@@ -9,6 +9,7 @@ import { cx } from "@/lib/cx";
 import { usePointerUI } from "@/lib/layout";
 
 import styles from "./RunLine.module.css";
+import { ToolGlyph } from "./ToolGlyph";
 
 interface RunLineProps {
   phrase: ReactNode;
@@ -55,7 +56,7 @@ export function RunLine({ phrase, glyphs = [], defaultOpen = false, live, asked,
         <span className={styles.glyphs}>
           {glyphs.map((entry) => (
             <span key={entry.glyph} role="img" aria-label={counted(entry)} title={counted(entry)}>
-              {entry.glyph} {entry.count}
+              <ToolGlyph glyph={entry.glyph} family={entry.family} /> {entry.count}
             </span>
           ))}
         </span>

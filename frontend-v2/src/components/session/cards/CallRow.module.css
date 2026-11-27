@@ -20,7 +20,6 @@
 .glyph {
   font-family: var(--mono);
   font-size: var(--f-stamp);
-  color: var(--faint);
   text-align: center;
 }
 

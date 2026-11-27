@@ -133,6 +133,12 @@
   padding: 0 0 4px 20px;
 }
 
+/* The glyphs of a focused or hovered line, and of an open run, take their colours. */
+.line:focus-visible,
+.body {
+  --lit: 1;
+}
+
 @container (max-width: 440px) {
   .hasStats .glyphs {
     display: none;
@@ -147,5 +153,9 @@
 @media (hover: hover) and (pointer: fine) {
   .line {
     height: 26px;
+  }
+
+  .line:hover {
+    --lit: 1;
   }
 }

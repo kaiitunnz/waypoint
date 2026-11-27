@@ -1,0 +1,25 @@
+/* Faint at rest. A holder sets --lit to 1 to bring the family's colour in. */
+.glyph {
+  color: color-mix(in srgb, var(--family, var(--faint)) calc(var(--lit, 0) * 100%), var(--faint));
+  transition: color 120ms ease;
+}
+
+.glyph[data-family="bash"] {
+  --family: var(--tool-bash);
+}
+
+.glyph[data-family="read"] {
+  --family: var(--tool-read);
+}
+
+.glyph[data-family="edit"] {
+  --family: var(--tool-edit);
+}
+
+.glyph[data-family="agent"] {
+  --family: var(--tool-agent);
+}
+
+.glyph[data-family="skill"] {
+  --family: var(--tool-skill);
+}

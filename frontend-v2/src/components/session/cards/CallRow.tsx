@@ -15,6 +15,7 @@ import { Attachments } from "./Attachments";
 import { Markdown } from "./Markdown";
 import { PathLabel } from "./PathLabel";
 import { TodoItems } from "./TodoItems";
+import { ToolGlyph } from "./ToolGlyph";
 import { FOLD_LINES } from "./useFold";
 
 function Prose({ caption, text }: { caption: string; text: string }) {
@@ -51,9 +52,7 @@ export function CallRow({ row }: { row: CallView }) {
   return (
     <div className={styles.call}>
       <div className={styles.head}>
-        <span className={styles.glyph} role="img" aria-label={row.toolLabel}>
-          {row.glyph}
-        </span>
+        <ToolGlyph className={styles.glyph} glyph={row.glyph} family={row.family} role="img" aria-label={row.toolLabel} />
         <div className={styles.subject} title={command || row.path || row.name ? undefined : row.title}>
           {row.summary ? (
             <div className={styles.heading}>

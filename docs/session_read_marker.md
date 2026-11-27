@@ -42,7 +42,7 @@ restart does not turn restored sessions unread.
 
 ## Unread
 
-The v2 session lists show an unread session with a semibold bright title and a
-bright time. A read row is regular, and an exited session is dimmed and never
-shows as unread. Any event recorded outside a lifecycle step, system notes
+The v2 session lists show an unread session with a semibold bright title, a
+bright time and a small dot left of the time. A read row is regular, and an
+exited session is dimmed and never shows as unread. Any event recorded outside a lifecycle step, system notes
 included, moves `last_event_at`.

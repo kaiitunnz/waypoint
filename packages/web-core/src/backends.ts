@@ -243,8 +243,7 @@ export function hasTerminalPane(
 }
 
 // Whether the transport reads its agent's dialogs off the screen, where what one shows
-// may not be what a reply answers: it has a terminal pane, or no structured stream. An
-// unknown transport is taken to.
+// may not be what a reply answers. An unknown transport is taken to.
 export function readsDialogsFromScreen(
   transport: SessionTransport | undefined,
   catalog?: BackendCatalog,

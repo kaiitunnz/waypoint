@@ -197,16 +197,22 @@ export type RequestRead = EventRecord | "missing" | "failed";
 
 export type ApprovalRequest = { status: "loading" } | { status: "failed" } | ({ status: "ready" } & ShownRequest);
 
-// A request is shown from its transcript. A plan's text travels in its ask, and one
-// from Waypoint's own plan mode has no call behind it, so the text is all of it.
+// A plan from Waypoint's own plan mode has no call, and no dialog, behind it.
+const isOwnPlan = (ask: PendingPlanAsk) => ask.plan.resolve_via === "approve_plan";
+
+// Whether a reply to the approval answers a dialog read off the screen. `fromScreen` is
+// `readsDialogsFromScreen` of the ask's session.
+export const answersScreenDialog = (ask: PendingApprovalAsk | PendingPlanAsk, fromScreen: boolean) =>
+  fromScreen && !(ask.kind === "plan_approval" && isOwnPlan(ask));
+
+// A request is shown from its transcript. A plan's text travels in its ask, and is all
+// of one from Waypoint's own plan mode.
 export function approvalRequest(
   ask: PendingApprovalAsk | PendingPlanAsk,
   read: RequestRead | null,
   session: AskSession,
 ): ApprovalRequest {
-  if (ask.kind === "plan_approval" && ask.plan.resolve_via === "approve_plan") {
-    return { status: "ready", ...shownPlan(ask.plan.text) };
-  }
+  if (ask.kind === "plan_approval" && isOwnPlan(ask)) return { status: "ready", ...shownPlan(ask.plan.text) };
   if (read === null) return { status: "loading" };
   if (typeof read === "string") return { status: "failed" };
   const shown = shownRequest(read, session);

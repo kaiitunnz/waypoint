@@ -168,22 +168,23 @@ function lockReason(body: ApprovalBody, input: Record<string, unknown> | null, t
 
 // A plan with no call behind it: its text is the request.
 export function shownPlan(plan: string): ShownRequest {
-  const whole = plan.trim() !== "";
+  const body: ApprovalBody = { kind: "plan", plan };
+  const lockNote = lockReason(body, null, null);
   return {
-    body: { kind: "plan", plan },
+    body,
     fields: { plan },
     warnings: hasHiddenText(plan) ? [HIDDEN_WARNING] : [],
     unverified: false,
-    whole,
-    lockNote: whole ? null : NO_PLAN,
+    whole: lockNote === null,
+    lockNote,
   };
 }
 
 const UNVERIFIED = "This call can't be verified from here";
 
-// A pending request as read from its transcript. Off the screen, a dialog may name
-// another call than the one a reply would answer, and a plan rebuilt from the transcript
-// may differ from the one in the dialog, so nothing there is decided.
+// A pending request as read from its transcript. A dialog read off the screen may name
+// another call than the one a reply would answer, and its plan, rebuilt from the
+// transcript, may differ from the one it shows, so neither is decided.
 export function shownRequest(request: EventRecord, session: AskSession): ShownRequest {
   const body = requestedBody(request);
   const fields = requestFields(request);

@@ -7,7 +7,7 @@ import { useApprovalRequest } from "@waypoint/web-core/hooks/useApprovalRequest"
 import { useAskQuestionState, type AskQuestionController } from "@waypoint/web-core/hooks/useAskQuestionState";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { askUserQuestions } from "@waypoint/web-core/needsYou";
-import { decideAsk, decisionView } from "@waypoint/web-core/pendingAskActions";
+import { answersScreenDialog, decideAsk, decisionView } from "@waypoint/web-core/pendingAskActions";
 import { approvalCopyText } from "@waypoint/web-core/session/approvals";
 import { askFormView } from "@waypoint/web-core/session/askQuestion";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
@@ -124,7 +124,7 @@ function RequestDetail({ ask, session, agent }: RequestDetailProps) {
         roomy
         title={ask.title}
         copyText={copyText}
-        copyLabel={ask.kind === "approval" ? "Copy request" : "Copy plan"}
+        copyLabel={ask.kind === "plan_approval" && !shown?.unverified ? "Copy plan" : "Copy request"}
         // Nothing is decided on part of a request.
         locked={!shown?.whole}
         actions={actions.map((action) => ({
@@ -167,7 +167,7 @@ function AskView({ ask }: { ask: PendingAsk }) {
   const askSession = useAskSessions();
   const session = askSession(ask.session_id);
   // An approval read off the screen is not decided here.
-  const terminal = ask.kind !== "question" && session.fromScreen;
+  const terminal = ask.kind !== "question" && answersScreenDialog(ask, session.fromScreen);
   const href = terminal ? sessionTerminalHref(ask.session_id) : sessionHref(ask.session_id);
   const source = (
     <SourceLine

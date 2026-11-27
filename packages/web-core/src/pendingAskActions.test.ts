@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import {
   answerQuestion,
+  answersScreenDialog,
   approvalRequest,
   buildAnswer,
   decideAsk,
@@ -256,6 +257,13 @@ describe("deciding outside the detail", () => {
       lockNote: null,
     });
     expect(approvalRequest(plan(" ", "approve_plan"), null, session)).toMatchObject({ whole: false, lockNote: "No plan text" });
+  });
+
+  it("answers a screen dialog for any approval read off one, but Waypoint's own plan", () => {
+    expect(answersScreenDialog(approval("Bash", { command: "ls" }), true)).toBe(true);
+    expect(answersScreenDialog(plan("# Plan", "approve"), true)).toBe(true);
+    expect(answersScreenDialog(plan("# Plan", "approve_plan"), true)).toBe(false);
+    expect(answersScreenDialog(approval("Bash", { command: "ls" }), false)).toBe(false);
   });
 
   it("leaves a plan read off the screen undecided, whatever its ask carries", () => {

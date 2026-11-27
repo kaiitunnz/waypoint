@@ -10,6 +10,7 @@ carries the pane's reading.
 
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -182,7 +183,10 @@ def _text_of(dialog: pane_dialog.ApprovalDialog) -> tuple[str | None, str | None
 def _asks_something_else(
     pending: PendingTtyApproval, dialog: pane_dialog.ApprovalDialog
 ) -> bool:
-    """Whether ``dialog`` is not a redraw of what ``pending``'s card asked."""
+    """Whether ``dialog`` is not a redraw of what ``pending``'s card asked. One
+    that can't be read whole says nothing either way."""
+    if not dialog.matchable:
+        return False
     if pending.call is not None:
         return not calls_shown(dialog, [pending.call])
     return pending.dialog is not None and _text_of(pending.dialog) != _text_of(dialog)
@@ -219,9 +223,9 @@ class DialogWatcher:
         # Ids of calls that cannot be asking: replied to, or whose dialog was
         # answered in the terminal. A call stays here once added.
         self._answered: set[str] = set()
-        # Dialogs answered while no call was named, by identity. The record of
-        # the call may be written late.
-        self._unnamed: dict[str, pane_dialog.ApprovalDialog] = {}
+        # Dialogs answered while no call was named, by identity, and when. The
+        # record of the call may be written late.
+        self._unnamed: dict[str, tuple[pane_dialog.ApprovalDialog, float]] = {}
         # The request whose dialog was missing from the last poll.
         self._departing: PendingTtyApproval | None = None
         # The popup kind already sent Esc this appearance, so one popup replacing
@@ -279,10 +283,11 @@ class DialogWatcher:
             case _ if screen in _ESC_DISMISS_LOG:
                 await self._dismiss(pane, screen)
             case pane_dialog.PaneScreen.PLAN:
+                if self._departing is not None and not self._departing.is_plan:
+                    self.mark_answered(self._departing)
                 self._departing = None
                 await self._poll_plan(session, snapshot, entry)
             case pane_dialog.PaneScreen.APPROVAL:
-                self._departing = None
                 await self._poll_approval(pane, snapshot, entry)
             case _:
                 await self._on_no_dialog()
@@ -298,7 +303,7 @@ class DialogWatcher:
         if pending.call is not None:
             self._answered.add(pending.call.tool_use_id)
         elif pending.dialog is not None:
-            self._unnamed[pending.dialog.identity] = pending.dialog
+            self._unnamed[pending.dialog.identity] = (pending.dialog, time.time())
 
     async def reply_refusal(self, pending: PendingTtyApproval) -> str | None:
         """Why a reply to ``pending`` must not be sent, as the note for its card;
@@ -429,7 +434,13 @@ class DialogWatcher:
     ) -> None:
         if (dialog := await self._read_approval(pane, snapshot)) is None:
             self._reset_debounce()
-        elif self._is_stable(dialog.identity):
+            return
+        if departing := self._departing:
+            self._departing = None
+            # Gone for one capture only, unless another request took its place.
+            if _asks_something_else(departing, dialog):
+                self.mark_answered(departing)
+        if self._is_stable(dialog.identity):
             await self._surface_approval(dialog, entry)
 
     async def _read_approval(
@@ -456,12 +467,18 @@ class DialogWatcher:
         return match_call(dialog, calls, self._answered)
 
     def _claim_late_records(self, agent: str | None, calls: list[PendingCall]) -> None:
-        """Mark as answered the calls that read like a request answered unnamed:
-        any of them may be that request's record, written late."""
-        for identity, dialog in list(self._unnamed.items()):
+        """Mark as answered the calls that read like a request answered unnamed
+        and were made before the answer: any of them may be that request's
+        record, written late."""
+        for identity, (dialog, answered_at) in list(self._unnamed.items()):
             if dialog.agent != agent:
                 continue
-            if late := calls_shown(dialog, calls, self._answered):
+            late = [
+                call
+                for call in calls_shown(dialog, calls, self._answered)
+                if call.made_at is None or call.made_at <= answered_at
+            ]
+            if late:
                 self._answered.update(call.tool_use_id for call in late)
                 del self._unnamed[identity]
 

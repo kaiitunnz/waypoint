@@ -1,6 +1,7 @@
 """Fake Claude transcripts, main and subagent, on disk for claude_tty tests."""
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,9 +27,14 @@ FETCH_INPUT = {
 
 
 def use(
-    tool_use_id: str, name: str, tool_input: dict[str, Any], msg: str = "msg-1"
+    tool_use_id: str,
+    name: str,
+    tool_input: dict[str, Any],
+    msg: str = "msg-1",
+    at: datetime | None = None,
 ) -> dict[str, Any]:
     return {
+        **({"timestamp": at.isoformat()} if at else {}),
         "type": "assistant",
         "cwd": CWD,
         "message": {

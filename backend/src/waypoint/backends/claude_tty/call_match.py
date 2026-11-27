@@ -50,6 +50,8 @@ _NO_NEWLINE = "\\ No newline"
 # Unchanged lines a diff shows around a change, unless the file ends sooner.
 _DIFF_CONTEXT = 3
 _ARGUMENT_RE = re.compile(r"^\s*([\w-]+):(?:\s(.*))?$")
+# What a Bash dialog draws for a call without a description.
+_NO_DESCRIPTION = "Run shell command"
 # Ports a printed URL leaves out.
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
@@ -201,10 +203,8 @@ def _bash_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:
         return False
     header = dialog.described_header
     if dialog.body is not None:
-        return _draws(command, dialog.body, dialog.width) and (
-            _draws(str(description), header, dialog.width)
-            if description
-            else not header
+        return _draws(command, dialog.body, dialog.width) and _draws(
+            str(description or _NO_DESCRIPTION), header, dialog.width
         )
     # Without dashed rules: the command's lines, then its description.
     for end in range(1, len(header) + 1):
@@ -255,6 +255,8 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
 def _read_range(tool_input: dict[str, Any]) -> str:
     """The part of the file a Read dialog says is asked for; empty for all of it."""
     offset, limit = tool_input.get("offset"), tool_input.get("limit")
+    if pages := tool_input.get("pages"):
+        return f"pages {pages}"
     if isinstance(limit, int):
         start = offset if isinstance(offset, int) else 1
         return f"lines {start}-{start + limit - 1}"

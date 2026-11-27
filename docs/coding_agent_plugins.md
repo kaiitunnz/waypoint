@@ -868,8 +868,8 @@ verification](pending_asks.md#call-verification)):
   is common on the main thread, stays unverified, as does a heading too narrow a
   pane to read whole.
 - An answered call is not named again. When a request is answered while
-  unverified, calls that read like it and are recorded only afterwards are not
-  named either.
+  unverified, a call that reads like it, was made before the answer by its
+  transcript timestamp, and is recorded only afterwards is not named either.
 
 A reply presses the option's digit only while the pane still shows the request,
 and messages are typed only while the composer is drawn.

@@ -128,6 +128,11 @@ TOOL_USE_HEADING = "Tool use"
 UNSANDBOXED_BASH_HEADING = "Bash command (unsandboxed)"
 # A line the options block ends with when the dialog is scrolled.
 _MORE_LINES_PREFIX = "↑"
+# The tip a Bash dialog may carry above its description; a narrow pane wraps it.
+_AUTO_MODE_TIP = (
+    "Tip: auto mode handles these prompts for you — choose "
+    '"switch to auto mode" below'
+)
 # The indent of an option's wrapped label or description.
 _OPTION_DETAIL_INDENT = " " * 5
 
@@ -219,17 +224,17 @@ class ApprovalDialog:
 
     @property
     def described_header(self) -> list[str]:
-        """The header without blank lines and the auto-mode tip, which a narrow
-        pane wraps."""
+        """The header without blank lines and the auto-mode tip."""
         lines = [line for line in self.header if line.strip()]
         for start, line in enumerate(lines):
             if line.strip().startswith("Tip:"):
+                # The lines that go on spelling the tip are its own.
+                spelled = " ".join(line.split())
                 end = start + 1
-                while (
-                    self.width
-                    and end < len(lines)
-                    and wraps(lines[end - 1], lines[end], self.width)
+                while end < len(lines) and _AUTO_MODE_TIP.startswith(
+                    longer := " ".join([spelled, *lines[end].split()])
                 ):
+                    spelled = longer
                     end += 1
                 return lines[:start] + lines[end:]
         return lines

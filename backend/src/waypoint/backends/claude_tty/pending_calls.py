@@ -9,6 +9,7 @@ subagent transcripts.
 import json
 import threading
 from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any, Protocol
 
 from waypoint.backends.claude_code.normalize import iter_content_blocks
@@ -33,6 +34,9 @@ class PendingCall:
     transcript: str | None = None
     # The session host's home directory, which a dialog prints as ``~``.
     home: str | None = None
+    # When Claude made the call, by the session host's clock. A record written
+    # late keeps this time.
+    made_at: float | None = None
 
 
 class CallSource(Protocol):
@@ -68,6 +72,13 @@ def _records(data: bytes) -> list[dict[str, Any]]:
         if isinstance(record, dict):
             records.append(record)
     return records
+
+
+def _timestamp(record: dict[str, Any]) -> float | None:
+    try:
+        return datetime.fromisoformat(str(record.get("timestamp"))).timestamp()
+    except ValueError:
+        return None
 
 
 def _message(record: dict[str, Any]) -> dict[str, Any]:
@@ -116,6 +127,7 @@ class _Unresolved:
                         input=tool_input if isinstance(tool_input, dict) else {},
                         cwd=cwd if isinstance(cwd, str) else None,
                         transcript=self._transcript,
+                        made_at=_timestamp(record),
                     )
                 continue
             results = [b for b in blocks if b.get("type") == "tool_result"]

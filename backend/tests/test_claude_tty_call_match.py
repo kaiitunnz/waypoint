@@ -572,3 +572,33 @@ def test_wide_characters_count_two_columns_towards_a_wrap() -> None:
     dialog = _with_command(f"echo {wide}", "done")
     call = _bash(f"echo {wide} done", "Create probe dir")
     assert match_call(dialog, [call]) == call
+
+
+def test_a_call_without_a_description_draws_a_stock_one() -> None:
+    dialog = _dialog(
+        "approval_bash_boxed.txt", ("Create probe dir\n", "Run shell command\n")
+    )
+    call = _call("Bash", {"command": "mkdir -p probe_dir_one"})
+    assert match_call(dialog, [call]) == call
+    described = _bash("mkdir -p probe_dir_one", "Create probe dir")
+    assert match_call(dialog, [described]) is None
+
+
+def test_a_long_first_word_below_the_tip_is_the_description() -> None:
+    # Too wide to have fitted after the tip, as a wrapped line would be.
+    description = "説明" * 20
+    dialog = _dialog(
+        "approval_bash_boxed.txt", (" Create probe dir\n", f" {description}\n")
+    )
+    assert [line.strip() for line in dialog.described_header] == [description]
+    call = _bash("mkdir -p probe_dir_one", description)
+    assert match_call(dialog, [call]) == call
+
+
+def test_a_pdf_read_matches_the_pages_drawn() -> None:
+    drawn = ("outside.txt)", "outside.txt · pages 1-3)")
+    dialog = _dialog("approval_read_wrapped.txt", drawn)
+    call = _call("Read", {**SHOWN_READ, "pages": "1-3"})
+    assert match_call(dialog, [call]) == call
+    other = _call("Read", {**SHOWN_READ, "pages": "1-4"})
+    assert match_call(dialog, [other]) is None

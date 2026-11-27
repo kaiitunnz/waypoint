@@ -5,7 +5,7 @@ the ask and the transport that replies to it.
 """
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -277,6 +277,78 @@ async def test_an_unnamed_requests_late_record_names_no_later_dialog(
     append(pane.main, use("two", "Agent", two))
     await pane.poll(1)
     assert _named(pane.asks[-1]) == (True, "two")
+
+
+async def test_a_later_call_is_named_after_a_request_answered_unnamed(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    await pane.poll()
+    dialog = pane.screen
+    asked = datetime.now(UTC) - timedelta(seconds=30)
+    assert await pane.reply() is True
+    # Its record and result are written together, after the answer.
+    append(pane.main, use("one", "Bash", BASH, at=asked), result("one"))
+    pane.screen = _screen("ready.txt")
+    await pane.poll()
+
+    later = datetime.now(UTC) + timedelta(seconds=5)
+    for tool_use_id in ("two", "three"):
+        append(pane.main, use(tool_use_id, "Bash", BASH, msg=tool_use_id, at=later))
+        pane.screen = dialog
+        await pane.poll()
+        assert _named(pane.asks[-1]) == (True, tool_use_id)
+        assert await pane.reply() is True
+        append(pane.main, result(tool_use_id))
+        pane.screen = _screen("ready.txt")
+        await pane.poll()
+
+
+async def test_a_late_record_made_before_the_answer_is_not_named(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    await pane.poll()
+    asked = datetime.now(UTC) - timedelta(seconds=30)
+    assert await pane.reply() is True
+    append(pane.main, use("one", "Bash", BASH, at=asked))
+    await pane.poll(8)
+    assert {_named(ask) for ask in pane.asks} == {(False, None)}
+
+
+async def test_a_dialog_that_follows_one_blank_capture_answered_the_first(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+    first = pane.screen
+
+    pane.screen = _screen("ready.txt")
+    await pane.poll(1)
+    pane.screen = _screen("approval_websearch.txt")
+    await pane.poll()
+    pane.screen = first
+    await pane.poll()
+
+    assert _named(pane.asks[-1]) == (False, None)
+
+
+async def test_a_redraw_that_cannot_be_read_answers_nothing(tmp_path: Path) -> None:
+    pane = Pane(tmp_path, "approval_subagent_bash_decoy.txt")
+    write_subagent(
+        pane.main, "a1", "general-purpose", jsonl(use("sub", "Bash", SUB_BASH))
+    )
+    await pane.poll()
+    whole = pane.screen
+
+    # A heading cut short, as a narrow pane can leave it.
+    pane.screen = whole.replace("from the general-purpose agent", "from the")
+    await pane.poll()
+    pane.screen = whole
+    await pane.poll()
+
+    assert _named(pane.asks[-1]) == (True, "sub")
 
 
 async def test_a_dialog_replaced_at_once_was_answered(tmp_path: Path) -> None:

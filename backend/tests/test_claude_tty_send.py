@@ -1,18 +1,17 @@
 """A claude_tty session takes keystrokes only into a drawn composer."""
 
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from claude_tty_transcripts import FIXTURES
 from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
 from waypoint.backends.claude_tty import transport as transport_mod
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
 from waypoint.transports import InputBlockedError
 
-FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
 RULE = "─" * 100
 # Popups nothing classifies, in place of the composer.
 UNKNOWN_POPUPS = [

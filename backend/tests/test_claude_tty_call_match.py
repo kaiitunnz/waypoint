@@ -1,16 +1,15 @@
 """Matching a captured permission dialog to the pending call behind it."""
 
 import dataclasses
-from pathlib import Path
 from typing import Any
 
 import pytest
 
+from claude_tty_transcripts import FETCH_INPUT, FIXTURES, SUBAGENT_COMMAND
 from waypoint.backends.claude_tty.call_match import match_call
 from waypoint.backends.claude_tty.pane_dialog import ApprovalDialog, parse_approval
 from waypoint.backends.claude_tty.pending_calls import PendingCall
 
-FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
 CWD = "/tmp/probe/repo"
 
 WRAPPED = (
@@ -22,7 +21,6 @@ MULTILINE = (
     'touch probe_multi.txt\nif true; then\n    echo "indented body"\nfi\n'
     'printf "%s\\n" a b > probe_out_multi_' + "a" * 128 + ".txt"
 )
-SUBAGENT_COMMAND = "mkdir -p sub_probe_dir_xyz && echo from-subagent"
 
 
 def _dialog(fixture: str, *replace: tuple[str, str]) -> ApprovalDialog:
@@ -110,15 +108,7 @@ SHOWN: list[tuple[str, str, dict[str, Any]]] = [
             "new_source": "y = 2",
         },
     ),
-    (
-        "approval_fetch_subagent.txt",
-        "WebFetch",
-        {
-            "url": "https://example.com/",
-            "prompt": "What is the exact text of the page's <title> (or the main "
-            "heading if no title is present)? Report only the title text.",
-        },
-    ),
+    ("approval_fetch_subagent.txt", "WebFetch", FETCH_INPUT),
     (
         "approval_websearch.txt",
         "WebSearch",
@@ -172,12 +162,7 @@ def test_fetch_matches_the_url_however_the_dialog_prints_it(
     dialog = _dialog(
         "approval_fetch_subagent.txt", ("url: https://example.com/", f"url: {printed}")
     )
-    tool_input = {
-        "url": url,
-        "prompt": "What is the exact text of the page's <title> (or the main "
-        "heading if no title is present)? Report only the title text.",
-    }
-    match = match_call(dialog, [_call("WebFetch", tool_input)])
+    match = match_call(dialog, [_call("WebFetch", {**FETCH_INPUT, "url": url})])
     assert match is not None
     assert match.input["url"] == url
 
@@ -187,12 +172,8 @@ def test_fetch_matches_the_url_however_the_dialog_prints_it(
 )
 def test_fetch_rejects_another_url(url: str) -> None:
     dialog = _dialog("approval_fetch_subagent.txt")
-    tool_input = {
-        "url": url,
-        "prompt": "What is the exact text of the page's <title> (or the main "
-        "heading if no title is present)? Report only the title text.",
-    }
-    assert match_call(dialog, [_call("WebFetch", tool_input)]) is None
+    call = _call("WebFetch", {**FETCH_INPUT, "url": url})
+    assert match_call(dialog, [call]) is None
 
 
 @pytest.mark.parametrize(
@@ -203,6 +184,7 @@ def test_fetch_rejects_another_url(url: str) -> None:
         ("", ""),
         ("bet", "BET"),
         ("gamma", "BETA"),
+        ("beta", "B2"),
         ("alpha\nbeta", "alpha\nBETA\nextra"),
     ],
 )
@@ -234,9 +216,11 @@ def test_a_home_path_names_a_file_under_that_home(
     assert (match_call(dialog, [call]) is not None) is matches
 
 
+# The rows ``approval_overwrite_two_hunks.txt`` changes.
+CHANGED_ROWS = {3: "three", 27: "twenty-seven"}
 ITEMS = "".join(
-    f"row {i}\n" if i not in (3, 27) else f"row {word} changed\n"
-    for i, word in ((i, {3: "three", 27: "twenty-seven"}.get(i)) for i in range(1, 31))
+    f"row {CHANGED_ROWS[i]} changed\n" if i in CHANGED_ROWS else f"row {i}\n"
+    for i in range(1, 31)
 )
 MARKER_EDIT = {
     "old_string": "marker = old",
@@ -376,13 +360,8 @@ def test_new_file_matches_its_whole_content() -> None:
     path = "/tmp/cc-tty-probe/probe_out.txt"
 
     def write(content: str, file_path: str = path) -> PendingCall:
-        call = PendingCall(
-            "t1",
-            "Write",
-            {"file_path": file_path, "content": content},
-            "/tmp/cc-tty-probe",
-        )
-        return call
+        tool_input = {"file_path": file_path, "content": content}
+        return PendingCall("t1", "Write", tool_input, "/tmp/cc-tty-probe")
 
     assert match_call(dialog, [write("waypoint-probe\n")]) is not None
     assert match_call(dialog, [write("waypoint-probe\nmore\n")]) is None
@@ -405,11 +384,6 @@ def test_new_file_matches_its_whole_content() -> None:
         ),
         # Spacing changes the command.
         ("approval_bash_boxed.txt", "Bash", {"command": "mkdir -pprobe_dir_one"}),
-        (
-            "approval_edit.txt",
-            "Edit",
-            {"file_path": f"{CWD}/notes.txt", "old_string": "beta", "new_string": "B2"},
-        ),
         (
             "approval_edit.txt",
             "Edit",

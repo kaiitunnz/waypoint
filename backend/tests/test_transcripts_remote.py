@@ -360,6 +360,16 @@ def test_remote_probe_dir_tells_unreachable_from_missing(
     assert fs.probe_dir(str(tmp_path)) is None
 
 
+def test_remote_probe_glob_tells_unreachable_from_no_match(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    assert fs.probe_glob(str(tmp_path), "*.jsonl") == []
+    fake_remote.force_error("glob", "transport failure")
+    assert fs.probe_glob(str(tmp_path), "*.jsonl") is None
+    assert fs.glob(str(tmp_path), "*.jsonl") == []
+
+
 def test_remote_expanduser_resolves_against_remote_home(
     tmp_path: Path, fake_remote: _FakeRemote, monkeypatch: pytest.MonkeyPatch
 ) -> None:

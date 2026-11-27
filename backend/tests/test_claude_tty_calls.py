@@ -13,6 +13,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from claude_tty_transcripts import (
+    FETCH_INPUT,
+    FIXTURES,
+    SUBAGENT_COMMAND,
     append,
     jsonl,
     result,
@@ -26,11 +29,9 @@ from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
-FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
-
 BASH = {"command": "mkdir -p probe_dir_one", "description": "Create probe dir"}
 SUB_BASH = {
-    "command": "mkdir -p sub_probe_dir_xyz && echo from-subagent",
+    "command": SUBAGENT_COMMAND,
     "description": "Create directory and echo marker text",
     "dangerouslyDisableSandbox": True,
 }
@@ -351,13 +352,8 @@ async def test_reply_to_an_unverified_card_needs_the_same_dialog(
 
 async def test_footerless_fetch_dialog_raises_an_ask(tmp_path: Path) -> None:
     pane = Pane(tmp_path, "approval_fetch_subagent.txt")
-    tool_input = {
-        "url": "https://example.com/",
-        "prompt": "What is the exact text of the page's <title> (or the main heading "
-        "if no title is present)? Report only the title text.",
-    }
     write_subagent(
-        pane.main, "a1", "web-fetch", jsonl(use("fetch", "WebFetch", tool_input))
+        pane.main, "a1", "web-fetch", jsonl(use("fetch", "WebFetch", FETCH_INPUT))
     )
 
     await pane.poll()

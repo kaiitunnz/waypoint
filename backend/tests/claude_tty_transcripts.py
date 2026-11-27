@@ -11,8 +11,17 @@ from waypoint.backends.claude_tty.byte_source import (
     transcript_path,
 )
 
+FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
 THREAD = "0f8fad5b-d9cb-469f-a165-70867728950e"
 CWD = "/tmp/probe/repo"
+# The calls ``approval_subagent_bash_decoy.txt`` and ``approval_fetch_subagent.txt``
+# show.
+SUBAGENT_COMMAND = "mkdir -p sub_probe_dir_xyz && echo from-subagent"
+FETCH_INPUT = {
+    "url": "https://example.com/",
+    "prompt": "What is the exact text of the page's <title> (or the main heading if "
+    "no title is present)? Report only the title text.",
+}
 
 
 def use(

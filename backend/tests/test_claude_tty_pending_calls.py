@@ -1,7 +1,6 @@
 """Reading a claude_tty session's pending tool calls off its transcripts."""
 
 from pathlib import Path
-from typing import Any
 
 from claude_tty_transcripts import (
     CWD,
@@ -16,11 +15,9 @@ from claude_tty_transcripts import (
 )
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
-    RemoteClaudeTranscriptByteSource,
     Tail,
 )
 from waypoint.backends.claude_tty.pending_calls import TranscriptCalls, pending_calls
-from waypoint.backends.transcript_fs_remote import RemoteMissing, RemoteRead
 
 
 def ids(data: bytes, *, truncated: bool = False) -> list[str]:
@@ -182,98 +179,3 @@ def test_missing_transcript_yields_nothing(tmp_path: Path) -> None:
     assert calls.candidates(None) == []
     assert calls.candidates("general-purpose") == []
     assert source.read_tail(str(tmp_path / "plan.md"), 10) is None
-
-
-def test_read_tail_marks_a_cut_window(tmp_path: Path) -> None:
-    path = tmp_path / "file"
-    path.write_bytes(b"0123456789")
-    source = LocalTranscriptByteSource(CWD, THREAD, None)
-    assert source.read_tail(str(path), 4) == Tail(b"6789", truncated=True)
-    assert source.read_tail(str(path), 40) == Tail(b"0123456789")
-
-
-class _FakeRemoteFs:
-    def __init__(self, files: dict[str, bytes]) -> None:
-        self.files = files
-        # Glob patterns the host cannot be asked about.
-        self.unreachable: set[str] = set()
-
-    def expanduser(self, path: str) -> str:
-        return path.replace("~", "/home/u", 1)
-
-    def probe_glob(self, root: str, pattern: str) -> list[str] | None:
-        return None if pattern in self.unreachable else self.glob(root, pattern)
-
-    def glob(self, root: str, pattern: str) -> list[str]:
-        if pattern.startswith("projects/"):
-            return [p for p in self.files if p.endswith(f"/{THREAD}.jsonl")]
-        depth = pattern.count("/")
-        return sorted(
-            p
-            for p in self.files
-            if p.startswith(f"{root}/")
-            and p.endswith(".jsonl")
-            and p.removeprefix(f"{root}/").count("/") == depth
-        )
-
-    def read_range(self, path: str, offset: int, limit: int) -> Any:
-        if path not in self.files:
-            return RemoteMissing()
-        data = self.files[path]
-        return RemoteRead(
-            data=data[offset : offset + limit], size=len(data), device=1, inode=1
-        )
-
-
-def _remote_source(files: dict[str, bytes]) -> RemoteClaudeTranscriptByteSource:
-    source = RemoteClaudeTranscriptByteSource.__new__(RemoteClaudeTranscriptByteSource)
-    source._fs = _FakeRemoteFs(files)  # type: ignore[assignment]
-    source._thread_id = THREAD
-    source._config_root = "~/.claude"
-    source._identity = None
-    source._path = None
-    source._home = None
-    source._warned = set()
-    return source
-
-
-def test_remote_source_reads_the_same_tree() -> None:
-    base = f"/home/u/.claude/projects/p/{THREAD}"
-    files = {
-        f"{base}.jsonl": jsonl(use("main-1", "Bash", {"command": "ls"})),
-        f"{base}/subagents/agent-a1.jsonl": jsonl(
-            use("sub-1", "Bash", {"command": "pwd"})
-        ),
-        f"{base}/subagents/agent-a1.meta.json": b'{"agentType": "general-purpose"}',
-        "/home/u/.claude/plans/p.md": b"0123456789",
-    }
-    source = _remote_source(files)
-    calls = TranscriptCalls(source)
-
-    assert [(c.tool_use_id, c.home) for c in calls.candidates(None)] == [
-        ("main-1", "/home/u")
-    ]
-    assert [c.tool_use_id for c in calls.candidates("general-purpose")] == ["sub-1"]
-    assert source.read_tail("/home/u/.claude/plans/p.md", 4) == Tail(
-        b"6789", truncated=True
-    )
-    assert source.read_tail("/home/u/.claude/plans/missing.md", 4) is None
-
-
-def test_a_failed_remote_listing_yields_no_candidates() -> None:
-    base = f"/home/u/.claude/projects/p/{THREAD}"
-    source = _remote_source(
-        {
-            f"{base}.jsonl": b"",
-            f"{base}/subagents/agent-a1.jsonl": jsonl(
-                use("sub-1", "Bash", {"command": "pwd"})
-            ),
-            f"{base}/subagents/agent-a1.meta.json": b'{"agentType": "general-purpose"}',
-        }
-    )
-    fake = source._fs
-    assert isinstance(fake, _FakeRemoteFs)
-    # One of the two listings fails: what the other found is not the whole set.
-    fake.unreachable = {"workflows/*/agent-*.jsonl"}
-    assert source.list_subagents() is None
-    assert TranscriptCalls(source).candidates("general-purpose") == []

@@ -4,11 +4,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from claude_tty_transcripts import jsonl, use
 from waypoint.backends.claude_tty import byte_source as bs
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
 )
+from waypoint.backends.claude_tty.pending_calls import TranscriptCalls
 from waypoint.backends.transcript_fs_remote import RemoteMissing, RemoteRead
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
@@ -254,17 +256,33 @@ class _FakeFs:
         self.glob_calls = 0
         self.read_calls: list[tuple[str, int, int]] = []
         self.expand: dict[str, str] = {}
+        # When set, a host's files: reads are cut to the range asked for, and
+        # globs are answered per pattern.
+        self.files: dict[str, bytes] | None = None
+        self.globs: dict[str, list[str]] = {}
+        # Glob patterns the host cannot be asked about.
+        self.unreachable: set[str] = set()
 
     def glob(self, root: str, pattern: str) -> list[str]:
         self.glob_calls += 1
         self.last_config_dir = root
         self.last_pattern = pattern
+        if self.files is not None:
+            return list(self.globs.get(pattern, []))
         return list(self.glob_result)
+
+    def probe_glob(self, root: str, pattern: str) -> list[str] | None:
+        return None if pattern in self.unreachable else self.glob(root, pattern)
 
     def read_range(
         self, path: str, offset: int, limit: int
     ) -> RemoteRead | RemoteMissing | None:
         self.read_calls.append((path, offset, limit))
+        if self.files is not None:
+            if (data := self.files.get(path)) is None:
+                return RemoteMissing()
+            window = data[offset : offset + limit]
+            return RemoteRead(data=window, size=len(data), device=1, inode=1)
         if self.by_path is not None:
             return self.by_path.get(path, RemoteMissing())
         return self.read_result
@@ -552,3 +570,43 @@ def test_start_tailer_builds_remote_source_with_target(monkeypatch) -> None:
     assert isinstance(source, bs.RemoteClaudeTranscriptByteSource)
     assert source._config_dir == "/home/u/.claude-work"
     assert source._launch_target_id == "remote-1"
+
+
+def test_local_read_tail_marks_a_cut_window(tmp_path: Path) -> None:
+    path = tmp_path / "file"
+    path.write_bytes(b"0123456789")
+    source = LocalTranscriptByteSource(CWD, TID, None)
+    assert source.read_tail(str(path), 4) == bs.Tail(b"6789", truncated=True)
+    assert source.read_tail(str(path), 40) == bs.Tail(b"0123456789")
+
+
+def test_remote_reads_the_files_around_the_transcript() -> None:
+    base = f"/home/u/.claude/projects/p/{TID}"
+    subagent = f"{base}/subagents/agent-a1.jsonl"
+    fs = _FakeFs()
+    fs.files = {
+        f"{base}.jsonl": jsonl(use("main-1", "Bash", {"command": "ls"})),
+        subagent: jsonl(use("sub-1", "Bash", {"command": "pwd"})),
+        f"{base}/subagents/agent-a1.meta.json": b'{"agentType": "general-purpose"}',
+        "/home/u/.claude/plans/p.md": b"0123456789",
+    }
+    fs.globs = {
+        f"projects/*/{TID}.jsonl": [f"{base}.jsonl"],
+        "agent-*.jsonl": [subagent],
+    }
+    fs.expand = {"~": "/home/u"}
+    source = _remote_source(fs, _session())
+    calls = TranscriptCalls(source)
+
+    assert [(c.tool_use_id, c.home) for c in calls.candidates(None)] == [
+        ("main-1", "/home/u")
+    ]
+    assert [c.tool_use_id for c in calls.candidates("general-purpose")] == ["sub-1"]
+    plan = "/home/u/.claude/plans/p.md"
+    assert source.read_tail(plan, 4) == bs.Tail(b"6789", truncated=True)
+    assert source.read_tail("/home/u/.claude/plans/missing.md", 4) is None
+
+    # One of the two listings fails: what the other found is not the whole set.
+    fs.unreachable = {"workflows/*/agent-*.jsonl"}
+    assert source.list_subagents() is None
+    assert calls.candidates("general-purpose") == []

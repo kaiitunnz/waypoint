@@ -14,7 +14,7 @@ from waypoint.usage_providers.lumid import LumidUsageProvider
 
 pytestmark = pytest.mark.asyncio
 
-_EMAIL = "noppanat.wad@gmail.com"
+_EMAIL = "person.name@example.com"
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -144,7 +144,7 @@ async def test_case_insensitive_match(
     storage = _storage(tmp_path)
     provider = _provider(
         storage,
-        _routes(_user_ok("NOPPANAT.WAD@GMAIL.COM"), _usage_ok([_row(email=_EMAIL)])),
+        _routes(_user_ok("PERSON.NAME@EXAMPLE.COM"), _usage_ok([_row(email=_EMAIL)])),
     )
     result = await provider.refresh(force=True)
     assert result.ok_count == 1

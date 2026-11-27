@@ -637,7 +637,7 @@ def test_account_label_hidden_unless_local_labels_setting_is_on(
             occurred_at=now,
             dims=_dims(),
             account_key="acct_deadbeef",
-            account_label="noppanat@u.nus.edu · plan: pro",
+            account_label="person@example.edu · plan: pro",
             window_id="5h",
             used_percent=42.0,
         )
@@ -659,8 +659,8 @@ def test_account_label_hidden_unless_local_labels_setting_is_on(
     visible = aggregate.build_health(
         storage, labels_on, _full_range(), TelemetryFilter()
     )
-    assert visible.limits.current[0].account_label == "noppanat@u.nus.edu · plan: pro"
-    assert visible.limits.series[0].account_label == "noppanat@u.nus.edu · plan: pro"
+    assert visible.limits.current[0].account_label == "person@example.edu · plan: pro"
+    assert visible.limits.series[0].account_label == "person@example.edu · plan: pro"
 
 
 def test_profile_label_shown_regardless_of_local_labels_setting(

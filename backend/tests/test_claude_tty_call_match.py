@@ -151,6 +151,50 @@ def test_dialog_matches_the_call_it_shows(
     assert match_call(_dialog(fixture), [call]) == call
 
 
+@pytest.mark.parametrize(
+    ("url", "printed"),
+    [
+        ("https://example.com", "https://example.com/"),
+        (
+            "HTTP://Example.COM:80/a b/ünï?q=1#frag",
+            "http://example.com/a%20b/%C3%BCn%C3%AF?q=1#frag",
+        ),
+        (
+            "https://user@bücher.example:8443?q=a%2fb",
+            "https://user@xn--bcher-kva.example:8443/?q=a%2fb",
+        ),
+    ],
+)
+def test_fetch_matches_the_url_however_the_dialog_prints_it(
+    url: str, printed: str
+) -> None:
+    dialog = _dialog(
+        "approval_fetch_subagent.txt",
+        ("url: https://example.com/", f"url: {printed}"),
+    )
+    tool_input = {
+        "url": url,
+        "prompt": "What is the exact text of the page's <title> (or the main "
+        "heading if no title is present)? Report only the title text.",
+    }
+    match = match_call(dialog, [_call("WebFetch", tool_input)])
+    assert match is not None
+    assert match.input["url"] == url
+
+
+@pytest.mark.parametrize(
+    "url", ["https://example.com:8443", "http://example.com", "https://[bad"]
+)
+def test_fetch_rejects_another_url(url: str) -> None:
+    dialog = _dialog("approval_fetch_subagent.txt")
+    tool_input = {
+        "url": url,
+        "prompt": "What is the exact text of the page's <title> (or the main "
+        "heading if no title is present)? Report only the title text.",
+    }
+    assert match_call(dialog, [_call("WebFetch", tool_input)]) is None
+
+
 def test_new_file_matches_its_whole_content() -> None:
     dialog = _dialog("approval_write.txt")
     path = "/tmp/cc-tty-probe/probe_out.txt"

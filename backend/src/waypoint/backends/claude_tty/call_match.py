@@ -9,6 +9,8 @@ import json
 import posixpath
 import re
 from collections.abc import Container, Sequence
+from typing import Any
+from urllib.parse import quote, urlsplit
 
 from waypoint.backends.claude_tty.pane_dialog import ApprovalDialog, unboxed
 from waypoint.backends.claude_tty.pending_calls import PendingCall
@@ -28,6 +30,19 @@ _NUMBERED_RE = re.compile(r"^ *(\d+)(?: (.*))?$")
 _DIFF_LINE_RE = re.compile(r"^ *(\d+) ([-+ ])(.*)$")
 _HUNK_BREAKS = frozenset({"...", "…", "⋮"})
 _ARGUMENT_RE = re.compile(r"^\s*([\w-]+):(?:\s(.*))?$")
+# Ports a printed URL leaves out.
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _kept_in_url(encoded: str) -> str:
+    """Printable ASCII a URL part prints as written: all but ``encoded``."""
+    return "".join(char for char in map(chr, range(0x21, 0x7F)) if char not in encoded)
+
+
+# What each part of a printed URL leaves unencoded.
+_PATH_SAFE = _kept_in_url('"#<>?`{}')
+_QUERY_SAFE = _kept_in_url("\"#<>'")
+_FRAGMENT_SAFE = _kept_in_url('"<>`')
 
 
 def match_call(
@@ -81,7 +96,7 @@ def _consistent(dialog: ApprovalDialog, call: PendingCall) -> bool:
     if names := _FILE_HEADINGS.get(heading):
         return call.name in names and _file_matches(dialog, heading, call)
     if heading == "Fetch":
-        return call.name == "WebFetch" and _arguments_match(dialog, call)
+        return call.name == "WebFetch" and _fetch_matches(dialog, call)
     if heading == "Tool use":
         return _tool_use_matches(dialog, call)
     if skill := _SKILL_HEADING_RE.match(heading):
@@ -300,17 +315,52 @@ def _arguments(body: list[str]) -> dict[str, list[str]] | None:
     return arguments
 
 
-def _arguments_match(dialog: ApprovalDialog, call: PendingCall) -> bool:
+def _arguments_match(dialog: ApprovalDialog, expected: dict[str, Any]) -> bool:
     shown = _arguments(dialog.body or [])
-    if shown is None or set(shown) != set(call.input):
+    if shown is None or set(shown) != set(expected):
         return False
-    for key, value in call.input.items():
+    for key, value in expected.items():
         forms = [json.dumps(value, ensure_ascii=False)]
         if isinstance(value, str):
             forms.append(value)
         if not any(_spells(form, shown[key]) for form in forms):
             return False
     return True
+
+
+def _printed_url(url: str) -> str:
+    """``url`` as the fetch dialog prints it, serialized the way browsers do.
+
+    Rarer rewrites, such as resolving ``..``, are not reproduced, so a call
+    needing one matches nothing. Raises ``ValueError`` on an unusable URL.
+    """
+    parts = urlsplit(url)
+    userinfo, at, _ = parts.netloc.rpartition("@")
+    host = (parts.hostname or "").encode("idna").decode()
+    if ":" in host:
+        host = f"[{host}]"
+    if parts.port is not None and parts.port != _DEFAULT_PORTS.get(parts.scheme):
+        host = f"{host}:{parts.port}"
+    printed = (
+        f"{parts.scheme}://{userinfo}{at}{host}"
+        f"{quote(parts.path or '/', safe=_PATH_SAFE)}"
+    )
+    if parts.query:
+        printed += "?" + quote(parts.query, safe=_QUERY_SAFE)
+    if parts.fragment:
+        printed += "#" + quote(parts.fragment, safe=_FRAGMENT_SAFE)
+    return printed
+
+
+def _fetch_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:
+    url = call.input.get("url")
+    if not isinstance(url, str):
+        return False
+    try:
+        printed = _printed_url(url)
+    except ValueError:
+        return False
+    return _arguments_match(dialog, {**call.input, "url": printed})
 
 
 def _alphanumeric(text: str) -> str:
@@ -330,7 +380,7 @@ def _mcp_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:
         and title.endswith("(MCP)")
         and _alphanumeric(shown_server) == _alphanumeric(server)
         and named in (_alphanumeric(tool), _alphanumeric(tool) + "tool")
-        and _arguments_match(dialog, call)
+        and _arguments_match(dialog, call.input)
     )
 
 

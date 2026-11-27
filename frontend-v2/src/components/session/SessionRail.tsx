@@ -90,7 +90,7 @@ function RailRow({
       <Link
         {...press}
         onContextMenu={onContextMenu}
-        draggable={false}
+        draggable={pointer ? undefined : false}
         href={sessionHref(session.id)}
         onNavigate={onNavigate}
         aria-current={current ? "page" : undefined}

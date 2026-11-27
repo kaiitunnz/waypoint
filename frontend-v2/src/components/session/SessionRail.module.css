@@ -93,11 +93,11 @@
   height: 34px;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .single .actions {
-    height: 100%;
-  }
+.single .actions {
+  height: 100%;
+}
 
+@media (hover: hover) and (pointer: fine) {
   .actions {
     opacity: 0;
   }
@@ -111,7 +111,7 @@
   .row:hover .time,
   .row:has(:focus-visible) .time,
   .row:has([aria-expanded="true"]) .time {
-    visibility: hidden;
+    opacity: 0;
   }
 }
 
@@ -161,7 +161,8 @@
   color: var(--muted);
 }
 
-/* Touch opens the menu by a long press; the button stays for a screen reader. */
+/* Touch opens the menu by a long press. The button shows for keyboard focus and
+   otherwise stays for a screen reader. */
 @media not all and (hover: hover) and (pointer: fine) {
   .single .item {
     min-height: 44px;
@@ -172,10 +173,14 @@
     user-select: none;
   }
 
-  .actions {
+  .row:not(:has(:focus-visible)) .actions {
     width: 1px;
     height: 1px;
     overflow: hidden;
     clip-path: inset(50%);
+  }
+
+  .row:has(:focus-visible) .time {
+    opacity: 0;
   }
 }

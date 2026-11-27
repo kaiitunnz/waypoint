@@ -101,7 +101,7 @@ class RemoteTranscriptFilesystem:
         return bool(self._run("exists", path).get("exists", False))
 
     def is_dir(self, path: str) -> bool:
-        return bool(self._run("is_dir", path).get("is_dir", False))
+        return bool(self.probe_dir(path))
 
     def probe_dir(self, path: str) -> bool | None:
         """``is_dir``, or ``None`` when the host could not be asked."""

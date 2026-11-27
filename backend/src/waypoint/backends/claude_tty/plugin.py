@@ -837,7 +837,7 @@ class ClaudeTtyPlugin:
     ) -> None:
         # The caller's snapshot can predate the teardown that stopped a tailer
         # which moved the session's folder.
-        session = runtime.storage.get_session(session.id) or session
+        session = runtime.get_session(session.id)
         state = session.transport_state
         thread_id: str | None = state.get("thread_id")
 
@@ -946,8 +946,7 @@ class ClaudeTtyPlugin:
             "pid": target.pane_pid,
             "thread_id": new_thread_id,
             "launch_args": launch_args,
-            **_carried_pre_plan_mode(session.permission_mode, state),
-            **carried_launch_cwd(state),
+            **_carried_state(session.permission_mode, state),
         }
         # The respawned pane hasn't confirmed a model yet.
         runtime.storage.update_session(
@@ -1085,10 +1084,7 @@ class ClaudeTtyPlugin:
                 "pid": target.pane_pid,
                 "thread_id": new_thread_id,
                 "launch_args": launch_args,
-                **_carried_pre_plan_mode(
-                    session.permission_mode, session.transport_state
-                ),
-                **carried_launch_cwd(session.transport_state),
+                **_carried_state(session.permission_mode, session.transport_state),
             },
             permission_mode=session.permission_mode,
             model=session.model,
@@ -1101,8 +1097,7 @@ class ClaudeTtyPlugin:
         runtime.storage.create_session(new_session)
         if materialized:
             runtime.storage.clone_events(session.id, new_session_id)
-        if folder != session.cwd:
-            await note_removed_folder(runtime, new_session_id, session.cwd, folder)
+        await note_removed_folder(runtime, new_session_id, session, folder)
         await runtime._record_system_event(
             new_session_id,
             f"Claude TUI forked from {session.title or session.id} (thread {new_thread_id})",
@@ -1278,7 +1273,7 @@ class ClaudeTtyPlugin:
         )
         await self._cancel_tailer(session.id)
         # The tailer may have moved the session's folder up to here.
-        session = runtime.storage.get_session(session.id) or session
+        session = runtime.get_session(session.id)
         session = await leave_removed_folder(runtime, session)
         state = session.transport_state
 
@@ -1333,15 +1328,10 @@ class ClaudeTtyPlugin:
             "thread_id": thread_id,
             "launch_args": launch_args,
         }
-        # Remember the mode held before entering plan so an ExitPlanMode approval
-        # can restore it (mirroring Chat): set it on the transition into plan;
-        # otherwise carry it while staying in plan and drop it on leaving.
+        # Entering plan, the mode held until now is the one to restore.
         if new_permission_mode == "plan" and session.permission_mode != "plan":
-            if session.permission_mode:
-                new_state["pre_plan_mode"] = session.permission_mode
-        else:
-            new_state.update(_carried_pre_plan_mode(new_permission_mode, state))
-        new_state.update(carried_launch_cwd(state))
+            state = {**state, "pre_plan_mode": session.permission_mode}
+        new_state.update(_carried_state(new_permission_mode, state))
         # The respawn may run a different model; the no-op early return above
         # keeps a benign relaunch from reaching here.
         runtime.storage.update_session(
@@ -1479,16 +1469,14 @@ class ClaudeTtyPlugin:
                     "pid": target.pane_pid,
                     "thread_id": thread_id,
                     "launch_args": launch_args,
-                    **_carried_pre_plan_mode(
+                    **_carried_state(
                         new_session.permission_mode, parent.transport_state
                     ),
-                    **carried_launch_cwd(parent.transport_state),
                 },
                 status=SessionStatus.STARTING,
                 **await folder_fields(parent, folder),
             )
-            if folder != parent.cwd:
-                await note_removed_folder(runtime, new_session.id, parent.cwd, folder)
+            await note_removed_folder(runtime, new_session.id, parent, folder)
             await runtime._record_system_event(
                 new_session.id,
                 f"Promoted side question to a session (resumed thread {thread_id})",
@@ -1790,20 +1778,21 @@ class ClaudeTtyPlugin:
         return runtime.get_session(session.id)
 
 
-def _carried_pre_plan_mode(
+def _carried_state(
     permission_mode: str | None, source_state: dict[str, Any]
 ) -> dict[str, str]:
-    """``pre_plan_mode`` to keep across a relaunch that stays in plan mode.
+    """The ``transport_state`` entries a relaunch carries over: ``launch_cwd``,
+    and ``pre_plan_mode`` while the session stays in plan mode.
 
-    The tailer restores it when a plan is approved; without it the session
-    would drop to ``default`` instead of the mode it held before plan.
+    The tailer restores ``pre_plan_mode`` when a plan is approved; without it
+    the session would drop to ``default`` instead of the mode it held before
+    plan.
     """
-    if permission_mode != "plan":
-        return {}
+    carried = carried_launch_cwd(source_state)
     pre_plan_mode = source_state.get("pre_plan_mode")
-    if isinstance(pre_plan_mode, str) and pre_plan_mode:
-        return {"pre_plan_mode": pre_plan_mode}
-    return {}
+    if permission_mode == "plan" and isinstance(pre_plan_mode, str) and pre_plan_mode:
+        carried["pre_plan_mode"] = pre_plan_mode
+    return carried
 
 
 class _TailerRun(NamedTuple):

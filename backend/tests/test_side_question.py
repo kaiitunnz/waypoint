@@ -182,6 +182,7 @@ def _make_session(
     launch_env: dict[str, str] | None = None,
     model: str | None = None,
     effort: str | None = None,
+    cwd: str = "/tmp/project",
 ) -> SessionRecord:
     settings_dir = storage.database_path.parent / "sessions" / session_id
     settings_dir.mkdir(parents=True, exist_ok=True)
@@ -197,7 +198,7 @@ def _make_session(
         source=SessionSource.MANAGED,
         transport="claude_cli",
         title="Test Session",
-        cwd="/tmp/project",
+        cwd=cwd,
         launch_target_id=launch_target_id,
         status=status,
         created_at=now,
@@ -713,7 +714,9 @@ async def test_bg_task_runs_in_the_launch_folder_when_the_folder_is_gone(
     runtime: Any, plugin: Any, tmp_path: Path
 ) -> None:
     session = _make_session(
-        runtime.storage, transport_state_extra={"launch_cwd": str(tmp_path)}
+        runtime.storage,
+        transport_state_extra={"launch_cwd": str(tmp_path)},
+        cwd=str(tmp_path / "removed"),
     )
     sq = SideQuestion(
         id="sq-moved",

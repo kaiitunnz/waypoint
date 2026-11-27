@@ -1,8 +1,4 @@
-"""claude_tty when Claude moves a session's transcript (a worktree, ``/cd``).
-
-Covers the tailer streaming across the move, the session's recorded folder
-following it, and the relaunch paths afterwards.
-"""
+"""claude_tty when Claude moves a session's transcript (a worktree, ``/cd``)."""
 
 import json
 import subprocess
@@ -77,6 +73,7 @@ def _runtime(session: SessionRecord) -> MagicMock:
     runtime = MagicMock()
     store = _Store(session)
     runtime.storage = store
+    runtime.get_session.side_effect = store.get_session
     runtime._find_launch_target.return_value = None
     runtime._record_system_event = AsyncMock()
     runtime._emit_adapter_event = AsyncMock()
@@ -154,7 +151,6 @@ def _tailer(
 
 @pytest.fixture
 def followed(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    """The tailer's folder follow."""
     follow = AsyncMock()
     monkeypatch.setattr(tailer_mod, "follow_relocation", follow)
     return follow
@@ -196,21 +192,6 @@ async def test_tailer_emits_each_record_once_across_moves(tmp_path: Path) -> Non
     runtime._record_system_event.assert_not_called()
 
 
-async def test_tailer_restarted_after_a_move_reads_only_new_records(
-    tmp_path: Path,
-) -> None:
-    away = transcript_path("/repo/app/.claude/worktrees/w", TID, str(tmp_path))
-    _append(away, _assistant("old"))
-    runtime = _runtime(_session("/repo/app"))
-    tailer = _tailer(runtime, tmp_path, start_at_end=True)
-
-    await tailer._drain()
-    _append(away, _assistant("new"))
-    await tailer._drain()
-
-    assert _outputs(runtime) == ["new"]
-
-
 async def test_tailer_started_at_the_end_follows_an_earlier_move(
     tmp_path: Path, followed: AsyncMock
 ) -> None:
@@ -230,6 +211,9 @@ async def test_tailer_started_at_the_end_follows_an_earlier_move(
 
     followed.assert_awaited_once_with(runtime, "s1", "/repo/app/.claude/worktrees/w")
     assert _outputs(runtime) == []
+    _append(away, _assistant("new"))
+    await tailer._drain()
+    assert _outputs(runtime) == ["new"]
 
 
 async def test_remote_tailer_reads_the_tail_for_an_earlier_move(
@@ -297,27 +281,13 @@ async def test_tailer_follows_the_last_relocation_after_the_records(
         {"type": "relocated", "relocatedCwd": "/repo/first"},
         _assistant("one"),
         {"type": "relocated", "relocatedCwd": "/repo/last"},
-        _assistant("two"),
+        # The records' cwd follows a shell ``cd``, which moves nothing.
+        {**_assistant("two"), "cwd": "/repo/app/sub"},
     )
     await tailer._drain()
 
     followed.assert_awaited_once_with(runtime, "s1", "/repo/last")
     assert emitted_at_follow == [2]
-
-
-async def test_tailer_ignores_a_records_own_cwd(
-    tmp_path: Path, followed: AsyncMock
-) -> None:
-    # The records' cwd follows a shell ``cd``, which moves nothing.
-    runtime = _runtime(_session("/repo/app"))
-    tailer = _tailer(runtime, tmp_path)
-    _append(
-        transcript_path("/repo/app", TID, str(tmp_path)),
-        {**_assistant("one"), "cwd": "/repo/app/sub"},
-    )
-    await tailer._drain()
-    assert _outputs(runtime) == ["one"]
-    followed.assert_not_called()
 
 
 # ── the session's recorded folder ─────────────────────────────────────────────
@@ -500,21 +470,30 @@ def _stub(plugin: ClaudeTtyPlugin, monkeypatch: pytest.MonkeyPatch) -> MagicMock
     return start_tailer
 
 
+def _status_before(path: str) -> SessionStatus:
+    return SessionStatus.EXITED if path == "reattach" else SessionStatus.IDLE
+
+
+async def _relaunch(
+    plugin: ClaudeTtyPlugin, runtime: MagicMock, session: SessionRecord, path: str
+) -> None:
+    if path == "reattach":
+        await plugin.restore_session(runtime, session)
+    else:
+        await plugin._restart_with_args(runtime, session, model="sonnet")
+
+
 @pytest.mark.parametrize("path", ["reattach", "restart"])
 async def test_relaunch_leaves_a_removed_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
 ) -> None:
-    status = SessionStatus.EXITED if path == "reattach" else SessionStatus.IDLE
-    session = _removed_worktree_session(tmp_path, status)
+    session = _removed_worktree_session(tmp_path, _status_before(path))
     session.raw_log_path = str(tmp_path / "raw.log")
     runtime = _runtime(session)
     plugin = ClaudeTtyPlugin()
     start_tailer = _stub(plugin, monkeypatch)
 
-    if path == "reattach":
-        await plugin.restore_session(runtime, session)
-    else:
-        await plugin._restart_with_args(runtime, session, model="sonnet")
+    await _relaunch(plugin, runtime, session, path)
 
     launch = str(tmp_path)
     assert runtime._command_for_backend.call_args.args[3] == launch
@@ -524,31 +503,6 @@ async def test_relaunch_leaves_a_removed_folder(
     assert runtime.storage.session.cwd == launch
     assert runtime.storage.session.transport_state["launch_cwd"] == launch
     _assert_removed_folder_note(runtime, "s1", tmp_path)
-
-
-async def test_reattach_keeps_a_moved_folder_that_exists(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    worktree = tmp_path / "w"
-    worktree.mkdir()
-    # The caller's snapshot predates the move the stored record carries.
-    stale = _session(str(tmp_path), status=SessionStatus.EXITED)
-    stale.raw_log_path = str(tmp_path / "raw.log")
-    moved = stale.model_copy(
-        update={
-            "cwd": str(worktree),
-            "transport_state": {"thread_id": TID, "launch_cwd": str(tmp_path)},
-        }
-    )
-    runtime = _runtime(moved)
-    plugin = ClaudeTtyPlugin()
-    _stub(plugin, monkeypatch)
-
-    await plugin.restore_session(runtime, stale)
-
-    assert runtime.tmux.start_managed_session.call_args.args[1] == str(worktree)
-    state = runtime.storage.session.transport_state
-    assert state["launch_cwd"] == str(tmp_path)
 
 
 async def test_restart_keeps_the_pane_when_no_folder_exists(
@@ -567,13 +521,18 @@ async def test_restart_keeps_the_pane_when_no_folder_exists(
     start_tailer.assert_not_called()
 
 
-async def test_restart_uses_the_stored_folder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("path", ["reattach", "restart"])
+async def test_relaunch_uses_the_stored_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
 ) -> None:
     worktree = tmp_path / "w"
     worktree.mkdir()
-    # A follow landed after the caller read the record.
-    stale = _session(str(tmp_path), raw_log_path=str(tmp_path / "raw.log"))
+    # The caller's snapshot predates the move the stored record carries.
+    stale = _session(
+        str(tmp_path),
+        status=_status_before(path),
+        raw_log_path=str(tmp_path / "raw.log"),
+    )
     moved = stale.model_copy(
         update={
             "cwd": str(worktree),
@@ -584,7 +543,7 @@ async def test_restart_uses_the_stored_folder(
     plugin = ClaudeTtyPlugin()
     _stub(plugin, monkeypatch)
 
-    await plugin._restart_with_args(runtime, stale, model="sonnet")
+    await _relaunch(plugin, runtime, stale, path)
 
     assert runtime.tmux.start_managed_session.call_args.args[1] == str(worktree)
     state = runtime.storage.session.transport_state
@@ -640,7 +599,9 @@ def test_fork_copy_refuses_an_ambiguous_transcript(tmp_path: Path) -> None:
     config_dir = tmp_path / "cfg"
     for folder in ("/one", "/two"):
         _append(transcript_path(folder, TID, str(config_dir)), _assistant(folder))
-    session = _session("/elsewhere", launch_env={})
+    session = _session(
+        "/elsewhere",
+    )
 
     assert not ClaudeTtyPlugin()._copy_transcript(
         session, TID, NEW_TID, str(config_dir), None
@@ -651,7 +612,9 @@ async def test_fork_copies_a_moved_transcript_beside_it(tmp_path: Path) -> None:
     config_dir = tmp_path / "cfg"
     moved = transcript_path("/elsewhere", TID, str(config_dir))
     _append(moved, _assistant("one"))
-    session = _session(str(tmp_path), launch_env={})
+    session = _session(
+        str(tmp_path),
+    )
 
     assert ClaudeTtyPlugin()._copy_transcript(
         session, TID, NEW_TID, str(config_dir), None
@@ -688,5 +651,4 @@ async def test_fork_of_a_removed_folder_records_where_it_launched(
     assert runtime.tmux.start_managed_session.call_args.args[1] == str(tmp_path)
     assert start_tailer.call_args.args[3] == str(tmp_path)
     _assert_removed_folder_note(runtime, "fork-1", tmp_path)
-    # The source keeps its record.
     assert runtime.storage.session.cwd == str(tmp_path / "removed")

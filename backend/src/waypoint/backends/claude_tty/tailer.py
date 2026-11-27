@@ -161,8 +161,7 @@ class TranscriptTailer:
         self._stop_requested = True
 
     async def _drain(self, *, force: bool = False) -> None:
-        # The priming tick fetches size + identity only (no body); ``force``
-        # bypasses a remote source's poll cadence (terminal drain on exit).
+        # The priming tick fetches size + identity only (no body).
         metadata_only = self._start_at_end and not self._primed
         read = await asyncio.to_thread(
             self._source.read_from,
@@ -263,8 +262,8 @@ class TranscriptTailer:
                 )
             if record.get("type") == "assistant":
                 await self._maybe_publish_context_usage(record)
-        # After the records: the offset is already past them, so a lookup cut
-        # short by a restart must not take any with it.
+        # After the records: the offset is past them, so a restart during the
+        # follow would drop any not yet emitted.
         if relocated is not None:
             await follow_relocation(self._runtime, self._session_id, relocated)
 

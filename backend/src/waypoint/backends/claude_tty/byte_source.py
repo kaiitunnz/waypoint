@@ -155,9 +155,8 @@ class TranscriptByteSource(Protocol):
         """Read from ``offset``.
 
         ``metadata_only`` asks for size + identity without fetching the body
-        (start-at-end priming). ``force`` bypasses a source's poll-cadence or
-        search backoff (the terminal drain on exit, and the tail read after
-        priming).
+        (start-at-end priming). ``force`` bypasses a source's poll cadence or
+        search backoff.
         """
         ...
 
@@ -181,10 +180,8 @@ class LocalTranscriptByteSource:
         self._identity: tuple[int, int] | None = None  # of the file last read
         # Monotonic time before which a miss does not search again.
         self._next_search_at = 0.0
-        # The wait after the last empty search, doubled by the next one. A
-        # search scans every project folder.
+        # Backoff after an empty search, which scans every project folder.
         self._search_delay = 0.0
-        # Whether the several-matches warning has been logged.
         self._warned_ambiguous = False
 
     def read_from(
@@ -318,13 +315,12 @@ class RemoteClaudeTranscriptByteSource:
     ) -> str | None:
         # A ``/clear`` before the first turn names a parent never written, so
         # there is no parent file to find the project dir from: scan them all.
-        session = self._runtime.storage.get_session(self._session_id)
-        if session is None:
-            return None
         try:
-            root = self._resolved_config_root(launch_folder(session))
+            root = self._resolved_config_root()
         except Exception:
             self._warn_once("clear-lookup", "remote /clear successor lookup failed")
+            return None
+        if root is None:
             return None
         return _single(
             self._fs.find_clear_successors(
@@ -359,10 +355,10 @@ class RemoteClaudeTranscriptByteSource:
         )
 
     def _resolve(self) -> str | None:
-        session = self._runtime.storage.get_session(self._session_id)
-        if session is None or not UUID_RE.match(self._thread_id):
+        if not UUID_RE.match(self._thread_id):
             return None
-        config_root = self._resolved_config_root(launch_folder(session))
+        if (config_root := self._resolved_config_root()) is None:
+            return None
         matches = self._fs.glob(config_root, f"projects/*/{self._thread_id}.jsonl")
         if not matches:
             return None
@@ -377,12 +373,15 @@ class RemoteClaudeTranscriptByteSource:
         read = self._fs.read_range(path, 0, 0)
         return None if read is None else read.identity
 
-    def _resolved_config_root(self, cwd: str) -> str:
-        if self._config_root is not None:
-            return self._config_root
-        root = resolve_remote_config_root(self._config_dir, cwd, self._fs)
-        self._config_root = root
-        return root
+    def _resolved_config_root(self) -> str | None:
+        if self._config_root is None:
+            session = self._runtime.storage.get_session(self._session_id)
+            if session is None:
+                return None
+            self._config_root = resolve_remote_config_root(
+                self._config_dir, launch_folder(session), self._fs
+            )
+        return self._config_root
 
     def _schedule(self, *, error: bool) -> None:
         self._backoff = (

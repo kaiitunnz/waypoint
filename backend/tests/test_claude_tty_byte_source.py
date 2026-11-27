@@ -15,9 +15,10 @@ from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
 TID = "11111111-1111-1111-1111-111111111111"
 CWD = "/repo/app"
+MOVED_CWD = "/repo/app/.claude/worktrees/w"
 
 
-def _session(cwd: str = "/repo/app") -> SessionRecord:
+def _session(cwd: str = CWD) -> SessionRecord:
     now = datetime.now(UTC)
     return SessionRecord(
         id="s1",
@@ -45,10 +46,15 @@ def _launch_target() -> SshLaunchTargetConfig:
 # ── Local source ─────────────────────────────────────────────────────────────
 
 
-def _local_source(config_dir: Path) -> tuple[LocalTranscriptByteSource, Path]:
-    path = bs.transcript_path(CWD, TID, str(config_dir))
+def _project_file(config_dir: Path, cwd: str = MOVED_CWD) -> Path:
+    path = bs.transcript_path(cwd, TID, str(config_dir))
     path.parent.mkdir(parents=True, exist_ok=True)
-    return LocalTranscriptByteSource(CWD, TID, str(config_dir)), path
+    return path
+
+
+def _local_source(config_dir: Path) -> tuple[LocalTranscriptByteSource, Path]:
+    source = LocalTranscriptByteSource(CWD, TID, str(config_dir))
+    return source, _project_file(config_dir, CWD)
 
 
 def test_local_missing_file_is_unobserved(tmp_path: Path) -> None:
@@ -87,26 +93,6 @@ def test_local_metadata_only_does_not_read_body(tmp_path: Path) -> None:
 
 # ── Local source: a transcript Claude moved ──────────────────────────────────
 
-MOVED_CWD = "/repo/app/.claude/worktrees/w"
-
-
-def _moved_path(config_dir: Path, cwd: str = MOVED_CWD) -> Path:
-    path = bs.transcript_path(cwd, TID, str(config_dir))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def _count_searches(monkeypatch) -> list[str]:
-    searches: list[str] = []
-    real = bs.local_claude_thread_artifacts
-
-    def counting(thread_id: str, config_dir: str | None = None) -> list[Path]:
-        searches.append(thread_id)
-        return real(thread_id, config_dir)
-
-    monkeypatch.setattr(bs, "local_claude_thread_artifacts", counting)
-    return searches
-
 
 def test_local_follows_a_moved_transcript_from_the_same_offset(
     tmp_path: Path,
@@ -114,7 +100,7 @@ def test_local_follows_a_moved_transcript_from_the_same_offset(
     src, path = _local_source(tmp_path)
     path.write_bytes(b"one\n")
     first = src.read_from(0)
-    moved = _moved_path(tmp_path)
+    moved = _project_file(tmp_path)
     path.rename(moved)
     with moved.open("ab") as fh:
         fh.write(b"two\n")
@@ -127,24 +113,19 @@ def test_local_follows_a_moved_transcript_from_the_same_offset(
     assert read.identity == first.identity
 
 
-def test_local_source_built_on_the_old_folder_finds_the_transcript(
-    tmp_path: Path,
-) -> None:
-    # A restart or reattach whose recorded folder predates the move.
-    moved = _moved_path(tmp_path)
-    moved.write_bytes(b"one\n")
-    src, _ = _local_source(tmp_path)
-    read = src.read_from(0, metadata_only=True)
-    assert read.observed is True
-    assert read.size == 4
-
-
 def test_local_search_runs_only_on_a_miss_and_backs_off(
     tmp_path: Path, monkeypatch
 ) -> None:
     now = {"t": 100.0}
     monkeypatch.setattr(bs.time, "monotonic", lambda: now["t"])
-    searches = _count_searches(monkeypatch)
+    searches: list[str] = []
+    real = bs.local_claude_thread_artifacts
+
+    def counting(thread_id: str, config_dir: str | None = None) -> list[Path]:
+        searches.append(thread_id)
+        return real(thread_id, config_dir)
+
+    monkeypatch.setattr(bs, "local_claude_thread_artifacts", counting)
     src, path = _local_source(tmp_path)
 
     # No transcript yet: one search, then none until the backoff elapses.
@@ -157,7 +138,14 @@ def test_local_search_runs_only_on_a_miss_and_backs_off(
     for _ in range(10):
         now["t"] += 20.0
         src.read_from(0)
-    assert src._search_delay == 10.0
+    # The backoff is capped at 10 seconds.
+    searches.clear()
+    now["t"] += 9.0
+    src.read_from(0)
+    assert searches == []
+    now["t"] += 1.0
+    src.read_from(0)
+    assert len(searches) == 1
 
     # Reading the file at its known path never searches.
     path.write_bytes(b"one\n")
@@ -167,7 +155,7 @@ def test_local_search_runs_only_on_a_miss_and_backs_off(
     assert searches == []
 
     # The next miss searches at once.
-    path.rename(_moved_path(tmp_path))
+    path.rename(_project_file(tmp_path))
     assert src.read_from(4).observed is True
     assert len(searches) == 1
 
@@ -184,7 +172,7 @@ def test_local_finds_a_transcript_that_reappears_after_the_backoff(
     path.rename(parked)
     assert src.read_from(4).observed is False
 
-    parked.rename(_moved_path(tmp_path))
+    parked.rename(_project_file(tmp_path))
     assert src.read_from(4).observed is False  # still backing off
     now["t"] += 1.0
     read = src.read_from(4)
@@ -199,7 +187,7 @@ def test_local_forced_read_ignores_the_search_backoff(
     monkeypatch.setattr(bs.time, "monotonic", lambda: 100.0)
     src, _ = _local_source(tmp_path)
     assert src.read_from(0).observed is False
-    _moved_path(tmp_path).write_bytes(b"tail\n")
+    _project_file(tmp_path).write_bytes(b"tail\n")
     assert src.read_from(0).observed is False
     assert src.read_from(0, force=True).data == b"tail\n"
 
@@ -208,7 +196,7 @@ def test_local_replaced_path_prefers_the_file_it_was_reading(tmp_path: Path) -> 
     src, path = _local_source(tmp_path)
     path.write_bytes(b"one\n")
     first = src.read_from(0)
-    moved = _moved_path(tmp_path)
+    moved = _project_file(tmp_path)
     path.rename(moved)
     path.write_bytes(b"another file\n")
 
@@ -244,8 +232,8 @@ def test_local_skips_a_file_swapped_between_stat_and_open(
 
 
 def test_local_ambiguous_matches_stay_unobserved(tmp_path: Path) -> None:
-    _moved_path(tmp_path, "/one").write_bytes(b"a\n")
-    _moved_path(tmp_path, "/two").write_bytes(b"b\n")
+    _project_file(tmp_path, "/one").write_bytes(b"a\n")
+    _project_file(tmp_path, "/two").write_bytes(b"b\n")
     src, _ = _local_source(tmp_path)
     assert src.read_from(0).observed is False
 

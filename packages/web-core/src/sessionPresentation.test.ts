@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentLabel,
   agentModelLabel,
+  brightPreview,
   formatSessionTime,
   isUnread,
   isWorkingStatus,
@@ -10,6 +11,8 @@ import {
   sessionLamp,
   sessionStanding,
   shortModelLabel,
+  showsUnread,
+  spokenStatus,
 } from "./sessionPresentation";
 import type { SessionRecord } from "./types";
 
@@ -44,8 +47,6 @@ describe("isUnread", () => {
 });
 
 describe("sessionLamp", () => {
-  const unread = { last_event_at: "2026-11-25T10:05:00Z" };
-
   it("maps status to a lamp", () => {
     expect(sessionLamp(session({ status: "running" }), false)).toBe("working");
     expect(sessionLamp(session({ status: "starting" }), false)).toBe("working");
@@ -60,18 +61,38 @@ describe("sessionLamp", () => {
     expect(sessionLamp(session({ status: "waiting_input" }), false)).toBe("needs");
   });
 
-  it("is done only when idle, unasked and unread", () => {
-    expect(sessionLamp(session(unread), false)).toBe("done");
-    expect(sessionLamp(session(unread), true)).toBe("needs");
-    expect(sessionLamp(session({ ...unread, status: "running" }), false)).toBe("working");
-    expect(sessionLamp(session({ ...unread, status: "exited" }), false)).toBe("exited");
-  });
-
   it("names each lamp", () => {
     expect(lampWord("needs", "waiting_input")).toBe("Needs you");
     expect(lampWord("error", "interrupted")).toBe("Interrupted");
     expect(lampWord("error", "error")).toBe("Error");
-    expect(lampWord("done", "idle")).toBe("Done");
+    expect(lampWord("idle", "idle")).toBe("Idle");
+  });
+});
+
+describe("showsUnread", () => {
+  const unread = { last_event_at: "2026-11-25T10:05:00Z" };
+
+  it("marks unread activity, except on an exited session", () => {
+    expect(showsUnread(session(unread))).toBe(true);
+    expect(showsUnread(session({ ...unread, status: "running" }))).toBe(true);
+    expect(showsUnread(session({ ...unread, status: "exited" }))).toBe(false);
+    expect(showsUnread(session())).toBe(false);
+  });
+});
+
+describe("spokenStatus", () => {
+  it("is spoken after the state's word", () => {
+    expect(spokenStatus("Idle", true)).toBe("Idle, unread");
+    expect(spokenStatus("Idle", false)).toBe("Idle");
+  });
+});
+
+describe("brightPreview", () => {
+  it("brightens the line of an unread finished turn only", () => {
+    const unread = session({ read_at: "2026-01-01T00:00:00Z", last_event_at: "2026-01-01T00:01:00Z" });
+    expect(brightPreview(unread, "idle")).toBe(true);
+    expect(brightPreview(unread, "working")).toBe(false);
+    expect(brightPreview(session(), "idle")).toBe(false);
   });
 });
 

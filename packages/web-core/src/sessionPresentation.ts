@@ -3,12 +3,27 @@ import { CLAUDE_MODEL_FAMILY_LABELS, formatResolvedModelLabel } from "./modelDis
 import { connectionLabel, type ConnectionState } from "./session/connection";
 import type { SessionRecord, SessionStatus } from "./types";
 
-// Lamps differ by shape and fill as well as hue.
-export type SessionLamp = "needs" | "working" | "done" | "error" | "idle" | "exited";
+// What a session is doing; an exited one draws no lamp.
+export type SessionLamp = "needs" | "working" | "error" | "idle" | "exited";
 
 export function isUnread(session: SessionRecord): boolean {
   if (!session.read_at) return false;
   return Date.parse(session.last_event_at) > Date.parse(session.read_at);
+}
+
+// Whether a list row reads as unread; an exited row stays dimmed whatever it holds.
+export function showsUnread(session: SessionRecord): boolean {
+  return session.status !== "exited" && isUnread(session);
+}
+
+// A preview line is bright where it reports a finished turn nobody has seen.
+export function brightPreview(session: SessionRecord, lamp: SessionLamp): boolean {
+  return lamp === "idle" && showsUnread(session);
+}
+
+// A row's spoken state: type alone says nothing to a screen reader.
+export function spokenStatus(word: string, unread: boolean): string {
+  return unread ? `${word}, unread` : word;
 }
 
 export function isWorkingStatus(status: SessionStatus | null | undefined): boolean {
@@ -20,7 +35,7 @@ export function sessionLamp(session: SessionRecord, hasAsk: boolean): SessionLam
   if (hasAsk || session.status === "waiting_input") return "needs";
   if (isWorkingStatus(session.status)) return "working";
   if (session.status === "error" || session.status === "interrupted") return "error";
-  return isUnread(session) ? "done" : "idle";
+  return "idle";
 }
 
 export function lampWord(lamp: SessionLamp, status: SessionRecord["status"]): string {
@@ -29,8 +44,6 @@ export function lampWord(lamp: SessionLamp, status: SessionRecord["status"]): st
       return "Needs you";
     case "working":
       return "Working";
-    case "done":
-      return "Done";
     case "error":
       return status === "interrupted" ? "Interrupted" : "Error";
     case "idle":

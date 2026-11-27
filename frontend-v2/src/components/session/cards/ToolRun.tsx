@@ -1,7 +1,7 @@
 "use client";
 
 import { describeStep } from "@waypoint/web-core/activity";
-import { describeCall, summarizeToolRun } from "@waypoint/web-core/session/toolRun";
+import { describeCall, pendingCallOf, summarizeToolRun } from "@waypoint/web-core/session/toolRun";
 import { itemKey, primaryEvent, type LeafItem } from "@waypoint/web-core/session/transcript";
 
 import { StepText } from "@/components/sessions/StepText";
@@ -21,9 +21,9 @@ export function ToolRun({ items, working }: ToolRunProps) {
   const { cwd, full } = useSessionContext();
   const summary = summarizeToolRun(items);
   const calls = items.map((child) => ({ child, row: describeCall(child, cwd) }));
-  const pending = calls.findLast(({ row }) => row?.status === "pending");
-  const live = working && pending !== undefined;
-  const step = live ? describeStep(primaryEvent(pending.child)) : null;
+  const pending = working ? pendingCallOf(items) : undefined;
+  const live = pending !== undefined;
+  const step = pending ? describeStep(primaryEvent(pending)) : null;
 
   return (
     <RunLine

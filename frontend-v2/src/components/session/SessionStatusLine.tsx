@@ -16,7 +16,7 @@ export function SessionStatusLine({ standing, agent, className }: SessionStatusL
   return (
     <span className={className}>
       <span className={cx(styles.state, standing.lamp === "needs" && styles.needs)}>
-        <StatusLamp state={standing.lamp} size="sm" flat />
+        {standing.lamp === "exited" ? null : <StatusLamp state={standing.lamp} size="sm" flat />}
         {standing.word}
       </span>
       <span className={styles.agent}>{agent}</span>

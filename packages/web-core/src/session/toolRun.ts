@@ -295,6 +295,10 @@ function argumentLines(tool: string | null, input: Record<string, unknown> | nul
   }
 }
 
+export function pendingCallOf(items: readonly LeafItem[]): LeafItem | undefined {
+  return items.findLast((child) => (child.kind === "pair" ? !child.pair.result : child.event.kind === "tool_call"));
+}
+
 export function describeCall(child: LeafItem, cwd?: string | null): CallView | null {
   const call = child.kind === "pair" ? child.pair.call : child.event.kind === "tool_call" ? child.event : null;
   const result = child.kind === "pair" ? child.pair.result : child.event.kind === "tool_result" ? child.event : null;

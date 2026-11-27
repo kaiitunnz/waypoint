@@ -1,4 +1,4 @@
-import { itemKey, type TranscriptItem } from "./transcript";
+import { itemKey, type LeafItem, type TranscriptItem } from "./transcript";
 import { cardKindOf, pairCardKindOf, type CardKind } from "./cardKind";
 
 // A turn is what the compact transcript spaces and routes together: the human's
@@ -65,4 +65,17 @@ export function groupTurns(items: readonly TranscriptItem[]): TranscriptTurn[] {
     );
   }
   return turns;
+}
+
+// The calls a transcript item draws as a run line; a question or a sent file is a card.
+export function runCallsOf(item: TranscriptItem): LeafItem[] {
+  if (item.kind === "tool_run") return item.items;
+  if (item.kind !== "pair") return [];
+  const kind = pairCardKindOf(item.pair);
+  return kind === "ask_question" || kind === "send_file" ? [] : [item];
+}
+
+// The turn's last tool run: the one a working session shows as live.
+export function lastRunIndex(turn: TranscriptTurn): number {
+  return turn.kind === "rule" ? -1 : turn.items.findLastIndex((item) => runCallsOf(item).length > 0);
 }

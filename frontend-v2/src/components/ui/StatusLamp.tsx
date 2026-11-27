@@ -1,11 +1,13 @@
+import type { HostOnline } from "@waypoint/web-core/hostPicker";
 import type { SessionLamp } from "@waypoint/web-core/sessionPresentation";
 
 import { cx } from "@/lib/cx";
 
 import styles from "./StatusLamp.module.css";
 
-// Lamps differ by shape and fill as well as hue, so state survives colour blindness.
-export type LampState = SessionLamp;
+// A session's state or a host's reachability. Lamps differ by shape and fill as well
+// as hue, so state survives colour blindness.
+export type LampState = SessionLamp | HostOnline;
 
 interface StatusLampProps {
   state: LampState;

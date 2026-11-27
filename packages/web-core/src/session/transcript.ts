@@ -382,7 +382,7 @@ export function removeConfirmedOptimisticMessages<T extends { text: string }>(
   return next;
 }
 
-function isToolResultDelta(event: EventRecord): boolean {
+export function isToolResultDelta(event: EventRecord): boolean {
   if (event.kind !== "tool_result") {
     return false;
   }
@@ -392,7 +392,7 @@ function isToolResultDelta(event: EventRecord): boolean {
 
 // Tool calls that render as their own card instead of folding into a collapsed
 // tool run.
-function isStandaloneToolCard(toolName: string | null): boolean {
+export function isStandaloneToolCard(toolName: string | null): boolean {
   return toolName === "AskUserQuestion" || toolName === "SendUserFile";
 }
 

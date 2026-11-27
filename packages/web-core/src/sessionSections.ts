@@ -12,14 +12,19 @@ export function visibleSessions(sessions: SessionRecord[]): SessionRecord[] {
 }
 
 export interface SessionSections {
-  // Pinned, whatever their status; newest pin first.
+  // Pinned and not exited; newest pin first.
   pinned: SessionRecord[];
   // Running or idle and not pinned. A session with a pending ask is shown by its
   // Needs-you card instead.
   live: SessionRecord[];
+  // Exited and pinned; newest pin first. They head the Exited group.
+  pinnedExited: SessionRecord[];
   // Exited and not pinned, among the sessions the live list still carries.
   exited: SessionRecord[];
 }
+
+export const byPin = (a: SessionRecord, b: SessionRecord): number =>
+  (b.pinned_at ?? "").localeCompare(a.pinned_at ?? "");
 
 export function buildSections(
   sessions: SessionRecord[],
@@ -27,16 +32,18 @@ export function buildSections(
 ): SessionSections {
   const pinned: SessionRecord[] = [];
   const live: SessionRecord[] = [];
+  const pinnedExited: SessionRecord[] = [];
   const exited: SessionRecord[] = [];
   for (const session of sessions) {
-    if (session.pinned_at) pinned.push(session);
-    else if (session.status === "exited") exited.push(session);
+    if (session.status === "exited") (session.pinned_at ? pinnedExited : exited).push(session);
+    else if (session.pinned_at) pinned.push(session);
     else if (!askSessionIds.has(session.id)) live.push(session);
   }
-  pinned.sort((a, b) => (b.pinned_at ?? "").localeCompare(a.pinned_at ?? ""));
+  pinned.sort(byPin);
   live.sort(byRecency);
+  pinnedExited.sort(byPin);
   exited.sort(byRecency);
-  return { pinned, live, exited };
+  return { pinned, live, pinnedExited, exited };
 }
 
 export interface SessionSearch {

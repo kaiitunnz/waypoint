@@ -1,7 +1,7 @@
 "use client";
 
 import { itemKey } from "@waypoint/web-core/session/transcript";
-import type { TranscriptTurn } from "@waypoint/web-core/session/turns";
+import { lastRunIndex, type TranscriptTurn } from "@waypoint/web-core/session/turns";
 
 import { cx } from "@/lib/cx";
 
@@ -18,7 +18,7 @@ interface TurnViewProps {
 export function TurnView({ turn, working }: TurnViewProps) {
   const { agentName } = useSessionContext();
   if (turn.kind === "rule") return <ItemView item={turn.item} first={false} live={false} />;
-  const lastRun = working ? turn.items.findLastIndex((item) => item.kind === "tool_run" || item.kind === "pair") : -1;
+  const lastRun = working ? lastRunIndex(turn) : -1;
   return (
     <div
       role="group"

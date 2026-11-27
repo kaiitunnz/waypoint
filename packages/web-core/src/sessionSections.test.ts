@@ -33,13 +33,29 @@ describe("buildSections", () => {
         session("old", { last_event_at: "2026-11-25T09:00:00Z" }),
         session("new", { last_event_at: "2026-11-25T11:00:00Z" }),
         session("pin-a", { pinned_at: "2026-11-01T00:00:00Z" }),
-        session("pin-b", { pinned_at: "2026-11-02T00:00:00Z", status: "exited" }),
+        session("pin-b", { pinned_at: "2026-11-02T00:00:00Z" }),
         session("gone", { status: "exited" }),
       ],
       new Set(),
     );
     expect(sections.pinned.map((s) => s.id)).toEqual(["pin-b", "pin-a"]);
     expect(sections.live.map((s) => s.id)).toEqual(["new", "old"]);
+    expect(sections.pinnedExited).toEqual([]);
+    expect(sections.exited.map((s) => s.id)).toEqual(["gone"]);
+  });
+
+  it("keeps every exited session out of Pinned, the pinned ones heading Exited by newest pin", () => {
+    const sections = buildSections(
+      [
+        session("early-pin", { pinned_at: "2026-11-01T00:00:00Z", status: "exited", last_event_at: "2026-11-25T12:00:00Z" }),
+        session("late-pin", { pinned_at: "2026-11-02T00:00:00Z", status: "exited", last_event_at: "2026-11-25T08:00:00Z" }),
+        session("live-pin", { pinned_at: "2026-11-03T00:00:00Z" }),
+        session("gone", { status: "exited" }),
+      ],
+      new Set(),
+    );
+    expect(sections.pinned.map((s) => s.id)).toEqual(["live-pin"]);
+    expect(sections.pinnedExited.map((s) => s.id)).toEqual(["late-pin", "early-pin"]);
     expect(sections.exited.map((s) => s.id)).toEqual(["gone"]);
   });
 

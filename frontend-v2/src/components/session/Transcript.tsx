@@ -16,6 +16,7 @@ import { TranscriptHoldProvider } from "./SessionContext";
 import styles from "./Transcript.module.css";
 import { TurnView } from "./TurnView";
 import { useTranscriptScroll } from "./useTranscriptScroll";
+import { WorkingRow, type WorkingTurn } from "./WorkingRow";
 
 interface TranscriptProps {
   turns: TranscriptTurn[];
@@ -27,6 +28,8 @@ interface TranscriptProps {
   hiddenCount: number;
   onShowAll: () => void;
   pending: PendingSend[];
+  // The running turn, shown in a row at the transcript's end.
+  runningTurn: WorkingTurn | null;
   // A question card to scroll to and mark; `seq` makes a repeat a new request.
   reveal?: { toolUseId: string; seq: number } | null;
   // Whether the card was on the page.
@@ -47,6 +50,7 @@ export function Transcript({
   hiddenCount,
   onShowAll,
   pending,
+  runningTurn,
   reveal,
   onRevealed,
 }: TranscriptProps) {
@@ -101,7 +105,9 @@ export function Transcript({
                 ))}
               </div>
               {pending.length > 0 ? <PendingTurn messages={pending} /> : null}
-              {!loading && turns.length === 0 && pending.length === 0 ? (
+              <WorkingRow turn={runningTurn} />
+              {/* The working row already says the agent is at work. */}
+              {!loading && turns.length === 0 && pending.length === 0 && (hiddenCount > 0 || !runningTurn) ? (
                 <EmptyTranscript status={status} hiddenCount={hiddenCount} onShowAll={onShowAll} />
               ) : null}
             </div>

@@ -23,7 +23,7 @@ interface SessionMenuActions {
 
 interface SessionMenuOptions {
   // Runs after a session is deleted from a dialog.
-  onRemoved?: () => void;
+  onRemoved?: (sessionId: string) => void;
   // Receives the session record after a rename or a pin change.
   onUpdated?: (session: SessionRecord) => void;
 }
@@ -41,7 +41,7 @@ export function useSessionMenuActions({ onRemoved, onUpdated }: SessionMenuOptio
       ...actions,
       setPinned: (sessionId: string, pinned: boolean) => actions.setPinned(sessionId, pinned, onUpdated),
       rename: (session: SessionRecord, title: string) => actions.rename(session, title, onUpdated),
-      remove: (sessionId: string) => actions.remove(sessionId, onRemoved),
+      remove: (sessionId: string) => actions.remove(sessionId, () => onRemoved?.(sessionId)),
     }),
     [actions, onRemoved, onUpdated],
   );

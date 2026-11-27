@@ -28,23 +28,44 @@ describe("rankSessionsForSwitcher", () => {
   ];
   const asks = new Set(["ask", "pin"]);
 
-  it("keeps the section order with a blank query, newest first inside a section", () => {
+  it("keeps the section order with a blank query", () => {
     const entries = rankSessionsForSwitcher(sessions, asks, "");
     expect(entries.map((e) => [e.session.id, e.section])).toEqual([
       ["ask", "needs"],
       ["pin", "needs"],
-      ["pin-gone", "pinned"],
       ["live-new", "live"],
       ["live-old", "live"],
+      ["pin-gone", "exited"],
       ["gone", "exited"],
     ]);
+  });
+
+  it("heads Exited with the pinned ones, newest pin first, ahead of newer unpinned ones", () => {
+    const entries = rankSessionsForSwitcher(
+      [
+        session("newer", "Newer", { status: "exited", last_event_at: "2026-11-25T12:00:00Z" }),
+        session("older", "Older", { status: "exited", last_event_at: "2026-11-25T11:00:00Z" }),
+        session("early-pin", "Early pin", { status: "exited", pinned_at: "2026-11-01T00:00:00Z" }),
+        session("late-pin", "Late pin", {
+          status: "exited",
+          pinned_at: "2026-11-02T00:00:00Z",
+          last_event_at: "2026-11-25T01:00:00Z",
+        }),
+      ],
+      new Set(),
+      "",
+    );
+    expect(ids(entries)).toEqual(["late-pin", "early-pin", "newer", "older"]);
   });
 
   it("matches fuzzily and keeps results in their sections", () => {
     const entries = rankSessionsForSwitcher(sessions, asks, "fix");
     expect(ids(entries)).toEqual(["ask"]);
     expect(entries[0].positions).toEqual([0, 1, 2]);
-    expect(ids(rankSessionsForSwitcher(sessions, asks, "pa"))).toEqual(["pin", "pin-gone"]);
+    expect(rankSessionsForSwitcher(sessions, asks, "pa").map((e) => [e.session.id, e.section])).toEqual([
+      ["pin", "needs"],
+      ["pin-gone", "exited"],
+    ]);
     expect(ids(rankSessionsForSwitcher(sessions, asks, "hmka"))).toEqual(["live-old"]);
   });
 

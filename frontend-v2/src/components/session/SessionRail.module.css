@@ -56,6 +56,10 @@
   list-style: none;
 }
 
+.row {
+  position: relative;
+}
+
 .item {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) auto;
@@ -68,24 +72,60 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .item:hover {
+  .row:hover .item {
     background: var(--fill-quiet);
   }
 }
 
 /* The open session takes the plane's colour so it joins the conversation like a tab. */
 .on,
-.on:hover {
+.row:hover .on {
   background: var(--plane);
+}
+
+/* The menu button takes the time's place at the end of the title's line. */
+.actions {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  height: 34px;
+}
+
+.single .actions {
+  height: 100%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .actions {
+    opacity: 0;
+  }
+
+  .row:hover .actions,
+  .row:has(:focus-visible) .actions,
+  .row:has([aria-expanded="true"]) .actions {
+    opacity: 1;
+  }
+
+  .row:hover .time,
+  .row:has(:focus-visible) .time,
+  .row:has([aria-expanded="true"]) .time {
+    opacity: 0;
+  }
 }
 
 .name {
   overflow: hidden;
   font-size: var(--f-body);
-  font-weight: 600;
   color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.unread .name {
+  font-weight: 600;
+  color: var(--text-strong);
 }
 
 .on .name {
@@ -93,8 +133,15 @@
 }
 
 .time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: var(--f-meta);
   color: var(--faint);
+}
+
+.unread .time {
+  color: var(--text-strong);
 }
 
 .sub {
@@ -106,17 +153,34 @@
   white-space: nowrap;
 }
 
-.single {
+.single .item {
   min-height: 36px;
 }
 
 .exited .name {
-  font-weight: 400;
   color: var(--muted);
 }
 
+/* Touch opens the menu by a long press. The button shows for keyboard focus and
+   otherwise stays for a screen reader. */
 @media not all and (hover: hover) and (pointer: fine) {
-  .single {
+  .single .item {
     min-height: 44px;
+  }
+
+  .item {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+
+  .row:not(:has(:focus-visible)) .actions {
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .row:has(:focus-visible) .time {
+    opacity: 0;
   }
 }

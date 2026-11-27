@@ -20,7 +20,7 @@ import { DEFAULT_BACKEND_PORT } from "@waypoint/web-core/tailnet";
 import { Button } from "@/components/ui/Button";
 import { Field, SearchInput, TextInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
+import { StatusLamp } from "@/components/ui/StatusLamp";
 import { cx } from "@/lib/cx";
 
 import styles from "./HostPicker.module.css";
@@ -48,12 +48,6 @@ interface HostPickerProps {
   // Level of the group headings, so they nest under the page's own headings.
   headingLevel?: "h2" | "h3";
 }
-
-const LAMP: Record<HostRow["online"], LampState> = {
-  online: "done",
-  offline: "exited",
-  unknown: "idle",
-};
 
 export function HostPicker({
   groups,
@@ -87,14 +81,14 @@ export function HostPicker({
         <li key={row.key}>
           <button
             type="button"
-            className={cx(styles.row, row.key === selectedKey && styles.selected)}
+            className={cx(styles.row, row.online === "offline" && styles.offline, row.key === selectedKey && styles.selected)}
             aria-current={row.key === selectedKey ? "true" : undefined}
             onClick={() => {
               setPicks((count) => count + 1);
               onSelect(row);
             }}
           >
-            <StatusLamp state={LAMP[row.online]} size="sm" label={row.online} />
+            <StatusLamp state={row.online} size="sm" label={row.online} />
             <span className={styles.name}>
               {row.name}
               {row.lastUsedAt !== null ? (

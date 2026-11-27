@@ -110,6 +110,14 @@
   white-space: nowrap;
 }
 
+.offline .name {
+  color: var(--muted);
+}
+
+.offline .address {
+  color: var(--faint);
+}
+
 .selected .name {
   color: var(--text-strong);
   font-weight: 600;

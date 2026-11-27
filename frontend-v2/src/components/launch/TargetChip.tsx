@@ -12,14 +12,16 @@ import { Icon } from "@/components/ui/Icon";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
 import { cx } from "@/lib/cx";
 import { useShellData } from "@/lib/shell-data";
+import { sshLamp } from "@/lib/ssh";
 
 import styles from "./TargetChip.module.css";
 
 const needsPassword = (target: LaunchTargetSummary | null) => target?.auth === "password" && !target.connected;
 
 function lampFor(target: LaunchTargetSummary | null): { state: LampState; label: string } {
+  if (!target) return { state: "online", label: "This host" };
   if (needsPassword(target)) return { state: "error", label: "SSH password required" };
-  return { state: "done", label: target ? "SSH target" : "This host" };
+  return { state: sshLamp(target), label: "SSH target" };
 }
 
 // "on <target> ▾": where the session launches, this host or an SSH target. A

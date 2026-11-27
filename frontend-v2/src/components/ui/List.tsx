@@ -25,6 +25,8 @@ interface ListRowProps {
   compact?: boolean;
   // One line that keeps the title's type.
   single?: boolean;
+  // A session's read state; a row without it keeps the default type.
+  unread?: boolean;
   dimmed?: boolean;
   href?: string;
   onClick?: () => void;
@@ -42,6 +44,7 @@ export function ListRow({
   selected,
   compact,
   single,
+  unread,
   dimmed,
   href,
   onClick,
@@ -52,6 +55,8 @@ export function ListRow({
     !lamp && styles.noLamp,
     compact && styles.compact,
     single && styles.single,
+    unread === true && styles.unread,
+    unread === false && styles.read,
     dimmed && styles.dimmed,
     selected && styles.selected,
   );

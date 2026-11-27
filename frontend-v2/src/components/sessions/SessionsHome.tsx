@@ -90,7 +90,7 @@ export function SessionsHome() {
   } = useExitedSessions({
     query,
     live: searching ? found.rest : sections.exited,
-    lead: searching ? found.lead : undefined,
+    lead: searching ? found.lead : sections.pinnedExited,
     enabled: searching || showExited,
   });
 

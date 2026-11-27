@@ -17,11 +17,15 @@ import { useAskQuestionState } from "@waypoint/web-core/hooks/useAskQuestionStat
 import { useOptimisticSends } from "@waypoint/web-core/hooks/useOptimisticSends";
 import { useSessionScheduledMessages } from "@waypoint/web-core/hooks/useSessionScheduledMessages";
 import { useSessionStream } from "@waypoint/web-core/hooks/useSessionStream";
+import { useTurnStart } from "@waypoint/web-core/hooks/useTurnStart";
 import { COMPACT_HEADER_WIDTH } from "@waypoint/web-core/layoutRules";
 import { findPendingApprovals, pendingPlanApproval } from "@waypoint/web-core/session/approvals";
+import { isAgentBusy } from "@waypoint/web-core/session/connection";
 import { composerAvailability, isExitedSession } from "@waypoint/web-core/session/send";
 import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
+import { workingStep } from "@waypoint/web-core/session/workingRow";
 import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
+import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { Composer } from "@/components/composer/Composer";
 import { FocusPill } from "@/components/composer/FocusPill";
@@ -71,7 +75,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
   const { toast, dismiss } = useToast();
   const catalog = useBackendCatalog(host, token, null);
   const stream = useSessionStream(host, token, id, handleAuthFailure);
-  const { session, events, connection, pendingQuestions, hasOlder, loadingOlder, loadOlder } = stream;
+  const { session, events, connection, pendingQuestions, hasOlder, loadingOlder, loadOlder, oldestSequence } = stream;
   const scheduled = useSessionScheduledMessages(host, token, id);
   const [filesOpen, setFilesOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -98,7 +102,16 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
     setPaneBesideTerminal(false);
   };
   const goHome = useCallback(() => router.replace("/"), [router]);
-  const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved: goHome, onUpdated: stream.setSession });
+  // The rail's menus act on any session; only a change to the open one affects this screen.
+  const { setSession } = stream;
+  const onRemoved = useCallback((removed: string) => (removed === id ? goHome() : undefined), [id, goHome]);
+  const onUpdated = useCallback(
+    (updated: SessionRecord) => {
+      if (updated.id === id) setSession(updated);
+    },
+    [id, setSession],
+  );
+  const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved, onUpdated });
   // A second reattach, from the menu or the question form, would restart the session the
   // first one restored; the ref stops a second tap before the next render.
   const [reconnecting, setReconnecting] = useState(false);
@@ -179,6 +192,19 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
     () => deriveTranscript(rendered, density, dockedPlanSequence),
     [rendered, density, dockedPlanSequence],
   );
+  // A turn runs by the same rule that offers Stop.
+  const busy = session !== null && isAgentBusy(session, connection);
+  const turnStartedAt = useTurnStart({
+    host,
+    token,
+    sessionId: id,
+    events,
+    oldestSequence,
+    hasOlder,
+    running: busy,
+    onAuthFailure: handleAuthFailure,
+  });
+  const step = useMemo(() => (busy ? workingStep(transcript.turns, rendered) : null), [busy, transcript.turns, rendered]);
   const canOpenFiles = composing && session !== null && supportsAttachments(session.backend, catalog);
   const openFiles = useMemo(() => (canOpenFiles ? () => setFilesOpen(true) : null), [canOpenFiles]);
   const context = useMemo(
@@ -293,6 +319,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
       hiddenCount={transcript.hiddenCount}
       onShowAll={() => setDensity("full")}
       pending={optimistic.pending}
+      runningTurn={busy ? { step, startedAt: turnStartedAt } : null}
       reveal={reveal}
       onRevealed={onRevealed}
     />
@@ -302,7 +329,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
     <SessionContextProvider value={context}>
       <AskControllerProvider value={askController}>
         <div className={cx(styles.screen, railColumn && styles.railOpen, paneColumn && styles.paneOpen)}>
-          {railColumn ? <SessionRail currentId={id} /> : null}
+          {railColumn ? <SessionRail currentId={id} catalog={catalog} onAction={onAction} /> : null}
           <section ref={conversationRef} className={cx(styles.conv, terminalView && styles.terminal)} aria-label="Conversation">
             {pointer ? (
               <SessionHeader
@@ -389,7 +416,13 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
           {paneColumn ? <SidePane /> : null}
           {panels.drawer === "rail" ? (
             <SideDrawer side="left" label="Sessions" onClose={panels.closeDrawer}>
-              <SessionRail currentId={id} onClose={panels.closeDrawer} onPick={panels.pickFromDrawer} />
+              <SessionRail
+                currentId={id}
+                catalog={catalog}
+                onAction={onAction}
+                onClose={panels.closeDrawer}
+                onPick={panels.pickFromDrawer}
+              />
             </SideDrawer>
           ) : null}
           {panels.drawer === "pane" ? (

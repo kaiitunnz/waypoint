@@ -33,9 +33,9 @@ interface SignInFormProps {
 }
 
 const PROBE_LAMP: Record<ProbeStatus, LampState> = {
-  idle: "idle",
-  checking: "idle",
-  reachable: "done",
+  idle: "unknown",
+  checking: "unknown",
+  reachable: "online",
   unreachable: "error",
 };
 

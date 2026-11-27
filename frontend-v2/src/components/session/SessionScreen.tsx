@@ -62,7 +62,6 @@ import { Transcript } from "./Transcript";
 import { useQuestionReveal } from "./useQuestionReveal";
 import { useSessionPanels } from "./useSessionPanels";
 import { ViewSwitch, type SessionView } from "./ViewSwitch";
-import { WorkingRow } from "./WorkingRow";
 
 // `initialView` is the view asked for on arrival; a session without it shows its own.
 export function SessionScreen({ id, initialView }: { id: string; initialView: SessionView }) {
@@ -320,7 +319,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
       hiddenCount={transcript.hiddenCount}
       onShowAll={() => setDensity("full")}
       pending={optimistic.pending}
-      workingRow={busy ? <WorkingRow step={step} startedAt={turnStartedAt} /> : null}
+      runningTurn={busy ? { step, startedAt: turnStartedAt } : null}
       reveal={reveal}
       onRevealed={onRevealed}
     />

@@ -70,26 +70,24 @@ whether they name the call a reply answers:
 
 | Field | Meaning |
 | --- | --- |
-| `call_verified` | `true`: `tool_name` and `tool_input` are the call the reply answers, or the plan `text` is the plan being approved. `false`: they are the screen's reading, which may be partial or wrong |
+| `call_verified` | `true`: `tool_name` and `tool_input` name the pending call the reply answers, or the plan `text` is the plan being approved. `false`: they are the screen's reading, which may be partial or wrong |
 | `tool_use_id` | The matched call, when one was matched |
-| `subagent` | The kind of subagent asking, when the request is a subagent's |
+| `subagent` | The type or name of the Claude subagent asking, when the request is one's |
 
 These fields are `null` on items from a transport that names its calls natively,
 so a client gates only screen-read transports on `call_verified`.
 
-For `claude_tty`:
+For `claude_tty`
+([matching rules](coding_agent_plugins.md#the-claude_tty-composition)):
 
-- A tool approval is verified when the pending calls, in the main transcript or
-  the named subagent's, that agree with everything the dialog shows are a single
-  call, or identical calls of one transcript, of which the oldest is named.
-  `tool_input` is then that call's whole input. A call Claude has not written to
-  its transcript while the dialog is up, which is common on the main thread,
-  stays unverified.
-- A plan approval is verified when its text is the content of the plan file the
-  dialog names. An unreadable file leaves the item unverified and without text,
-  listed as a plain `approval`.
-- A reply is refused with `400` when the terminal no longer shows the request,
-  and the request on screen is raised as a new item.
+- A verified tool approval names a pending call that is consistent with
+  everything the dialog draws. Inputs the dialog does not draw, such as a Bash
+  `timeout` or an `Agent` prompt, are not compared
+  ([#646](https://github.com/kaiitunnz/waypoint/issues/646)).
+- Calls of the main thread are often unverified.
+- A reply is refused with `400` when the terminal no longer shows the request or
+  it cannot be confirmed there, and the request on screen is raised as a new
+  item.
 
 ## Bounded payloads
 

@@ -1301,7 +1301,7 @@ class PendingAskApproval(BaseModel):
     # requests always do.
     call_verified: bool | None = None
     tool_use_id: str | None = None
-    # The subagent asking, when it is one.
+    # The type or name of the Claude subagent asking, when it is one.
     subagent: str | None = None
 
 

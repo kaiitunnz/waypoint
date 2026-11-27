@@ -708,12 +708,13 @@ a typed, unsent message implements the `PaneComposerReading` protocol from
 def pane_composer_holds_input(self, pane_text: str) -> bool: ...
 ```
 
-Resume on a tmux or `claude_tty` pane presses Enter; when this method reports a
-typed message on the pre-Enter snapshot, the runtime marks the session
-`running`. Without it, resume leaves the status to the transport. Resume refuses
-with `InputBlockedError` (409) while `pane_shows_blocking_dialog` reports a
-dialog, and on `claude_tty` also while the composer is not drawn. Claude
-implements it; `claude_tty` delegates to its composed Claude agent.
+Resume on a tmux or `claude_tty` pane presses Enter; when the pre-Enter
+snapshot holds a typed message, the runtime marks the session `running`. Resume
+refuses with `InputBlockedError` (409) while the snapshot shows a blocking
+dialog. On tmux both come from the agent plugin (`pane_composer_holds_input`,
+`pane_shows_blocking_dialog`), and without the former resume leaves the status
+to the transport. Claude implements both. `claude_tty` has its own resume, which
+reads the Claude pane directly and also refuses while the composer is not drawn.
 
 ## Token & context usage
 
@@ -850,9 +851,26 @@ Claude threads appear under both backend ids.
 
 `claude_tty` reads permission dialogs off the pane and names the call each asks
 about when that is certain ([call
-verification](pending_asks.md#call-verification)). A reply presses the option's
-digit only while the pane still shows the request, and messages are typed only
-while the composer is drawn.
+verification](pending_asks.md#call-verification)):
+
+- The candidates are the pending calls of the main transcript, or of the named
+  subagent's. A tool approval is verified when those consistent with everything
+  the dialog draws are a single call, or identical calls of one transcript, of
+  which the oldest is named. `tool_input` is that call's whole input.
+- Diffs and commands are compared line by line; runs of whitespace within a line
+  are not told apart.
+- Claude draws the `Bash command (unsandboxed)` heading only while sandboxing is
+  on. It matches a call with `dangerouslyDisableSandbox`, and the plain heading
+  one without.
+- A plan approval is verified when its text is the content of the plan file the
+  dialog names. An unreadable file gives no text.
+- A call Claude has not written to its transcript while the dialog is up, which
+  is common on the main thread, stays unverified, as does a heading too narrow a
+  pane to read whole.
+- A call that was replied to is not named again.
+
+A reply presses the option's digit only while the pane still shows the request,
+and messages are typed only while the composer is drawn.
 
 `/clear` starts a new conversation in a new transcript, whose `derived-from`
 header record names the old thread with `via: "clear"`. After a `/clear` sent

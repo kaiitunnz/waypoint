@@ -353,6 +353,27 @@ async def test_follow_names_a_worktree_after_its_repository(
     assert (session.repo_name, session.branch) == ("proj", "worktree-w")
 
 
+async def test_follow_back_from_a_removed_folder_keeps_the_name(
+    repo: tuple[Path, Path], tmp_path: Path
+) -> None:
+    # A session created in a linked worktree is named after that worktree.
+    root, _ = repo
+    created = tmp_path / "proj-feature"
+    _git(root, "worktree", "add", "-q", str(created), "-b", "feature")
+    nested = created / "nested"
+    _git(root, "worktree", "add", "-q", str(nested), "-b", "nested")
+    runtime = _runtime(
+        _session(str(created), repo_name="proj-feature", branch="feature")
+    )
+
+    await follow_relocation(runtime, "s1", str(nested))
+    _git(root, "worktree", "remove", str(nested))
+    await follow_relocation(runtime, "s1", str(created))
+
+    session = runtime.storage.session
+    assert (session.repo_name, session.branch) == ("proj-feature", "feature")
+
+
 async def test_follow_keeps_state_written_during_the_git_lookup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

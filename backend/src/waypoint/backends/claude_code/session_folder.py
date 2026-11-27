@@ -80,6 +80,10 @@ async def _git_meta_for(session: SessionRecord, folder: str) -> GitMeta:
         return meta
     if common == await git_common_dir(session.cwd):
         return GitMeta(repo_name=session.repo_name, branch=meta.branch)
+    # The folder being left can be gone, so the creation folder is compared too.
+    if common == await git_common_dir(launch := launch_folder(session)):
+        created = await resolve_git_meta(launch)
+        return GitMeta(repo_name=created.repo_name, branch=meta.branch)
     if (git_dir := Path(common)).name == ".git":
         return GitMeta(repo_name=git_dir.parent.name, branch=meta.branch)
     return meta

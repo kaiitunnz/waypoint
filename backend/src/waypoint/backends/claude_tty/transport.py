@@ -75,6 +75,9 @@ class ClaudeTtyTransport(TmuxTransport):
         text: str,
         attachments: list[ResolvedAttachment] | None = None,
     ) -> None:
+        # Before the send, which waits long enough for the tailer to read an
+        # earlier interrupt's marker.
+        self._plugin.supersede_interrupt(session.id)
         await super().send_input(session, text, attachments)
         if text.split(maxsplit=1)[:1] != [_CLEAR_COMMAND]:
             return
@@ -143,7 +146,8 @@ class ClaudeTtyTransport(TmuxTransport):
                 snapshot
             ) or not pane_dialog.composer_drawn(snapshot):
                 raise InputBlockedError()
-            submits = pane_dialog.composer_holds_input(snapshot)
+            if submits := pane_dialog.composer_holds_input(snapshot):
+                self._plugin.supersede_interrupt(session.id)
             await self.adapter.resume(target)
         return submits
 
@@ -158,6 +162,9 @@ class ClaudeTtyTransport(TmuxTransport):
             self._runtime, session.id, "Pending approval cleared by interrupt"
         )
         target = self._target(session)
+        # Before the Esc, so the tailer cannot read its marker first. The runtime
+        # notes this interrupt, so the marker adds no note of its own.
+        self._plugin.expect_interrupt(session.id)
         await self.adapter.send_bytes(target, b"\x1b")
         # Retried here: the tailer takes several polls to raise a dialog that
         # outlived its card.

@@ -27,24 +27,15 @@ from waypoint.backends.task_notifications import (
     TaskNotification,
     task_notification_event,
 )
-from waypoint.schemas import SessionStatus
 
 
-def format_status_event(event: dict[str, Any]) -> tuple[str, SessionStatus]:
-    status_label = event.get("status")
-    compact_result = event.get("compact_result")
-    if status_label == "compacting":
-        return "Compacting context…", SessionStatus.RUNNING
-    if compact_result is not None:
-        return (
-            f"Context compaction {compact_result}",
-            (
-                SessionStatus.IDLE
-                if compact_result == "success"
-                else SessionStatus.ERROR
-            ),
-        )
-    return "", SessionStatus.RUNNING
+def format_status_event(event: dict[str, Any]) -> str:
+    """The note for a ``status`` system record, or ``""`` for one that has none."""
+    if event.get("status") == "compacting":
+        return "Compacting context…"
+    if (compact_result := event.get("compact_result")) is not None:
+        return f"Context compaction {compact_result}"
+    return ""
 
 
 def format_compact_boundary(metadata: dict[str, Any]) -> str:
@@ -162,6 +153,97 @@ def is_injected_user_turn(content: Any) -> bool:
             "This session is being continued"
         )
     return False
+
+
+# ─── Turn boundaries (Claude Code native transcript) ─────────────────────────
+#
+# An interrupt writes no assistant record: the CLI appends a ``user`` record
+# whose only block is one of these markers, after a rejection result when a tool
+# call was cut off or declined.
+
+_INTERRUPT_MARKERS = frozenset(
+    {
+        "[Request interrupted by user]",
+        "[Request interrupted by user for tool use]",
+    }
+)
+
+INTERRUPTED_NOTE = "Interrupted"
+DECLINED_NOTE = "Turn ended — tool use declined"
+
+
+def is_interrupt_marker(content: Any) -> bool:
+    """A typed prompt is a string, so one quoting a marker does not count."""
+    if not isinstance(content, list) or len(content) != 1:
+        return False
+    block = content[0]
+    return (
+        isinstance(block, dict)
+        and block.get("type") == "text"
+        and block.get("text") in _INTERRUPT_MARKERS
+    )
+
+
+def is_user_rejection(record: dict[str, Any]) -> bool:
+    """Whether the human declined or cut off the tool call this record reports on.
+
+    The turn is over; a decline with feedback carries an ``Error: …`` result
+    instead, and its turn goes on.
+    """
+    result = record.get("toolUseResult")
+    return isinstance(result, str) and result.strip().lower().startswith(
+        "user rejected"
+    )
+
+
+def is_human_prompt(record: dict[str, Any]) -> bool:
+    origin = record.get("origin")
+    return isinstance(origin, dict) and origin.get("kind") == "human"
+
+
+def is_queued_prompt(record: dict[str, Any]) -> bool:
+    """A prompt the human queued mid-turn, delivered now: it starts a turn."""
+    return is_human_prompt(record) and record.get("promptSource") == "queued"
+
+
+def is_transcript_only(record: dict[str, Any]) -> bool:
+    """A record kept in the transcript but never sent to the model: no turn."""
+    return bool(record.get("queueTranscriptOnly"))
+
+
+@dataclass
+class TurnAbortTracker:
+    """Why the interrupt marker about to arrive was written.
+
+    The marker ends the turn; the rejection records before it say how.
+    """
+
+    _dismissed_question: bool = False
+    _declined: bool = False
+
+    def rejected(self, record: dict[str, Any]) -> None:
+        # Absent when the call was already running as the human cut it off.
+        if record.get("toolDenialBeforeRun"):
+            self._declined = True
+
+    def question_dismissed(self) -> None:
+        self._dismissed_question = True
+
+    def reset(self) -> None:
+        self._dismissed_question = False
+        self._declined = False
+
+    def resolve(self) -> tuple[str, str] | None:
+        """``(note, stop_reason)`` for the marker, or None for a dismissed
+        question, which stays answerable. Resets the tracker.
+        """
+        dismissed, declined = self._dismissed_question, self._declined
+        self.reset()
+        if dismissed:
+            return None
+        if declined:
+            return DECLINED_NOTE, "tool_rejected"
+        return INTERRUPTED_NOTE, "interrupted"
 
 
 # ─── Task notifications (Claude Code native transcript) ──────────────────────

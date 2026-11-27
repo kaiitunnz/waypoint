@@ -24,6 +24,7 @@ from waypoint.backends.claude_code.models import (
     normalize_claude_model_id,
 )
 from waypoint.backends.claude_code.normalize import (
+    INTERRUPTED_NOTE,
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
     TaskListTracker,
@@ -265,7 +266,7 @@ def claude_cli_mode_for(mode: str) -> str:
 
 
 EmitEvent = Callable[
-    [str, EventKind, str, dict[str, Any], SessionStatus],
+    [str, EventKind, str, dict[str, Any], SessionStatus | None],
     Coroutine[Any, Any, None],
 ]
 InitCallback = Callable[[str, dict[str, Any]], None]
@@ -295,6 +296,8 @@ LaunchFactory = Callable[
 
 
 STDERR_TAIL_LINES = 50
+# ``terminal_reason`` values of a result that an interrupt cut short.
+_INTERRUPTED_TERMINAL_REASONS = frozenset({"aborted_streaming", "aborted_tools"})
 
 
 @dataclass
@@ -360,6 +363,10 @@ class ClaudeSessionState:
     last_plan_path: str | None = None
     last_plan_content: str | None = None
     closing: bool = False
+    # Waypoint asked to interrupt and the interrupted turn's result is still due.
+    stop_requested: bool = False
+    # Input was sent since, so that result may not move the new turn's status.
+    stop_superseded: bool = False
     model: str | None = None
     # The raw concrete model id the CLI last reported resolving to (e.g.
     # ``claude-sonnet-5``), mirrored from the persisted
@@ -405,6 +412,20 @@ def _control_response_line(request_id: str, response_body: dict[str, Any]) -> by
         "response": {"request_id": request_id, **response_body},
     }
     return (json.dumps(envelope) + "\n").encode("utf-8")
+
+
+def _turn_activity_status(event: dict[str, Any]) -> SessionStatus | None:
+    """The status a model or tool message sets. A subagent's keeps the session's:
+    a background one goes on after the turn that launched it has ended.
+    """
+    return None if event.get("parent_tool_use_id") else SessionStatus.RUNNING
+
+
+def _is_interrupted_result(event: dict[str, Any], stop_requested: bool) -> bool:
+    if (reason := event.get("terminal_reason")) is not None:
+        return reason in _INTERRUPTED_TERMINAL_REASONS
+    # CLI versions that report no ``terminal_reason``.
+    return stop_requested and event.get("subtype") == "error_during_execution"
 
 
 def _process_writable(state: ClaudeSessionState) -> bool:
@@ -687,6 +708,8 @@ class ClaudeCliAdapter:
             raise ClaudeCliError(
                 self._format_dead_process_error(state, state.process.returncode)
             )
+        if state.stop_requested:
+            state.stop_superseded = True
         envelope = {
             "type": "user",
             "message": {"role": "user", "content": _user_content(text, attachments)},
@@ -707,6 +730,8 @@ class ClaudeCliAdapter:
         # behaviour. Fall back to SIGINT only if the request fails — that
         # ends the process (rc=0 in `-p` mode), so the session would have to
         # be resumed.
+        state.stop_requested = True
+        state.stop_superseded = False
         request_id = f"interrupt-{uuid.uuid4()}"
         try:
             await self._send_control_request(
@@ -1299,9 +1324,9 @@ class ClaudeCliAdapter:
                 "tool_input": payload.get("tool_input"),
                 "tool_use_id": tool_use_id,
                 "diff_preview": diff_preview,
-                "status": SessionStatus.RUNNING,
             },
-            SessionStatus.RUNNING,
+            # A background subagent's edit asks permission after its turn ended.
+            None,
         )
 
     def has_pending_approval(self, session_id: str) -> bool:
@@ -1690,17 +1715,15 @@ class ClaudeCliAdapter:
             self._drop_ask_questions(
                 state, lambda entry: entry.request_id == request_id
             )
+            if await self._withdraw_approval(state, request_id):
+                return
         if event_type == "rate_limit_event":
             await self._emit_event(
                 state.session_id,
                 EventKind.SYSTEM_NOTE,
                 format_rate_limit(event.get("rate_limit_info", {})),
-                {
-                    "method": "rate_limit_event",
-                    "payload": event,
-                    "status": SessionStatus.RUNNING,
-                },
-                SessionStatus.RUNNING,
+                {"method": "rate_limit_event", "payload": event},
+                None,
             )
             return
         # Unknown — surface as system_note for visibility.
@@ -1708,13 +1731,32 @@ class ClaudeCliAdapter:
             state.session_id,
             EventKind.SYSTEM_NOTE,
             f"Unhandled claude event: {event_type}",
-            {
-                "method": event_type or "unknown",
-                "payload": event,
-                "status": SessionStatus.RUNNING,
-            },
-            SessionStatus.RUNNING,
+            {"method": event_type or "unknown", "payload": event},
+            None,
         )
+
+    async def _withdraw_approval(
+        self, state: ClaudeSessionState, request_id: object
+    ) -> bool:
+        """Forget the approval whose request the binary withdrew, and post the
+        note that closes its card."""
+        for tool_use_id, entry in list(state.pending.items()):
+            if entry.request_id != request_id:
+                continue
+            state.pending.pop(tool_use_id, None)
+            await self._emit_event(
+                state.session_id,
+                EventKind.SYSTEM_NOTE,
+                (
+                    "Pending approval cleared by interrupt"
+                    if state.stop_requested
+                    else "Pending approval withdrawn by Claude"
+                ),
+                {"method": "approval.invalidated", "approval_id": tool_use_id},
+                None,
+            )
+            return True
+        return False
 
     async def _handle_system(
         self, state: ClaudeSessionState, event: dict[str, Any]
@@ -1776,22 +1818,20 @@ class ClaudeCliAdapter:
             return
         if subtype == "status":
             # /compact and similar CLI commands surface their lifecycle here.
-            text, status = format_status_event(event)
-            if text:
+            if text := format_status_event(event):
                 await self._emit_event(
                     state.session_id,
                     EventKind.SYSTEM_NOTE,
                     text,
-                    {
-                        "method": "system.status",
-                        "payload": event,
-                        "status": status,
-                    },
-                    status,
+                    {"method": "system.status", "payload": event},
+                    None,
                 )
             return
         if subtype == "compact_boundary":
             metadata = event.get("compact_metadata") or {}
+            # A manual /compact is a turn of its own; auto-compaction runs
+            # inside one.
+            status = SessionStatus.IDLE if metadata.get("trigger") == "manual" else None
             await self._emit_event(
                 state.session_id,
                 EventKind.SYSTEM_NOTE,
@@ -1799,22 +1839,18 @@ class ClaudeCliAdapter:
                 {
                     "method": "system.compact_boundary",
                     "payload": event,
-                    "status": SessionStatus.IDLE,
+                    "status": status,
                 },
-                SessionStatus.IDLE,
+                status,
             )
             return
-        # Anything else — stash as system note.
+        # Anything else marks no turn boundary (some arrive while idle).
         await self._emit_event(
             state.session_id,
             EventKind.SYSTEM_NOTE,
             f"system/{subtype}",
-            {
-                "method": f"system.{subtype}",
-                "payload": event,
-                "status": SessionStatus.RUNNING,
-            },
-            SessionStatus.RUNNING,
+            {"method": f"system.{subtype}", "payload": event},
+            None,
         )
 
     async def _handle_assistant(
@@ -1823,6 +1859,7 @@ class ClaudeCliAdapter:
         message = event.get("message") or {}
         message_id = str(message.get("id") or "")
         usage = message.get("usage") or event.get("usage") or {}
+        activity = _turn_activity_status(event)
         for block in iter_content_blocks(message.get("content")):
             block_type = block.get("type")
             if block_type == "text":
@@ -1837,9 +1874,9 @@ class ClaudeCliAdapter:
                         "method": "assistant.text",
                         "item_id": message_id,
                         "payload": block,
-                        "status": SessionStatus.RUNNING,
+                        "status": activity,
                     },
-                    SessionStatus.RUNNING,
+                    activity,
                 )
             elif block_type == "tool_use":
                 tool_use_id = str(block.get("id") or "")
@@ -1855,7 +1892,11 @@ class ClaudeCliAdapter:
                     continue
                 if tool_name in TASK_TOOL_NAMES:
                     await self._handle_task_tool_use(
-                        state, tool_name, tool_use_id, block.get("input") or {}
+                        state,
+                        tool_name,
+                        tool_use_id,
+                        block.get("input") or {},
+                        activity,
                     )
                     continue
                 input_text = json.dumps(block.get("input") or {}, indent=2)
@@ -1863,7 +1904,7 @@ class ClaudeCliAdapter:
                 call_status = (
                     SessionStatus.WAITING_INPUT
                     if tool_name == "AskUserQuestion"
-                    else SessionStatus.RUNNING
+                    else activity
                 )
                 tool_call_metadata: dict[str, Any] = {
                     "method": "assistant.tool_use",
@@ -1914,6 +1955,7 @@ class ClaudeCliAdapter:
         self, state: ClaudeSessionState, event: dict[str, Any]
     ) -> None:
         message = event.get("message") or {}
+        status = _turn_activity_status(event)
         for block in iter_content_blocks(message.get("content")):
             if block.get("type") != "tool_result":
                 continue
@@ -1921,7 +1963,7 @@ class ClaudeCliAdapter:
             if tool_use_id and tool_use_id in state.pending_task_creates:
                 # The TaskCreate result carries the assigned task id; fold it
                 # into the todo snapshot instead of rendering the raw result.
-                await self._handle_task_create_result(state, tool_use_id, block)
+                await self._handle_task_create_result(state, tool_use_id, block, status)
                 continue
             if tool_use_id and tool_use_id in state.suppressed_result_tool_use_ids:
                 # Echoed verdict for an ExitPlanMode approval, or a suppressed
@@ -1934,7 +1976,6 @@ class ClaudeCliAdapter:
             text = stringify_tool_result(content)
             is_error = bool(block.get("is_error"))
             kind = EventKind.TOOL_RESULT
-            status = SessionStatus.RUNNING
             metadata = {
                 "method": "user.tool_result",
                 "item_id": tool_use_id,
@@ -1957,6 +1998,7 @@ class ClaudeCliAdapter:
         tool_name: str,
         tool_use_id: str,
         tool_input: dict[str, Any],
+        status: SessionStatus | None,
     ) -> None:
         if tool_name == "TaskCreate":
             # The assigned id only comes back in the matching tool_result, so
@@ -1985,10 +2027,14 @@ class ClaudeCliAdapter:
                 active_form=tool_input.get("activeForm"),
                 description=tool_input.get("description"),
             )
-            await self._emit_task_snapshot(state)
+            await self._emit_task_snapshot(state, status)
 
     async def _handle_task_create_result(
-        self, state: ClaudeSessionState, tool_use_id: str, block: dict[str, Any]
+        self,
+        state: ClaudeSessionState,
+        tool_use_id: str,
+        block: dict[str, Any],
+        status: SessionStatus | None,
     ) -> None:
         create_input = state.pending_task_creates.pop(tool_use_id, None)
         if create_input is None:
@@ -2013,9 +2059,11 @@ class ClaudeCliAdapter:
             description=create_input.get("description"),
             status=create_input.get("status") or "pending",
         )
-        await self._emit_task_snapshot(state)
+        await self._emit_task_snapshot(state, status)
 
-    async def _emit_task_snapshot(self, state: ClaudeSessionState) -> None:
+    async def _emit_task_snapshot(
+        self, state: ClaudeSessionState, status: SessionStatus | None
+    ) -> None:
         if state.task_card_item_id is None:
             state.task_card_item_id = uuid.uuid4().hex
         todos = state.task_tracker.snapshot()
@@ -2029,14 +2077,17 @@ class ClaudeCliAdapter:
                 "item_type": "todo_list",
                 "tool_name": "TodoWrite",
                 "payload": {"input": {"todos": todos}},
-                "status": SessionStatus.RUNNING,
+                "status": status,
             },
-            SessionStatus.RUNNING,
+            status,
         )
 
     async def _handle_result(
         self, state: ClaudeSessionState, event: dict[str, Any]
     ) -> None:
+        if _is_interrupted_result(event, state.stop_requested):
+            await self._handle_interrupted_result(state)
+            return
         subtype = event.get("subtype", "")
         is_error = bool(event.get("is_error"))
         usage = event.get("usage") or {}
@@ -2061,6 +2112,29 @@ class ClaudeCliAdapter:
             },
             SessionStatus.ERROR if is_error else SessionStatus.IDLE,
         )
+
+    async def _handle_interrupted_result(self, state: ClaudeSessionState) -> None:
+        requested, superseded = state.stop_requested, state.stop_superseded
+        state.stop_requested = state.stop_superseded = False
+        if not requested:
+            await self._emit_event(
+                state.session_id,
+                EventKind.SYSTEM_NOTE,
+                INTERRUPTED_NOTE,
+                {
+                    "method": "result",
+                    "stop_reason": "interrupted",
+                    "status": SessionStatus.IDLE,
+                },
+                SessionStatus.IDLE,
+            )
+            return
+        # The runtime notes Waypoint's own interrupt. Re-assert its status over
+        # any of the turn's records read since.
+        if not superseded and self._on_session_update is not None:
+            await self._on_session_update(
+                state.session_id, {"status": SessionStatus.INTERRUPTED}, True
+            )
 
     async def _publish_context_usage(
         self, state: ClaudeSessionState, snapshot: SessionContextUsage

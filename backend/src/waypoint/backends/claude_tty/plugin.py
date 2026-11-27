@@ -704,6 +704,16 @@ class ClaudeTtyPlugin:
         )
         return True
 
+    def expect_interrupt(self, session_id: str) -> None:
+        """Waypoint is about to interrupt the session's turn."""
+        if run := self._tailers.get(session_id):
+            run.tailer.expect_interrupt()
+
+    def supersede_interrupt(self, session_id: str) -> None:
+        """Waypoint is about to submit input, past any interrupt it made."""
+        if run := self._tailers.get(session_id):
+            run.tailer.supersede_interrupt()
+
     async def reply_refusal(
         self, session_id: str, pending: PendingTtyApproval
     ) -> str | None:

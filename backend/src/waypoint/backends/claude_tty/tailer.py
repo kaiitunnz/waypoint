@@ -114,6 +114,12 @@ class TranscriptTailer:
         tailer to adopt."""
         self._stop_requested = True
 
+    def expect_interrupt(self) -> None:
+        self._normalizer.expect_interrupt()
+
+    def supersede_interrupt(self) -> None:
+        self._normalizer.supersede_interrupt()
+
     async def _drain(self, *, force: bool = False) -> None:
         # The priming tick fetches size + identity only (no body).
         metadata_only = self._start_at_end and not self._primed

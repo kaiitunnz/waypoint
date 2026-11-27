@@ -478,10 +478,10 @@ describe("describeCall subagents", () => {
       label: 'Agent "List docs" finished',
       reply: report("2 files"),
     });
-    expect(describeCall(item)).toMatchObject({ label: "", reply: null, status: "pending" });
+    expect(describeCall(item)).toMatchObject({ label: "Background task", reply: null, status: "pending" });
   });
 
-  it("carries the report files of the notification that stands in", () => {
+  it("carries the files of a report the notification cut", () => {
     const spec = (id: string) => ({ id, filename: `${id}.md`, kind: "file", size: 5000 });
     const files = { attachments: [spec("spill"), spec("transcript")], inline_attachment_ids: ["spill"] };
     const notice = (kind: string) => {
@@ -490,6 +490,8 @@ describe("describeCall subagents", () => {
     };
     // An agent's captured output file is its transcript, not its report.
     expect(reported(notice("agent"))?.attachments.map((file) => file.id)).toEqual(["spill"]);
+    const failed = notification({ status: "failed" });
+    expect(reported({ ...failed, metadata: { ...failed.metadata, attachments: [spec("transcript")] } })?.attachments).toEqual([]);
     const make = [claudeCall("Bash", { command: "make" }), answer("started", { result_deferred: true })];
     const row = reportedFor(make, notice("background_command"));
     expect(row?.reply).toEqual(output("start", true));

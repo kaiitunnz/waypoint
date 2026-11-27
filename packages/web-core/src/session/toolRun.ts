@@ -340,7 +340,8 @@ interface Outcome {
   status: CallView["status"];
   endedBy: EventRecord | null;
   reply: CallReply | null;
-  // The summary and report files of a task notification that stands in for the result.
+  // The summary of a task notification that stands in for the result, and the files of a
+  // report it cut.
   summary: string | null;
   attachments: AttachmentSpec[];
 }
@@ -365,7 +366,8 @@ function outcomeOf(
       endedBy: report,
       reply: replyWith(note.kind === "agent" ? "report" : "output", preview, note.resultTruncated),
       summary: note.summary,
-      attachments: taskNoteReport(note, report).specs,
+      // An uncut or absent report leaves only the agent's raw output file, if any.
+      attachments: note.resultTruncated ? taskNoteReport(note, report).specs : [],
     };
   }
   if (!result || deferred) return { ...NO_NOTICE, status: "pending", endedBy: null, reply: null };
@@ -405,7 +407,9 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
   const outcome = outcomeOf(call, result, tool, child.kind === "pair" ? child.pair.report : undefined, Boolean(request?.prompt));
   // A launch acknowledgement says nothing about a call that is not loaded.
   const preview =
-    !call && result?.metadata?.result_deferred === true ? (outcome.summary ?? "") : previewForToolEvent(event, badge.label);
+    !call && result?.metadata?.result_deferred === true
+      ? (outcome.summary ?? "Background task")
+      : previewForToolEvent(event, badge.label);
   const todos = tool === "TodoWrite" ? ([result, call].map((e) => (e ? readTodoEntries(e) : null)).find((entries) => entries !== null) ?? null) : null;
   const progress = todos ? summarizeTodos(todos) : null;
   const label = todos

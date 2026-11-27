@@ -19,6 +19,8 @@ export interface AskSession {
 export interface ShownRequest {
   // The typed view.
   body: ApprovalBody;
+  // The summary that titles the request, or null for its plain title.
+  summary: string | null;
   // Every field of the request, shown raw below the view.
   fields: Record<string, unknown>;
   // What the request asks for beyond the call it names, or why it cannot be decided.
@@ -232,6 +234,7 @@ export function shownPlan(plan: string): ShownRequest {
   const lockNote = lockReason(body, null, null);
   return {
     body,
+    summary: null,
     fields: { plan },
     warnings: misleads(plan) ? [HIDDEN_WARNING] : [],
     unverified: false,
@@ -246,14 +249,16 @@ const UNVERIFIED = "This call can't be verified from here";
 // another call than the one a reply would answer, and its plan, rebuilt from the
 // transcript, may differ from the one it shows, so neither is decided.
 export function shownRequest(request: EventRecord, session: AskSession): ShownRequest {
-  const body = requestedBody(request, titlingSummary(request.metadata, session.cwd) !== null);
+  const summary = titlingSummary(request.metadata, session.cwd);
+  const body = requestedBody(request, summary !== null);
   const fields = requestFields(request);
   if (session.fromScreen) {
-    return { body, fields, warnings: [UNVERIFIED], unverified: true, whole: false, lockNote: null };
+    return { body, summary, fields, warnings: [UNVERIFIED], unverified: true, whole: false, lockNote: null };
   }
   const lockNote = lockReason(body, asRecord(request.metadata?.tool_input), readToolName(request));
   return {
     body,
+    summary,
     fields,
     warnings: requestWarnings(request.metadata, session.cwd),
     unverified: false,

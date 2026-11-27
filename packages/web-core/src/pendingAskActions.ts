@@ -140,9 +140,11 @@ export interface AskTitle {
   marked: boolean;
 }
 
-// The title every list and detail gives an ask. `cwd` is its session's.
-export function askTitle(ask: PendingAsk, cwd: string): AskTitle {
-  const summary = askSummaryTitle(ask, cwd);
+// The title every list and detail gives an ask. `cwd` is its session's. A detail passes
+// its request: the ask's strings are cut, so only the whole request shows every reason
+// not to take the summary.
+export function askTitle(ask: PendingAsk, cwd: string, request?: ApprovalRequest): AskTitle {
+  const summary = ask.kind === "approval" && request?.status === "ready" ? request.summary : askSummaryTitle(ask, cwd);
   return summary === null ? { text: ask.title, marked: false } : { text: summary, marked: true };
 }
 

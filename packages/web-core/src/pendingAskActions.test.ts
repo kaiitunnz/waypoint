@@ -8,6 +8,7 @@ import {
   buildAnswer,
   decideAsk,
   askPreview,
+  askTitle,
   decisionView,
   inlineCommand,
   emptyPicks,
@@ -254,6 +255,20 @@ describe("deciding outside the detail", () => {
     });
   });
 
+  it("titles a detail from the whole request, past where the ask cut it", () => {
+    const ask = approval("Bash", { command: "echo banner…" }, true);
+    ask.approval.summary = "Print a banner";
+    const request = (command: string) =>
+      approvalRequest(
+        ask,
+        ev(1, "approval_request", "Approve Bash", { tool_name: "Bash", tool_input: { command }, summary: "Print a banner" }),
+        session,
+      );
+    expect(askTitle(ask, session.cwd, { status: "loading" })).toEqual({ text: "Print a banner", marked: true });
+    expect(askTitle(ask, session.cwd, request("echo banner"))).toEqual({ text: "Print a banner", marked: true });
+    expect(askTitle(ask, session.cwd, request("echo banner \u202e"))).toEqual({ text: ask.title, marked: false });
+  });
+
   it("takes a plan's text from its ask, beside the rest of its call", () => {
     const request = ev(1, "approval_request", "Approve plan", {
       tool_name: "ExitPlanMode",
@@ -270,6 +285,7 @@ describe("deciding outside the detail", () => {
     expect(approvalRequest(plan("# Plan", "approve_plan"), null, session)).toEqual({
       status: "ready",
       body: { kind: "plan", plan: "# Plan" },
+      summary: null,
       fields: { plan: "# Plan" },
       warnings: [],
       unverified: false,

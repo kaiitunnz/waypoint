@@ -12,12 +12,7 @@
 }
 
 .heading {
-  composes: sectionHead from "./RailItem.module.css";
   padding: 14px 18px 4px;
-}
-
-.count {
-  composes: count from "./RailItem.module.css";
 }
 
 /* A rail row, inset so the selection's fill has all its corners. */

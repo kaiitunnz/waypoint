@@ -36,12 +36,7 @@
 }
 
 .sectionHead {
-  composes: sectionHead from "../sessions/RailItem.module.css";
   padding: 14px 16px 4px;
-}
-
-.count {
-  composes: count from "../sessions/RailItem.module.css";
 }
 
 .list {

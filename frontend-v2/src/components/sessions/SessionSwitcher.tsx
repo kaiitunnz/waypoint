@@ -20,13 +20,12 @@ import { ActionChip } from "@/components/ui/ActionChip";
 import { Dialog } from "@/components/ui/Dialog";
 import { SearchInput } from "@/components/ui/Field";
 import { handleAuthFailure } from "@/lib/auth";
-import { cx } from "@/lib/cx";
 import { useShowExited } from "@/lib/show-exited";
 import { usePointerUI } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
 import { ExitedToggle } from "./ExitedGroup";
-import { RailItem, railItemClass, useRailRows } from "./RailItem";
+import { RailHeading, RailItem, useRailRows } from "./RailItem";
 import styles from "./SessionSwitcher.module.css";
 import { EXITED_PAGE_SIZE } from "./useExitedSessions";
 
@@ -115,30 +114,34 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
     return (
       <li key={session.id} role="presentation">
         {heading ? (
-          <div className={styles.heading}>
-            {SWITCHER_SECTION_LABELS[section]}{" "}
-            <span className={styles.count}>{listed.filter((other) => other.section === section).length}</span>
-          </div>
-        ) : null}
-        <button
-          type="button"
-          role="option"
-          id={`${listId}-${session.id}`}
-          aria-selected={index === selected}
-          tabIndex={-1}
-          className={cx(railItemClass(session, lamp, sub), styles.option)}
-          onMouseMove={() => setActive(index)}
-          onClick={() => open(session)}
-        >
-          <RailItem
-            session={session}
-            lamp={lamp}
-            section={section}
-            now={now}
-            positions={entry.positions}
-            sub={sub}
+          <RailHeading
+            as="div"
+            label={SWITCHER_SECTION_LABELS[section]}
+            count={listed.filter((other) => other.section === section).length}
+            className={styles.heading}
           />
-        </button>
+        ) : null}
+        <RailItem
+          session={session}
+          lamp={lamp}
+          section={section}
+          now={now}
+          positions={entry.positions}
+          sub={sub}
+          className={styles.option}
+          render={(row) => (
+            <button
+              {...row}
+              type="button"
+              role="option"
+              id={`${listId}-${session.id}`}
+              aria-selected={index === selected}
+              tabIndex={-1}
+              onMouseMove={() => setActive(index)}
+              onClick={() => open(session)}
+            />
+          )}
+        />
       </li>
     );
   };

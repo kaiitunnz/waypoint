@@ -12,7 +12,7 @@ import { rankSessionsForSwitcher, SWITCHER_SECTION_LABELS, type SwitcherSection 
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { ExitedGroup } from "@/components/sessions/ExitedGroup";
-import { RailItem, railItemClass, useRailRows } from "@/components/sessions/RailItem";
+import { RailHeading, RailItem, useRailRows } from "@/components/sessions/RailItem";
 import { SessionMenu, type SessionAction } from "@/components/sessions/SessionMenu";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
 import { useExitedSessions } from "@/components/sessions/useExitedSessions";
@@ -70,17 +70,26 @@ function RailRow({
   };
   return (
     <li className={cx(styles.row, sub === null && styles.single)}>
-      <Link
-        {...press}
-        onContextMenu={onContextMenu}
-        draggable={pointer ? undefined : false}
-        href={sessionHref(session.id)}
-        onNavigate={onNavigate}
-        aria-current={current ? "page" : undefined}
-        className={cx(railItemClass(session, lamp, sub), styles.item, current && styles.on)}
-      >
-        <RailItem session={session} lamp={lamp} section={section} now={now} sub={sub} timeClassName={styles.time} />
-      </Link>
+      <RailItem
+        session={session}
+        lamp={lamp}
+        section={section}
+        now={now}
+        sub={sub}
+        className={cx(styles.item, current && styles.on)}
+        timeClassName={styles.time}
+        render={(row) => (
+          <Link
+            {...press}
+            {...row}
+            onContextMenu={onContextMenu}
+            draggable={pointer ? undefined : false}
+            href={sessionHref(session.id)}
+            onNavigate={onNavigate}
+            aria-current={current ? "page" : undefined}
+          />
+        )}
+      />
       <span className={styles.actions}>
         <SessionMenu
           session={session}
@@ -179,9 +188,12 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
           if (sessions.length === 0) return null;
           return (
             <section key={section}>
-              <h3 className={styles.sectionHead}>
-                {SWITCHER_SECTION_LABELS[section]} <span className={styles.count}>{sessions.length}</span>
-              </h3>
+              <RailHeading
+                as="h3"
+                label={SWITCHER_SECTION_LABELS[section]}
+                count={sessions.length}
+                className={styles.sectionHead}
+              />
               <ul className={styles.list}>{sessions.map((session) => row(session, section))}</ul>
             </section>
           );

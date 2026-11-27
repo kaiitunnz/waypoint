@@ -5,7 +5,6 @@ import { useStoredFlag } from "./useStoredFlag";
 // An unset key means the surface's own default, so surfaces with different defaults keep separate keys.
 export const PANEL_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.panel";
 export const SWITCHER_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.switcher";
-export const LIST_SHOW_EXITED_KEY = "waypoint.show-exited-sessions.list";
 
 // Persisted show-exited flag, `shownByDefault` until a choice is made. Every surface using one key
 // agrees, in this tab and across tabs.

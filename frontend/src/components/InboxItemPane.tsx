@@ -1,16 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 
 import { InboxItemView } from "@/components/InboxItemView";
-import {
-  connectInboxSocket,
-  deleteInboxItem,
-  fetchInboxItem,
-  isAuthError,
-  markInboxRead,
-} from "@waypoint/web-core/api";
-import type { InboxItem, SessionEnvelope } from "@waypoint/web-core/types";
+import { useInboxItem } from "@waypoint/web-core/hooks/useInboxItem";
 
 // Smart wrapper for a single inbox item: hydrates it, marks it read, keeps it
 // live over /ws/inbox/{id}, and owns delete. Shared by the desktop split-view
@@ -28,78 +21,7 @@ export function InboxItemPane({
   onAuthFailure: () => void;
   onDeleted: () => void;
 }) {
-  const [item, setItem] = useState<InboxItem | null>(null);
-  const [gone, setGone] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    setItem(null);
-    setGone(false);
-    setError(null);
-    fetchInboxItem(host, token, itemId)
-      .then((value) => {
-        if (active) setItem(value);
-      })
-      .catch((err) => {
-        if (!active) return;
-        if (isAuthError(err)) {
-          onAuthFailure();
-          return;
-        }
-        setError(err instanceof Error ? err.message : "failed to load item");
-      });
-    markInboxRead(host, token, itemId).catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [host, token, itemId, onAuthFailure]);
-
-  useEffect(() => {
-    let active = true;
-    let socket: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
-
-    function connect() {
-      socket = connectInboxSocket(
-        host,
-        token,
-        itemId,
-        (message: SessionEnvelope) => {
-          if (message.type !== "inbox_update") return;
-          const payload = message.payload;
-          if (payload.deleted) {
-            setGone(true);
-            setItem(null);
-            return;
-          }
-          if (payload.item) setItem(payload.item as InboxItem);
-        },
-        () => {
-          if (active) onAuthFailure();
-        },
-        {
-          onOpen: () => {
-            attempt = 0;
-          },
-          onClose: () => {
-            if (!active) return;
-            const delay = Math.min(15000, 500 * 2 ** attempt);
-            attempt += 1;
-            reconnectTimer = setTimeout(connect, delay);
-          },
-        },
-      );
-    }
-    connect();
-
-    return () => {
-      active = false;
-      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      socket?.close();
-    };
-  }, [host, token, itemId, onAuthFailure]);
+  const { item, gone, error, remove } = useInboxItem({ host, token, itemId, onAuthFailure });
 
   const handleDelete = useCallback(() => {
     if (
@@ -108,13 +30,10 @@ export function InboxItemPane({
     ) {
       return;
     }
-    deleteInboxItem(host, token, itemId)
-      .then(() => onDeleted())
-      .catch((err) => {
-        if (isAuthError(err)) onAuthFailure();
-        else setError(err instanceof Error ? err.message : "failed to delete");
-      });
-  }, [host, token, itemId, onAuthFailure, onDeleted]);
+    void remove().then((deleted) => {
+      if (deleted) onDeleted();
+    });
+  }, [remove, onDeleted]);
 
   if (gone) {
     return <div className="inbox-empty">This item was deleted.</div>;

@@ -69,6 +69,17 @@ export function pasteAttaches(files: readonly File[], text: string): boolean {
   return text.split(/[\r\n]+/).every((line) => !line.trim() || names.has(namedBy(line.trim()).normalize("NFC")));
 }
 
+// Attaches the files of a paste that carries them in place of its text.
+export function attachFromPaste(
+  event: { clipboardData: DataTransfer; preventDefault: () => void },
+  addFiles: (files: File[]) => void,
+): void {
+  const files = filesFromDataTransfer(event.clipboardData);
+  if (!pasteAttaches(files, event.clipboardData.getData("text/plain"))) return;
+  event.preventDefault();
+  addFiles(files);
+}
+
 // The file name a clipboard line stands for: its own, or the last part of an
 // absolute path or file URI. A web address or relative path is just text.
 function namedBy(line: string): string {

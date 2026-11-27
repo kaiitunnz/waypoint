@@ -19,9 +19,11 @@
 }
 
 .label {
+  flex: none;
   font-size: var(--f-meta);
   font-weight: 400;
   color: var(--brass-text);
+  white-space: nowrap;
 }
 
 .quiet {
@@ -40,5 +42,13 @@
 @media (hover: hover) and (pointer: fine) {
   .chip {
     height: 36px;
+  }
+
+  .chip.compact {
+    height: auto;
+    min-height: 28px;
+    padding: 3px 10px;
+    border-radius: var(--r-sm);
+    font-size: var(--f-meta);
   }
 }

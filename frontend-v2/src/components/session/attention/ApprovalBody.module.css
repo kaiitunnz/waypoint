@@ -3,6 +3,10 @@
   color: var(--text);
 }
 
+.whole pre {
+  white-space: pre-wrap;
+}
+
 .block {
   padding: 6px 9px;
   border-radius: 8px;

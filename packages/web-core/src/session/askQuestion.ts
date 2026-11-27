@@ -175,21 +175,19 @@ export function askFormState(
   return event.sequence > snapshot.as_of_sequence ? "starting" : "gone";
 }
 
+// Multi-select toggles; single-select replaces, and tapping the one pick clears it.
+export function toggleSelection(current: readonly string[], label: string, multi: boolean): string[] {
+  if (multi) return current.includes(label) ? current.filter((item) => item !== label) : [...current, label];
+  return current.length === 1 && current[0] === label ? [] : [label];
+}
+
 export function toggleLabel(
   draft: AskDraft,
   questionIndex: number,
   label: string,
   multiSelect: boolean,
 ): AskDraft {
-  const current = draft.picked[questionIndex] ?? [];
-  let next: string[];
-  if (multiSelect) {
-    next = current.includes(label)
-      ? current.filter((item) => item !== label)
-      : [...current, label];
-  } else {
-    next = current.length === 1 && current[0] === label ? [] : [label];
-  }
+  const next = toggleSelection(draft.picked[questionIndex] ?? [], label, multiSelect);
   return { ...draft, picked: { ...draft.picked, [questionIndex]: next } };
 }
 

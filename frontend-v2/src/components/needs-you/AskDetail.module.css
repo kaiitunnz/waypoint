@@ -1,0 +1,28 @@
+.card {
+  composes: card from "../../styles/attention.module.css";
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.headline {
+  font-size: var(--f-head);
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin-top: 8px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.warn {
+  margin-bottom: 6px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--warn);
+}

@@ -9,6 +9,7 @@
 .segment {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   min-width: 44px;
   height: 44px;

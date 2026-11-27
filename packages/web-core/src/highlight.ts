@@ -214,6 +214,57 @@ function classifyDiffLine(line: string): DiffLineKind {
   return "context";
 }
 
+function classifyHunkLine(line: string): DiffLineKind {
+  if (line.startsWith("+")) return "add";
+  if (line.startsWith("-")) return "del";
+  // "No newline at end of file", and a header after a hunk that ran short.
+  if (line.startsWith("\\ ") || line.startsWith("diff --git")) return "meta";
+  return line.startsWith("@@") ? "hunk" : "context";
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+// One file's own headers, which come once each.
+const FILE_HEADER = /^(?:diff --git |--- |\+\+\+ )/;
+// What may come before the first hunk. A diff view draws none of it, so no line here can
+// say more than the file's path and change do.
+const PREAMBLE =
+  /^(?:diff --git |index |--- |\+\+\+ |Index: |={4,}$|new file mode 100644$|deleted file mode |similarity index |rename (?:from|to) |$)/;
+
+// Whether a file's diff is its headers and hunks and no more: each hunk holds the lines
+// its header counts, and only further hunks follow the first. Another diff has lines
+// missing, merged or left outside their hunk, or holds a second file under this one's name.
+export function hunksAddUp(diff: string): boolean {
+  let oldLeft = 0;
+  let newLeft = 0;
+  let seen = false;
+  const headers = new Set<string>();
+  for (const line of diff.replace(/\n$/, "").split("\n")) {
+    if (oldLeft === 0 && newLeft === 0) {
+      const hunk = HUNK_HEADER.exec(line);
+      if (hunk) {
+        seen = true;
+        oldLeft = Number(hunk[2] ?? 1);
+        newLeft = Number(hunk[4] ?? 1);
+      } else if (!line.startsWith("\\ ")) {
+        // "\ No newline at end of file" aside, nothing but a hunk follows a hunk.
+        if (seen || !PREAMBLE.test(line)) return false;
+        const header = FILE_HEADER.exec(line)?.[0];
+        if (header && headers.has(header)) return false;
+        if (header) headers.add(header);
+      }
+      continue;
+    }
+    const kind = classifyHunkLine(line);
+    if (kind === "hunk" || line.startsWith("diff --git")) return false;
+    if (kind === "meta") continue;
+    if (kind !== "add") oldLeft -= 1;
+    if (kind !== "del") newLeft -= 1;
+    if (oldLeft < 0 || newLeft < 0) return false;
+  }
+  return oldLeft === 0 && newLeft === 0;
+}
+
 interface DiffStructRow {
   kind: DiffLineKind;
   oldNo: number | null;
@@ -230,13 +281,19 @@ function parseDiffStructure(diff: string): DiffStructRow[] {
   let oldLine = 0;
   let newLine = 0;
   let inHunk = false;
+  // Lines the hunk's header says are still to come: among them a leading `+++` or
+  // `---` is content, not a file header.
+  let oldLeft = 0;
+  let newLeft = 0;
   for (const line of body.split("\n")) {
-    const kind = classifyDiffLine(line);
+    const kind = oldLeft > 0 || newLeft > 0 ? classifyHunkLine(line) : classifyDiffLine(line);
     if (kind === "hunk") {
-      const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      const match = HUNK_HEADER.exec(line);
       if (match) {
         oldLine = Number(match[1]);
-        newLine = Number(match[2]);
+        newLine = Number(match[3]);
+        oldLeft = Number(match[2] ?? 1);
+        newLeft = Number(match[4] ?? 1);
         inHunk = true;
       }
       rows.push({ kind, oldNo: null, newNo: null, content: line });
@@ -247,6 +304,8 @@ function parseDiffStructure(diff: string): DiffStructRow[] {
       continue;
     }
     const content = line.slice(1);
+    if (kind !== "add") oldLeft -= 1;
+    if (kind !== "del") newLeft -= 1;
     if (kind === "add") {
       rows.push({ kind, oldNo: null, newNo: newLine++, content });
     } else if (kind === "del") {

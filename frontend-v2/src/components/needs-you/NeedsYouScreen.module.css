@@ -1,0 +1,57 @@
+.screen {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  height: calc(100dvh - var(--tabbar-inset, 0px));
+  overflow: hidden;
+  background: var(--plane);
+}
+
+.split {
+  grid-template-columns: min(var(--queue-width), 50vw) minmax(0, 1fr);
+}
+
+.queue,
+.detail {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split .queue {
+  border-right: 1px solid var(--line);
+  background: var(--ground);
+}
+
+.detail {
+  overflow-y: auto;
+}
+
+/* A hidden pane keeps its layout, and so its scroll position. */
+.off {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+}
+
+.placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+}
+
+.resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 2;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizer:focus-visible {
+  background: var(--fill-raised);
+  outline: none;
+}

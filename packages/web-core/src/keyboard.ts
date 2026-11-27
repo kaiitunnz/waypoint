@@ -1,5 +1,3 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-
 type KeyboardEventLike = Pick<
   globalThis.KeyboardEvent,
   "ctrlKey" | "key" | "metaKey" | "shiftKey"
@@ -53,9 +51,7 @@ export function isSwitcherShortcut(
   );
 }
 
-export function isModifiedEnterShortcut(
-  event: ReactKeyboardEvent<HTMLTextAreaElement>,
-): boolean {
+export function isModifiedEnterShortcut(event: KeyboardEventLike): boolean {
   if (isComposingKeyEvent(event)) {
     return false;
   }

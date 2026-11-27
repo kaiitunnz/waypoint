@@ -1,0 +1,78 @@
+.item {
+  border-radius: var(--r-card);
+}
+
+.behind {
+  border-radius: var(--r-card);
+}
+
+/* A card that only opens has no brass hairline. */
+.card {
+  display: block;
+  width: 100%;
+  padding: 10px 14px 11px;
+  border-radius: var(--r-card);
+  background: var(--attention);
+  text-align: left;
+}
+
+.quiet {
+  background: var(--plane-raised);
+}
+
+.body {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.headline {
+  line-height: 22px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.strong .headline {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.quiet .headline {
+  color: var(--muted);
+}
+
+.detail {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: var(--f-meta);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.trash {
+  top: 4px;
+  right: 4px;
+  background: var(--attention);
+}
+
+.time {
+  composes: time from "./QueueItemShell.module.css";
+}

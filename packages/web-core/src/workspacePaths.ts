@@ -142,6 +142,19 @@ export function relativeToCwd(path: string, cwd: string | null | undefined): str
   return path.startsWith(`${root}/`) ? path.slice(root.length).replace(/^\/+/, "") || "." : path;
 }
 
+// A path as given to a session working in `cwd`, made absolute; null when it is
+// relative and `cwd` is unknown.
+export function resolveFromCwd(path: string, cwd: string | null | undefined): string | null {
+  const absolute = path.startsWith("/");
+  if (!absolute && !cwd) return null;
+  const parts: string[] = [];
+  for (const part of (absolute ? path : `${cwd}/${path}`).split("/")) {
+    if (part === "..") parts.pop();
+    else if (part !== "" && part !== ".") parts.push(part);
+  }
+  return `/${parts.join("/")}`;
+}
+
 // Every path inside `cwd` that appears in free text, made relative to it.
 export function relativizeInText(text: string, cwd: string | null | undefined): string {
   const root = trimCwd(cwd);

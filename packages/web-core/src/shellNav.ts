@@ -1,5 +1,8 @@
 export const sessionHref = (id: string) => `/session/${encodeURIComponent(id)}`;
 
+// The session opened on its Terminal view; one without a terminal pane opens as usual.
+export const sessionTerminalHref = (id: string) => `${sessionHref(id)}?view=terminal`;
+
 // The session's workspace explorer, opened at `path` when given.
 export const sessionFilesHref = (id: string, path?: string) =>
   `${sessionHref(id)}/files${path === undefined ? "" : `?path=${encodeURIComponent(path)}`}`;
@@ -51,9 +54,12 @@ export function settingsSectionOf(pathname: string): string | undefined {
 }
 
 // The touch tab bar shows on the top-level screens only. A session, a single
-// needs-you item and the assistant take the whole screen.
-export function showsTabBar(pathname: string): boolean {
-  return ["/", "/inbox", "/board", "/telemetry"].includes(normalize(pathname));
+// needs-you item and the assistant take the whole screen. In columns the
+// needs-you queue stays beside its item, and the bar with it.
+export function showsTabBar(pathname: string, columns: boolean): boolean {
+  const path = normalize(pathname);
+  if (columns && isUnder(path, "/inbox")) return true;
+  return ["/", "/inbox", "/board", "/telemetry"].includes(path);
 }
 
 const MAX_BADGE_COUNT = 99;

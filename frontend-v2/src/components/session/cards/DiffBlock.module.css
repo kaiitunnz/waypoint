@@ -60,6 +60,14 @@
   font-feature-settings: "liga" 0;
 }
 
+/* Every line wraps, so none runs out of view. */
+.wrap .line {
+  grid-template-columns: 30px 14px minmax(0, 1fr);
+  width: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .no {
   padding-right: 6px;
   color: var(--faint);
@@ -123,5 +131,9 @@
 @container (min-width: 600px) {
   .line {
     grid-template-columns: 38px 16px max-content;
+  }
+
+  .wrap .line {
+    grid-template-columns: 38px 16px minmax(0, 1fr);
   }
 }

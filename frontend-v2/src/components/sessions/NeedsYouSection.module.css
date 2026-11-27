@@ -13,11 +13,11 @@
   padding: 4px 10px 0;
 }
 
-.inboxWrap {
+.queueWrap {
   padding: 8px 10px 0;
 }
 
-.inbox {
+.queueLink {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -29,13 +29,13 @@
   color: var(--text);
 }
 
-.inbox > :last-child {
+.queueLink > :last-child {
   margin-left: auto;
   color: var(--faint);
 }
 
 /* The full layout lines the cards up with its tiles. */
-.full .inboxWrap {
+.full .queueWrap {
   padding: 12px 16px 0;
 }
 

@@ -1,0 +1,21 @@
+.box {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--field-line);
+  border-radius: 4px;
+}
+
+.on {
+  border-color: var(--text-strong);
+  background: var(--text-strong);
+  color: var(--plane);
+}
+
+.dash {
+  width: 7px;
+  height: 2px;
+  background: var(--plane);
+}

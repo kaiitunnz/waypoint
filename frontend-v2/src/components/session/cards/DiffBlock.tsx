@@ -6,7 +6,7 @@ import type { EventDiffPreview, EventDiffPreviewFile } from "@waypoint/web-core/
 import { DIFF_MARKER, type DiffLine } from "@waypoint/web-core/highlight";
 import { useHighlightedDiff } from "@waypoint/web-core/hooks/useHighlighted";
 import { compactDiff, fullDiff, reachableLines } from "@waypoint/web-core/session/diffCompact";
-import { displayChangeType, diffFilePathLabel } from "@waypoint/web-core/session/diffPreview";
+import { displayChangeType, diffFilePathLabel, isBareRename } from "@waypoint/web-core/session/diffPreview";
 import { relativeToCwd, splitPath } from "@waypoint/web-core/workspacePaths";
 
 import { cx } from "@/lib/cx";
@@ -46,24 +46,28 @@ function ContextFold({ lines }: { lines: DiffLine[] }) {
   );
 }
 
-function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader: boolean }) {
+function FileDiff({ file, showHeader, whole }: { file: EventDiffPreviewFile; showHeader: boolean; whole?: boolean }) {
   const lines = useHighlightedDiff(file.diff, file.path);
   const [open, setOpen] = useState(false);
   const compact = useMemo(() => compactDiff(lines, COMPACT_LINES), [lines]);
   const full = useMemo(() => fullDiff(lines), [lines]);
-  const folded = reachableLines(compact) < full.length;
-  const rows = open ? full : compact;
+  const folded = !whole && reachableLines(compact) < full.length;
+  const rows = whole || open ? full : compact;
   const change = displayChangeType(file);
+  // A file that only moved has no lines: its paths say it all.
+  const renamed = isBareRename(file);
   const { cwd } = useSessionContext();
   const shown = diffFilePathLabel(file, cwd);
   const from = file.oldPath && file.oldPath !== file.path ? file.oldPath : null;
-  const label = (path: string) => <PathLabel {...splitPath(relativeToCwd(path, cwd))} full={path} className={styles.path} />;
+  const label = (path: string) => (
+    <PathLabel {...splitPath(relativeToCwd(path, cwd))} full={path} className={styles.path} whole={whole} />
+  );
 
   return (
     <div className={styles.file}>
       {showHeader ? (
         <div className={styles.head}>
-          <span className={styles.change}>{change.label}</span>
+          <span className={styles.change}>{renamed ? "rename" : change.label}</span>
           {from ? (
             <span className={styles.moved}>
               {label(from)}
@@ -84,8 +88,8 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
       ) : null}
       {file.unavailableReason ? (
         <p className={styles.note}>{file.unavailableReason}</p>
-      ) : full.length > 0 ? (
-        <div className={cx(styles.code, highlight.hl)} role="group" aria-label={`Diff for ${shown}`}>
+      ) : !renamed && full.length > 0 ? (
+        <div className={cx(styles.code, whole && styles.wrap, highlight.hl)} role="group" aria-label={`Diff for ${shown}`}>
           {rows.map((row, index) => {
             if (row.kind === "line") return <Line key={index} line={row.line} />;
             if (row.lines) return <ContextFold key={index} lines={row.lines} />;
@@ -97,7 +101,7 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
           })}
         </div>
       ) : (
-        <p className={styles.note}>{file.diff ? "No line changes." : "No diff content available."}</p>
+        <p className={styles.note}>{file.diff || renamed ? "No line changes." : "No diff content available."}</p>
       )}
       {folded ? (
         <div className={styles.foot}>
@@ -109,11 +113,12 @@ function FileDiff({ file, showHeader }: { file: EventDiffPreviewFile; showHeader
   );
 }
 
-export function DiffBlock({ preview, headers }: { preview: EventDiffPreview; headers?: boolean }) {
+// `whole` shows every line and path, wrapped.
+export function DiffBlock({ preview, headers, whole }: { preview: EventDiffPreview; headers?: boolean; whole?: boolean }) {
   return (
     <>
       {preview.files.map((file, index) => (
-        <FileDiff key={`${file.path}-${index}`} file={file} showHeader={headers ?? preview.files.length > 1} />
+        <FileDiff key={`${file.path}-${index}`} file={file} showHeader={headers ?? preview.files.length > 1} whole={whole} />
       ))}
       {preview.truncated && !preview.files.some((file) => file.truncated) ? <p className={styles.note}>Diff truncated.</p> : null}
     </>

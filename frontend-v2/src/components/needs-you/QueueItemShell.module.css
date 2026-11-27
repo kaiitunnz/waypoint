@@ -1,0 +1,50 @@
+.item {
+  position: relative;
+}
+
+.slide {
+  position: relative;
+  touch-action: pan-y;
+  transition: transform 140ms ease-out;
+}
+
+.swiping .slide {
+  transition: none;
+}
+
+.behind {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-right: 18px;
+  background: var(--error);
+  color: var(--on-action);
+  font-weight: 600;
+}
+
+.swiping .behind {
+  display: flex;
+}
+
+.inert {
+  opacity: 0.45;
+}
+
+/* Outranks the icon button's own position. */
+.item > .trash {
+  position: absolute;
+  opacity: 0;
+}
+
+.item:hover .trash,
+.trash:focus-visible {
+  opacity: 1;
+}
+
+/* The trash takes the time's place while it shows. */
+.item:hover:has(> .trash) .time {
+  visibility: hidden;
+}

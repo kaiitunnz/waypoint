@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
@@ -7,28 +6,28 @@ import type { PendingAsk } from "@waypoint/web-core/types";
 
 import { StatusLamp } from "@/components/ui/StatusLamp";
 
+import { SourceLine } from "./SourceLine";
 import styles from "./AskCard.module.css";
 
 interface AskCardProps {
   ask: PendingAsk;
   agent: string;
   now: number;
+  // False when the headline opens the ask: a card has one target at its top.
+  linked: boolean;
   children: ReactNode;
 }
 
-export function AskCard({ ask, agent, now, children }: AskCardProps) {
+export function AskCard({ ask, agent, now, linked, children }: AskCardProps) {
   return (
     <section className={styles.card} aria-label={`${ask.session_title}: ${ask.title}`}>
-      <div className={styles.source}>
-        <StatusLamp state="needs" size="sm" flat />
-        <Link href={sessionHref(ask.session_id)} className={styles.name}>
-          {ask.session_title}
-        </Link>
-        <span className={styles.agent}>{agent}</span>
-        <time className={styles.time} dateTime={ask.created_at}>
-          {formatSessionTime(ask.created_at, now)}
-        </time>
-      </div>
+      <SourceLine
+        lead={<StatusLamp state="needs" size="sm" flat />}
+        name={ask.session_title}
+        href={linked ? sessionHref(ask.session_id) : undefined}
+        kind={agent}
+        time={<time dateTime={ask.created_at}>{formatSessionTime(ask.created_at, now)}</time>}
+      />
       {children}
     </section>
   );

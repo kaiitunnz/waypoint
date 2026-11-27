@@ -1,5 +1,7 @@
 "use client";
 
+import { foldLines } from "@waypoint/web-core/session/foldText";
+
 import { cx } from "@/lib/cx";
 
 import clamp from "./Clamp.module.css";
@@ -16,8 +18,18 @@ export function Lines({ text }: { text: string }) {
   ));
 }
 
-// A command or script in mono, folded at eight lines.
-export function CommandText({ text }: { text: string }) {
+// A command or script in mono, folded at eight lines unless `whole`.
+export function CommandText({ text, whole }: { text: string; whole?: boolean }) {
+  return whole ? (
+    <div className={styles.mono}>
+      <Lines text={foldLines(text, Infinity, "start").text} />
+    </div>
+  ) : (
+    <FoldedCommand text={text} />
+  );
+}
+
+function FoldedCommand({ text }: { text: string }) {
   const { open, toggle, shown, total, content, chip } = useFold<HTMLDivElement>(text, "start");
   return (
     <>

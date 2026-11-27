@@ -1,108 +1,92 @@
 "use client";
 
-import { useState } from "react";
-
-import {
-  decideAsk,
-  decisionView,
-  planPreview,
-  type DecisionAction,
-  type DecisionKind,
-} from "@waypoint/web-core/pendingAskActions";
+import { needsHref } from "@waypoint/web-core/needsYou";
+import { decisionView, inlineCommand, planPreview } from "@waypoint/web-core/pendingAskActions";
 import type { PendingApprovalAsk, PendingPlanAsk } from "@waypoint/web-core/types";
+import { splitPath } from "@waypoint/web-core/workspacePaths";
 
+import { CommandText } from "@/components/session/cards/CommandText";
+import { PathLabel } from "@/components/session/cards/PathLabel";
 import { Button } from "@/components/ui/Button";
-import { Dialog } from "@/components/ui/Dialog";
 import { TextInput } from "@/components/ui/Field";
 
+import { DecisionButtons, useApprovalReply } from "./ApprovalReply";
 import { AskCard } from "./AskCard";
+import { OpenHeadline, OpenLink } from "./AskOpen";
 import { AskStatus } from "./AskStatus";
 import styles from "./Ask.module.css";
-import { useAskResponder } from "./useAskResponder";
+import { useAskSessions } from "./useAskSessions";
 
 interface DecisionAskProps {
   ask: PendingApprovalAsk | PendingPlanAsk;
   agent: string;
   now: number;
+  openHref?: string;
 }
 
-const VARIANT = { approve: "primary", session: "text", decline: "danger" } as const satisfies Record<
-  DecisionKind,
-  string
->;
-
 // A tool approval or a plan approval.
-export function DecisionAsk({ ask, agent, now }: DecisionAskProps) {
-  const { actions, supportsNote, preview, planBody } = decisionView(ask);
-  const [noteOpen, setNoteOpen] = useState(false);
-  const [note, setNote] = useState("");
-  const [reading, setReading] = useState(false);
-  const { phase, send, busy } = useAskResponder();
-  const disabled = busy || ask.availability !== "actionable";
+export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
+  const { preview, planBody } = decisionView(ask);
+  const reply = useApprovalReply(ask);
+  const askSession = useAskSessions();
+  // Only a command is decided here, and then the card shows it whole.
+  const inline = inlineCommand(ask, askSession(ask.session_id).fromScreen) !== null;
+  const status = <AskStatus availability={ask.availability} phase={reply.phase} />;
+  const headline = openHref ? <OpenHeadline href={openHref}>{ask.title}</OpenHeadline> : <h3 className={styles.headline}>{ask.title}</h3>;
+  const command =
+    preview?.kind === "command" ? (
+      <div className={styles.command}>
+        <CommandText text={preview.text} whole={inline} />
+      </div>
+    ) : null;
+  const path =
+    preview?.kind === "path" ? (
+      <div className={styles.path}>
+        <PathLabel {...splitPath(preview.path)} full={preview.path} />
+      </div>
+    ) : null;
+  const summary =
+    planBody !== null ? (
+      <p className={styles.clamp}>{planPreview(planBody)}</p>
+    ) : ask.body && !command ? (
+      <p className={styles.clamp}>{ask.body}</p>
+    ) : null;
 
-  const decide = async (decision: string) => {
-    if (await send((host, token, retry) => decideAsk(host, token, ask, decision, note, retry))) setReading(false);
-  };
-  const button = (action: DecisionAction, size: "sm" | "md" = "sm") => (
-    <Button
-      key={action.decision}
-      variant={VARIANT[action.kind]}
-      size={size}
-      disabled={disabled}
-      busy={phase.state === "sending"}
-      onClick={() => void decide(action.decision)}
-    >
-      {action.label}
-    </Button>
-  );
+  if (!inline) {
+    return (
+      <AskCard ask={ask} agent={agent} now={now} linked={openHref === undefined}>
+        {headline}
+        <div className={styles.review}>
+          <div>
+            {command}
+            {path}
+            {summary}
+          </div>
+          <OpenLink href={openHref ?? needsHref(ask.id)} label="Review" />
+        </div>
+        {status}
+      </AskCard>
+    );
+  }
 
   return (
-    <AskCard ask={ask} agent={agent} now={now}>
-      <h3 className={styles.headline}>{ask.title}</h3>
-      {preview?.kind === "command" ? <pre className={styles.command}>{preview.text}</pre> : null}
-      {preview?.kind === "path" ? <p className={`${styles.path} mono`}>{preview.path}</p> : null}
-      {planBody !== null ? (
-        <p className={styles.clamp}>{planPreview(planBody)}</p>
-      ) : ask.body && preview?.kind !== "command" ? (
-        <p className={styles.clamp}>{ask.body}</p>
-      ) : null}
-      {noteOpen ? (
+    <AskCard ask={ask} agent={agent} now={now} linked={openHref === undefined}>
+      {headline}
+      {command}
+      {reply.noteOpen ? (
         <div className={styles.note}>
-          <TextInput
-            autoFocus
-            value={note}
-            disabled={disabled}
-            aria-label="Note"
-            placeholder="Note"
-            onChange={(event) => setNote(event.target.value)}
-          />
+          <TextInput autoFocus {...reply.noteProps} />
         </div>
       ) : null}
       <div className={styles.actions}>
-        {actions.map((action) => button(action))}
-        {planBody !== null ? (
-          <Button variant="text" size="sm" onClick={() => setReading(true)}>
-            Read plan
-          </Button>
-        ) : null}
-        {supportsNote && !noteOpen ? (
-          <Button variant="text" size="sm" className={styles.end} onClick={() => setNoteOpen(true)}>
+        <DecisionButtons reply={reply} />
+        {reply.offersNote ? (
+          <Button variant="text" size="sm" className={styles.end} onClick={reply.openNote}>
             Add note
           </Button>
         ) : null}
       </div>
-      <AskStatus availability={ask.availability} phase={phase} />
-      {planBody !== null ? (
-        <Dialog
-          open={reading}
-          onClose={() => setReading(false)}
-          title={ask.title}
-          subtitle={ask.session_title}
-          footer={<>{actions.map((action) => button(action, "md"))}</>}
-        >
-          <p className={styles.plan}>{planBody}</p>
-        </Dialog>
-      ) : null}
+      {status}
     </AskCard>
   );
 }

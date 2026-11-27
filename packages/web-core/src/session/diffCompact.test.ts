@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPlainDiffLines } from "../highlight";
+import { buildPlainDiffLines, hunksAddUp } from "../highlight";
 import { compactDiff, fullDiff, reachableLines } from "./diffCompact";
 
 const DIFF = [
@@ -82,5 +82,51 @@ describe("fullDiff", () => {
     const rows = fullDiff(buildPlainDiffLines(DIFF));
     expect(rows).toHaveLength(11);
     expect(rows.every((row) => row.kind === "line")).toBe(true);
+  });
+});
+
+describe("buildPlainDiffLines", () => {
+  const shown = (diff: string) =>
+    fullDiff(buildPlainDiffLines(diff)).map((row) => (row.kind === "line" ? `${row.line.kind}:${row.line.tokens[0].text}` : row.kind));
+
+  it("keeps hunk lines that look like file headers", () => {
+    const diff = "--- a/x.sql\n+++ b/x.sql\n@@ -1,3 +1,4 @@\n keep\n--- old comment\n+++i;\n+ok\n tail\n";
+    expect(hunksAddUp(diff)).toBe(true);
+    expect(shown(diff)).toEqual(["context:keep", "del:-- old comment", "add:++i;", "add:ok", "context:tail"]);
+  });
+
+  it("tells hunks that do not hold what their header counts", () => {
+    // Two lines run together for want of a final newline.
+    expect(hunksAddUp("--- a\n+++ a\n@@ -1 +1 @@\n-a = 1+a = 2\n")).toBe(false);
+    expect(hunksAddUp("@@ -1,2 +1,2 @@\n x\n-a+b\n")).toBe(false);
+    expect(hunksAddUp("@@ -1 +1 @@\n-a\n+b\n+c\n")).toBe(false);
+    expect(hunksAddUp("@@ -1,2 +1,2 @@\n x\n@@ -9 +9 @@\n-a\n+b\n")).toBe(false);
+    expect(hunksAddUp("Index: a\n====\n--- a\n+++ a\n@@ -1,2 +1,2 @@\n\n-a\n+b\n\\ No newline at end of file\n")).toBe(true);
+  });
+
+  it("refuses a second file under the first's name", () => {
+    const diff = "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-one\n+two\n\\ No newline at end of file\n--- a/b\n+++ b/b\n@@ -0,0 +1 @@\n+three\n";
+    expect(hunksAddUp(diff)).toBe(false);
+    // Both still read, for a screen that only shows them.
+    expect(shown(diff)).toEqual(["del:one", "add:two", "add:three"]);
+    expect(hunksAddUp("--- a/a\n+++ b/a\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-one\n+two\n")).toBe(false);
+    expect(hunksAddUp("diff --git a/a b/a\ndiff --git a/b b/b\n@@ -1 +1 @@\n-one\n+two\n")).toBe(false);
+  });
+
+  it("takes only headers that say no more than the path before the first hunk", () => {
+    const hunk = "@@ -1 +1 @@\n-one\n+two\n";
+    expect(hunksAddUp(`diff --git a/a b/a\nnew file mode 100644\nindex 1..2\n--- a/a\n+++ b/a\n${hunk}`)).toBe(true);
+    // None of these would show.
+    for (const before of ["+rm -rf /", "-x", " x", "old mode 100644", "new mode 100755", "new file mode 100755", "note"]) {
+      expect([before, hunksAddUp(`${before}\n${hunk}`)]).toEqual([before, false]);
+    }
+  });
+
+  it("takes only further hunks after the first", () => {
+    const hunk = "@@ -1 +1 @@\n-one\n+two\n";
+    expect(hunksAddUp(`${hunk}@@ -9 +9 @@\n-a\n+b\n`)).toBe(true);
+    for (const after of ["--- a/b\n", "+++ b/b\n", "index 1..2\n", "rename to b\n", "\n"]) {
+      expect([after, hunksAddUp(`${hunk}${after}\n`)]).toEqual([after, false]);
+    }
   });
 });

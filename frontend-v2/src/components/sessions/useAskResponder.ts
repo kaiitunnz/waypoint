@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useId } from "react";
 
 import { isAuthError } from "@waypoint/web-core/api";
 import { isAgentNotReady, NOT_READY_MESSAGE, type RetryOptions } from "@waypoint/web-core/pendingAskActions";
@@ -8,37 +8,44 @@ import { isAgentNotReady, NOT_READY_MESSAGE, type RetryOptions } from "@waypoint
 import { handleAuthFailure } from "@/lib/auth";
 import { useShellData } from "@/lib/shell-data";
 
+import { useAskLocks, useAskPhases } from "./AskLocks";
+
+// `action` names which reply is in flight or went through.
 export type AskPhase =
   | { state: "idle" }
   // `retrying`: the agent is not ready yet and the reply is being retried.
-  | { state: "sending"; retrying: boolean }
-  | { state: "sent" }
-  | { state: "error"; message: string };
-
-// An answered ask leaves the feed when the agent closes it; if it is still listed
-// after this, the card takes input again.
-const SENT_HOLD_MS = 10_000;
+  | { state: "sending"; retrying: boolean; action?: string }
+  | { state: "sent"; action?: string }
+  | {
+      state: "error";
+      message: string;
+      // The surface that sent the reply, the only one to offer its retry.
+      owner?: string;
+      // Sends the failed reply again.
+      retry?: () => void;
+    };
 
 // Runs one response to an ask. A failure keeps the card as it was, with the reason.
-export function useAskResponder() {
+// With a `lockId` under an AskLocksProvider, every surface of the ask shares the phase.
+export function useAskResponder(lockId?: string) {
   const { host, token } = useShellData();
-  const [phase, setPhase] = useState<AskPhase>({ state: "idle" });
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+  const owner = useId();
+  const shared = useAskLocks();
+  const own = useAskPhases();
+  const [locks, id] = shared && lockId !== undefined ? [shared, lockId] : [own, owner];
+  const { setPhase: setById } = locks;
+  const setPhase = useCallback((next: AskPhase) => setById(id, next), [setById, id]);
+  const phase = locks.phase(id);
 
   const send = useCallback(
-    async (run: (host: string, token: string, retry: RetryOptions) => Promise<void>): Promise<boolean> => {
-      setPhase({ state: "sending", retrying: false });
+    async function attempt(
+      run: (host: string, token: string, retry: RetryOptions) => Promise<void>,
+      action?: string,
+    ): Promise<boolean> {
+      setPhase({ state: "sending", retrying: false, action });
       try {
-        await run(host, token, { onRetry: () => setPhase({ state: "sending", retrying: true }) });
-        setPhase({ state: "sent" });
-        timer.current = setTimeout(() => setPhase({ state: "idle" }), SENT_HOLD_MS);
+        await run(host, token, { onRetry: () => setPhase({ state: "sending", retrying: true, action }) });
+        setPhase({ state: "sent", action });
         return true;
       } catch (error) {
         if (isAuthError(error)) {
@@ -46,19 +53,28 @@ export function useAskResponder() {
         } else {
           setPhase({
             state: "error",
+            owner,
             message: isAgentNotReady(error)
               ? NOT_READY_MESSAGE
               : error instanceof Error
                 ? error.message
                 : "Could not send",
+            retry: () => void attempt(run, action),
           });
         }
         return false;
       }
     },
-    [host, token],
+    [host, token, owner, setPhase],
   );
 
+  // A reply that has been edited since makes the failed one stale.
+  const dismiss = useCallback(() => {
+    if (phase.state === "error") setPhase({ state: "idle" });
+  }, [phase.state, setPhase]);
+
   const busy = phase.state === "sending" || phase.state === "sent";
-  return { phase, send, busy };
+  const offered: AskPhase =
+    phase.state === "error" && phase.owner !== owner ? { state: "error", message: phase.message } : phase;
+  return { phase: offered, send, busy, dismiss };
 }

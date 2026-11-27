@@ -19,7 +19,7 @@ export function NavRail() {
   const pathname = usePathname();
   const active = activeNavKey(pathname);
   const settings = isSettingsPath(pathname);
-  const { needsYou } = useShellData();
+  const { waiting } = useShellData();
   return (
     <nav className={styles.rail} aria-label="Main">
       <Link href="/" className={styles.logo} aria-label="Waypoint">
@@ -27,7 +27,7 @@ export function NavRail() {
       </Link>
       {NAV_DESTINATIONS.map((destination) => {
         const isActive = destination.key === active;
-        const count = destination.key === "needs-you" ? needsYou : 0;
+        const count = destination.key === "needs-you" ? waiting.all : 0;
         return (
           <Link
             key={destination.key}

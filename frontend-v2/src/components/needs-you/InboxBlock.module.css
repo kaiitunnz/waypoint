@@ -1,0 +1,136 @@
+.block {
+  min-width: 0;
+  padding: 14px 0;
+  border-radius: var(--r);
+}
+
+.block + .block {
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.drop {
+  outline: 2px dashed var(--field-line);
+  outline-offset: 2px;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 8px;
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+
+.kind {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.waiting,
+.answered {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.waiting {
+  color: var(--brass-text);
+}
+
+.answered {
+  color: var(--done);
+}
+
+.end {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.markdown {
+  min-width: 0;
+}
+
+.question {
+  font-size: var(--f-head);
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  margin-top: 2px;
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+
+.edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 12px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.attach {
+  margin-left: -10px;
+}
+
+.grow {
+  flex: 1 1 auto;
+}
+
+.cancel {
+  color: var(--muted);
+}
+
+.error {
+  font-size: var(--f-meta);
+  color: var(--error);
+}
+
+.echo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.echoLabel {
+  flex: none;
+}
+
+.echoAnswer {
+  font-weight: 600;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.echoReply {
+  display: inline-flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.open {
+  margin: 4px 0 -6px -8px;
+}

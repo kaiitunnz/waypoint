@@ -1,0 +1,134 @@
+.row {
+  overflow: hidden;
+  margin-left: 8px;
+  border-radius: var(--r) 0 0 var(--r);
+}
+
+/* Hairlines between rows, none beside a filled one. */
+.row + .row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 28px;
+  z-index: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.selected::before,
+.selected + .row::before {
+  display: none;
+}
+
+.slide {
+  background: var(--ground);
+}
+
+.selected .slide {
+  background: var(--plane);
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px 10px 8px;
+  text-align: left;
+}
+
+/* The row clips what overflows it, so its focus ring sits inside. */
+.main:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Level with the source line. */
+.lead {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+}
+
+.source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--f-meta);
+  line-height: 18px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.name {
+  overflow: hidden;
+  font-family: var(--serif);
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+
+.kind {
+  flex: none;
+}
+
+.time {
+  composes: time from "./QueueItemShell.module.css";
+  font-size: var(--f-meta);
+  line-height: 18px;
+  color: var(--faint);
+}
+
+.headline,
+.detail {
+  grid-column: 2 / 4;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headline {
+  margin-top: 1px;
+  line-height: 20px;
+  color: var(--text);
+}
+
+.whole .headline,
+.whole .detail {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.strong .headline {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.detail {
+  font-size: var(--f-meta);
+  line-height: 18px;
+  color: var(--faint);
+}
+
+.quiet .name,
+.quiet .headline {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.trash {
+  top: 3px;
+  right: 6px;
+  z-index: 2;
+  background: var(--ground);
+}
+
+.selected .trash {
+  background: var(--plane);
+}

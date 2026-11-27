@@ -1,7 +1,11 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
+import { toggleSelection } from "./session/askQuestion";
+import { shownPlan, shownRequest, type AskSession, type ShownRequest } from "./session/wholeRequest";
 import type {
+  EventRecord,
   PendingApprovalAsk,
+  PendingAsk,
   PendingAskOption,
   PendingAskPrompt,
   PendingPlanAsk,
@@ -34,14 +38,8 @@ export function emptyPicks(prompts: PendingAskPrompt[]): PromptPick[] {
   return prompts.map(() => EMPTY_PICK);
 }
 
-// A single-select prompt holds one label (tapping it again clears it); a
-// multi-select prompt toggles each label.
 export function toggleOption(pick: PromptPick, label: string, multiSelect: boolean): PromptPick {
-  const has = pick.labels.includes(label);
-  if (multiSelect) {
-    return { ...pick, labels: has ? pick.labels.filter((item) => item !== label) : [...pick.labels, label] };
-  }
-  return { ...pick, labels: has ? [] : [label] };
+  return { ...pick, labels: toggleSelection(pick.labels, label, multiSelect) };
 }
 
 // A lone single-select question is answered by tapping an option, so a tap
@@ -107,33 +105,19 @@ export function buildAnswer(prompts: PendingAskPrompt[], picks: PromptPick[]): B
 
 // ─── Approvals and plans ───
 
-export type DecisionKind = "approve" | "session" | "decline";
+// A queue decides one request at a time: a wider grant's scope is not on screen.
+export type Decision = "accept" | "decline";
 
 export interface DecisionAction {
-  // The id sent to the approve endpoint.
-  decision: string;
+  // The id sent to the approve endpoint, which every agent takes.
+  decision: Decision;
   label: string;
-  kind: DecisionKind;
 }
 
-// "acceptForSession", "allow_for_session", "approve-for-this-session": matched by
-// shape so no agent is named.
-const SESSION_ALLOW = /^(accept|allow|approve)(for)?(this)?session$/;
-
-export function sessionScopedAllow(decisions: readonly string[]): string | undefined {
-  return decisions.find((decision) => SESSION_ALLOW.test(decision.toLowerCase().replace(/[^a-z]/g, "")));
-}
-
-// Every agent maps accept and decline to allow and deny; the session-scoped
-// allow shows whenever the agent lists one.
-function decisionActions(decisions: readonly string[]): DecisionAction[] {
-  const forSession = sessionScopedAllow(decisions);
-  return [
-    { decision: "accept", label: "Approve", kind: "approve" },
-    ...(forSession ? [{ decision: forSession, label: "For this session", kind: "session" as const }] : []),
-    { decision: "decline", label: "Decline", kind: "decline" },
-  ];
-}
+const DECISION_ACTIONS: readonly DecisionAction[] = [
+  { decision: "accept", label: "Approve" },
+  { decision: "decline", label: "Decline" },
+];
 
 export type ApprovalPreview = { kind: "command"; text: string } | { kind: "path"; path: string } | null;
 
@@ -159,7 +143,7 @@ export function planPreview(text: string, maxLines = 3): string {
 }
 
 export interface DecisionView {
-  actions: DecisionAction[];
+  actions: readonly DecisionAction[];
   supportsNote: boolean;
   preview: ApprovalPreview;
   // The full plan, for a plan approval.
@@ -170,18 +154,74 @@ export function decisionView(ask: PendingApprovalAsk | PendingPlanAsk): Decision
   if (ask.kind === "approval") {
     const { approval } = ask;
     return {
-      actions: decisionActions(approval.decisions),
+      actions: DECISION_ACTIONS,
       supportsNote: approval.supports_note,
       preview: approvalPreview(approval),
       planBody: null,
     };
   }
   return {
-    actions: decisionActions(ask.plan.decisions),
+    actions: DECISION_ACTIONS,
     supportsNote: ask.plan.supports_note,
     preview: null,
     planBody: ask.plan.text,
   };
+}
+
+// What a row or card lists whole beside its actions: a command or question of a few
+// short lines.
+const LISTED_MAX_LENGTH = 160;
+const LISTED_MAX_LINES = 3;
+
+export const fitsListing = (text: string) =>
+  text.length <= LISTED_MAX_LENGTH && text.split("\n").length <= LISTED_MAX_LINES;
+
+// All a shell call may carry for a row to decide it.
+const INLINE_INPUT = new Set(["command", "description", "timeout", "run_in_background"]);
+// All a command decided on a row may hold: printable ASCII, line breaks and tabs.
+// Anything else may read other than it runs.
+const PLAIN_COMMAND = /^[\x20-\x7e\n\t]*$/;
+
+// The command a row or card takes a decision on, or null: a shell call whose input the
+// ask carries whole, with nothing else of consequence, and whose command lists whole.
+// `fromScreen` is `readsDialogsFromScreen` of the ask's session.
+export function inlineCommand(ask: PendingAsk, fromScreen: boolean): string | null {
+  if (ask.kind !== "approval" || fromScreen) return null;
+  const { tool_name: tool, tool_input: input, tool_input_truncated: cut } = ask.approval;
+  if (normalizeToolName(tool) !== "Bash" || !input || cut) return null;
+  if (!Object.keys(input).every((key) => INLINE_INPUT.has(key))) return null;
+  const { command } = input;
+  if (typeof command !== "string" || command.trim() === "" || !PLAIN_COMMAND.test(command)) return null;
+  return fitsListing(command) ? command : null;
+}
+
+// A pending approval's request event, as read from the transcript.
+export type RequestRead = EventRecord | "missing" | "failed";
+
+export type ApprovalRequest = { status: "loading" } | { status: "failed" } | ({ status: "ready" } & ShownRequest);
+
+// A plan from Waypoint's own plan mode has no call, and no dialog, behind it.
+const isOwnPlan = (ask: PendingPlanAsk) => ask.plan.resolve_via === "approve_plan";
+
+// Whether a reply to the approval answers a dialog read off the screen. `fromScreen` is
+// `readsDialogsFromScreen` of the ask's session.
+export const answersScreenDialog = (ask: PendingApprovalAsk | PendingPlanAsk, fromScreen: boolean) =>
+  fromScreen && !(ask.kind === "plan_approval" && isOwnPlan(ask));
+
+// A request is shown from its transcript. A plan's text travels in its ask, and is all
+// of one from Waypoint's own plan mode.
+export function approvalRequest(
+  ask: PendingApprovalAsk | PendingPlanAsk,
+  read: RequestRead | null,
+  session: AskSession,
+): ApprovalRequest {
+  if (ask.kind === "plan_approval" && isOwnPlan(ask)) return { status: "ready", ...shownPlan(ask.plan.text) };
+  if (read === null) return { status: "loading" };
+  if (typeof read === "string") return { status: "failed" };
+  const shown = shownRequest(read, session);
+  if (ask.kind !== "plan_approval" || shown.unverified) return { status: "ready", ...shown };
+  const { body, whole, lockNote } = shownPlan(ask.plan.text);
+  return { status: "ready", ...shown, body, whole, lockNote };
 }
 
 // ─── Responding ───
@@ -243,7 +283,7 @@ export function decideAsk(
   host: string,
   token: string,
   ask: PendingApprovalAsk | PendingPlanAsk,
-  decision: string,
+  decision: Decision,
   note: string | undefined,
   retry: RetryOptions = {},
 ): Promise<void> {
@@ -252,9 +292,7 @@ export function decideAsk(
     if (ask.kind === "approval") {
       await approveSession(host, token, ask.session_id, decision, text, ask.approval.approval_id);
     } else if (ask.plan.resolve_via === "approve_plan") {
-      // approve-plan has its own fixed vocabulary; the session-scoped allow is its acceptForSession.
-      const planDecision = decision === "accept" || decision === "decline" ? decision : "acceptForSession";
-      await approvePlan(host, token, ask.session_id, ask.plan.plan_id, planDecision, text);
+      await approvePlan(host, token, ask.session_id, ask.plan.plan_id, decision, text);
     } else {
       await approveSession(host, token, ask.session_id, decision, text, ask.plan.plan_id);
     }

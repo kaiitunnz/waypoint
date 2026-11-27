@@ -1,0 +1,11 @@
+.glyph {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+  color: var(--brass-text);
+}
+
+.done {
+  color: var(--faint);
+}

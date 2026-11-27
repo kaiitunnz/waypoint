@@ -1,0 +1,97 @@
+.subject {
+  margin-top: 6px;
+  font-size: var(--f-title);
+  font-weight: 600;
+  line-height: 26px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.waiting {
+  color: var(--brass-text);
+}
+
+.gate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: 12px;
+  padding: 10px 12px 2px;
+  border-radius: var(--r);
+  background: var(--plane-raised);
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.gateKind {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Its own line, so a long title leaves the glyph and links level with their text. */
+.gateTitle {
+  flex-basis: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gateLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.blocks {
+  margin-top: 4px;
+}
+
+.group + .group {
+  border-top: 1px solid var(--line);
+}
+
+.files {
+  margin-top: 14px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Overrides the hairline between blocks: a group of files has none. */
+.blocks > .group > .grid > * {
+  border-top: 0;
+}
+
+@media (min-width: 900px) {
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 16px;
+    align-items: start;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .gateLink {
+    min-height: 32px;
+  }
+}

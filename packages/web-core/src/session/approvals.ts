@@ -52,7 +52,7 @@ export type ApprovalBody =
   | { kind: "edit"; tool: string; path: string | null }
   | { kind: "raw"; text: string };
 
-const WORKFLOW_TOOLS = new Set(["Workflow", "RunWorkflow"]);
+export const WORKFLOW_TOOLS: ReadonlySet<string> = new Set(["Workflow", "RunWorkflow"]);
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
 

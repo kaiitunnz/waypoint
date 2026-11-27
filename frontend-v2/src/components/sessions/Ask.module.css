@@ -33,14 +33,7 @@
   padding: 8px 12px;
   border-radius: 8px;
   background: var(--sunken);
-  font-family: var(--mono);
-  font-size: var(--f-code);
   line-height: 19px;
-  color: var(--text-strong);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 160px;
-  overflow-y: auto;
 }
 
 .path {
@@ -61,19 +54,64 @@
   white-space: pre-line;
 }
 
-.plan {
-  margin: 0;
-  font-family: var(--sans);
-  font-size: var(--f-body);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .note {
   margin-top: 8px;
 }
 
 .end {
   composes: end from "../../styles/attention.module.css";
+}
+
+.open {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.open > svg {
+  margin: 3px 0 0 auto;
+  color: var(--faint);
+}
+
+/* A 44px tap target; negative margins borrow the space around the line. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .open {
+    margin: -4px 0 -8px;
+    padding: 11px 0;
+  }
+
+  .open > svg {
+    margin-top: 3px;
+  }
+}
+
+.review {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.review > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.go {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin-bottom: -6px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .go {
+    min-height: 32px;
+    margin-bottom: 0;
+    font-size: var(--f-meta);
+  }
 }

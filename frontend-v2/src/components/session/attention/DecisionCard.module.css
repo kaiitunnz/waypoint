@@ -50,3 +50,8 @@
 .end {
   composes: end from "../../../styles/attention.module.css";
 }
+
+.roomy .body {
+  max-height: none;
+  overflow: visible;
+}

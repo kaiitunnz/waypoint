@@ -10,6 +10,7 @@ import {
   splitFileName,
   splitPath,
   textColumns,
+  resolveFromCwd,
 } from "./workspacePaths";
 
 describe("isWorkspacePathHref", () => {
@@ -220,5 +221,14 @@ describe("textColumns", () => {
     expect(textColumns("設計メモ.md")).toBe(11);
     expect(textColumns("a😀b")).toBe(4);
     expect(textColumns("café→.txt")).toBe(9);
+  });
+});
+
+describe("resolveFromCwd", () => {
+  it("makes a session's path absolute", () => {
+    expect(resolveFromCwd("sub/./a.txt", "/w/")).toBe("/w/sub/a.txt");
+    expect(resolveFromCwd("../b.txt", "/w/p")).toBe("/w/b.txt");
+    expect(resolveFromCwd("/x//y.txt", "")).toBe("/x/y.txt");
+    expect(resolveFromCwd("a.txt", "")).toBeNull();
   });
 });

@@ -59,7 +59,8 @@ import { useQuestionReveal } from "./useQuestionReveal";
 import { useSessionPanels } from "./useSessionPanels";
 import { ViewSwitch, type SessionView } from "./ViewSwitch";
 
-export function SessionScreen({ id }: { id: string }) {
+// `initialView` is the view asked for on arrival; a session without it shows its own.
+export function SessionScreen({ id, initialView }: { id: string; initialView: SessionView }) {
   const pointer = usePointerUI();
   const panels = useSessionPanels();
   const [measureConversation, narrowHeader] = useNarrowerThan(COMPACT_HEADER_WIDTH);
@@ -87,7 +88,7 @@ export function SessionScreen({ id }: { id: string }) {
   );
 
   const [density, setDensity] = useLocalSetting<TranscriptDensity>("waypoint-session-density", TRANSCRIPT_DENSITIES, "summary");
-  const [view, setView] = useState<SessionView>("chat");
+  const [view, setView] = useState<SessionView>(initialView);
   // The side pane folds away while the Terminal view shows; its toggle opens it
   // for this visit only.
   const [paneBesideTerminal, setPaneBesideTerminal] = useState(false);

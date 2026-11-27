@@ -4,7 +4,7 @@ import { useCallback, useId, useRef, useState, type ChangeEvent, type ClipboardE
 import { createPortal } from "react-dom";
 
 import { insertTrigger, useCommandCompletions } from "@waypoint/web-core/composer-completions";
-import { filesFromDataTransfer, pasteAttaches } from "@waypoint/web-core/fileDrop";
+import { attachFromPaste } from "@waypoint/web-core/fileDrop";
 import { useFileMentions } from "@waypoint/web-core/hooks/use-file-mentions";
 import { useAttachments } from "@waypoint/web-core/hooks/useAttachments";
 import { useFileDragVisible } from "@waypoint/web-core/hooks/useFileDragVisible";
@@ -89,10 +89,7 @@ export function useComposerField({ sessionId, attachmentsEnabled, commands, path
       mentions.handleKey(event) || completions.handleSuggestionKey(event),
     onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => {
       if (!attachmentsEnabled) return;
-      const files = filesFromDataTransfer(event.clipboardData);
-      if (!pasteAttaches(files, event.clipboardData.getData("text/plain"))) return;
-      event.preventDefault();
-      attachments.addFiles(files);
+      attachFromPaste(event, attachments.addFiles);
     },
     insert: (trigger: "/" | "@") => {
       const node = field.current;

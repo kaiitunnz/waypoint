@@ -242,6 +242,15 @@ export function hasTerminalPane(
   return caps ? caps.has_terminal_pane : FALLBACK_HAS_TERMINAL_PANE.has(transport);
 }
 
+// Whether the transport reads its agent's dialogs off the screen, where what one shows
+// may not be what a reply answers. An unknown transport is taken to.
+export function readsDialogsFromScreen(
+  transport: SessionTransport | undefined,
+  catalog?: BackendCatalog,
+): boolean {
+  return !transport || hasTerminalPane(transport, catalog) || fidelityFor(transport, catalog) === "heuristic";
+}
+
 // Whether the terminal pane accepts keystroke input from the user.
 export function terminalInteractive(
   transport: SessionTransport,

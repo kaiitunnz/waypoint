@@ -3,15 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import {
   answerQuestion,
+  answersScreenDialog,
+  approvalRequest,
   buildAnswer,
   decideAsk,
   decisionView,
+  inlineCommand,
   emptyPicks,
   isAnswerable,
   isAgentNotReady,
   planPreview,
   retryWhileNotReady,
-  sessionScopedAllow,
   showsSend,
   stripRecommendedSuffix,
   tapOption,
@@ -20,6 +22,7 @@ import {
   type PromptPick,
   isRecommendedLabel,
 } from "./pendingAskActions";
+import { ev } from "./test-helpers";
 import type {
   PendingApprovalAsk,
   PendingAskApproval,
@@ -117,36 +120,14 @@ describe("decisions", () => {
   const plan = (decisions: string[]) =>
     ({ kind: "plan_approval", plan: { plan_id: "p1", text: "# Plan", decisions, supports_note: false, resolve_via: "approve" } }) as unknown as PendingPlanAsk;
 
-  it("always offers approve and decline, and an escalation only when listed", () => {
-    expect(decisionView(approval()).actions.map((a) => a.decision)).toEqual(["accept", "decline"]);
-    expect(
-      decisionView(approval({ decisions: ["accept", "acceptForSession", "decline", "acceptAlways"] })).actions.map(
-        (a) => a.decision,
-      ),
-    ).toEqual(["accept", "acceptForSession", "decline"]);
-    expect(decisionView(plan(["acceptForSession"])).actions.map((a) => a.label)).toEqual([
-      "Approve",
-      "For this session",
-      "Decline",
-    ]);
-  });
-
-  it("sends the agent's own id for the session-scoped allow, whatever its spelling", () => {
-    for (const id of ["acceptForSession", "allow_for_session", "approve-for-this-session", "AllowForSession"]) {
-      const { actions } = decisionView(approval({ decisions: ["approve", id, "decline"] }));
-      expect(actions.map((a) => [a.decision, a.label])).toEqual([
+  it("offers only a single decision, whatever wider grant the agent lists", () => {
+    const listed = ["accept", "acceptForSession", "decline", "acceptAlways"];
+    for (const ask of [approval({ decisions: listed }), plan(listed), plan([])]) {
+      expect(decisionView(ask).actions.map((a) => [a.decision, a.label])).toEqual([
         ["accept", "Approve"],
-        [id, "For this session"],
         ["decline", "Decline"],
       ]);
     }
-    expect(sessionScopedAllow(["approve", "acceptAlways", "decline"])).toBeUndefined();
-    expect(sessionScopedAllow([])).toBeUndefined();
-  });
-
-  it("keeps Approve first and Decline last", () => {
-    const { actions } = decisionView(approval({ decisions: ["approve", "acceptForSession", "decline"] }));
-    expect(actions.map((a) => a.kind)).toEqual(["approve", "session", "decline"]);
   });
 
   it("previews the command or the edited file, and carries the plan text", () => {
@@ -164,6 +145,156 @@ describe("decisions", () => {
   it("reads the note support from the approval or the plan", () => {
     expect(decisionView(approval({ supports_note: false })).supportsNote).toBe(false);
     expect(decisionView(approval()).supportsNote).toBe(true);
+  });
+});
+
+describe("deciding outside the detail", () => {
+  const approval = (
+    tool_name: string | null,
+    tool_input: Record<string, unknown> | null,
+    tool_input_truncated = false,
+  ): PendingApprovalAsk => ({
+    id: "approval:s:a",
+    session_id: "s",
+    session_title: "Session",
+    session_backend: "x",
+    spawner_session_id: null,
+    created_at: "2026-11-27T08:00:00Z",
+    sequence: 1,
+    availability: "actionable",
+    title: "Approve",
+    body: null,
+    kind: "approval",
+    approval: {
+      approval_id: "a",
+      tool_name,
+      tool_input,
+      tool_input_truncated,
+      decisions: ["accept", "decline"],
+      supports_note: false,
+    },
+  });
+  const plan = (text: string, resolve_via: PendingAskPlan["resolve_via"]) =>
+    ({ kind: "plan_approval", plan: { plan_id: "p", text, resolve_via } }) as unknown as PendingPlanAsk;
+  const session = { cwd: "/w", fromScreen: false };
+  const inline = (tool: string | null, input: Record<string, unknown> | null) => inlineCommand(approval(tool, input), false);
+
+  it("decides a plain shell command that lists whole", () => {
+    expect(inline("Bash", { command: "git push" })).toBe("git push");
+    expect(inline("bash", { command: "a\nb\nc", description: "x", timeout: 5, run_in_background: true })).toBe("a\nb\nc");
+    expect(inline("Bash", { command: "x".repeat(160) })).toBe("x".repeat(160));
+    expect(inline("Bash", { command: "x".repeat(161) })).toBeNull();
+    expect(inline("Bash", { command: "a\nb\nc\nd" })).toBeNull();
+  });
+
+  it("opens a call that carries anything else", () => {
+    for (const extra of [
+      { dangerouslyDisableSandbox: true },
+      { dangerouslyDisableSandbox: false },
+      { workdir: "/etc" },
+      { cwd: "/w" },
+      { anything: 1 },
+    ]) {
+      expect(inline("Bash", { command: "ls", ...extra })).toBeNull();
+    }
+  });
+
+  it("opens a command read off the screen, which may not be the one asked", () => {
+    expect(inlineCommand(approval("Bash", { command: "ls" }), true)).toBeNull();
+  });
+
+  it("opens everything else", () => {
+    expect(inline("Bash", null)).toBeNull();
+    expect(inline("Bash", {})).toBeNull();
+    expect(inline("Bash", { command: " " })).toBeNull();
+    expect(inline("Bash", { command: ["ls"] })).toBeNull();
+    expect(inline(null, { command: "ls" })).toBeNull();
+    expect(inline("Edit", { file_path: "/srv/a.ts" })).toBeNull();
+    expect(inline("mcp__sh__run", { command: "ls" })).toBeNull();
+    // Cut by the server.
+    expect(inlineCommand(approval("Bash", { command: "git pu" }, true), false)).toBeNull();
+    expect(inlineCommand(plan("# Plan", "approve"), false)).toBeNull();
+  });
+
+  it("decides only a command of printable ASCII, line breaks and tabs", () => {
+    expect(inline("Bash", { command: "a\t~ !\nb" })).toBe("a\t~ !\nb");
+    for (const command of [
+      // `#` after a no-break space starts no comment, so what follows runs.
+      "echo cleanup\u00a0#; rm -rf build",
+      // A backslash before CR LF escapes the return, so the next line runs by itself.
+      "echo would run: \\\r\nrm -rf build",
+      "a\r\nb",
+      "ls # \u202e/ fr- mr ;",
+      "rm\u200b -rf a",
+      "ls\ufe0f",
+      "ls\u{e0100}",
+      "ls\u3164",
+      "ls\u3000",
+      "ls\u2800",
+      "ls\x7f",
+      "ls\x1b[8m",
+      "echo \u00e9",
+    ]) {
+      expect([command, inline("Bash", { command })]).toEqual([command, null]);
+    }
+  });
+
+  it("shows a request from its transcript", () => {
+    const request = ev(1, "approval_request", "Approve Bash", { tool_name: "Bash", tool_input: { command: "ls" } });
+    const ask = approval("Bash", { command: "ls" });
+    expect(approvalRequest(ask, null, session)).toEqual({ status: "loading" });
+    expect(approvalRequest(ask, "missing", session)).toEqual({ status: "failed" });
+    expect(approvalRequest(ask, "failed", session)).toEqual({ status: "failed" });
+    expect(approvalRequest(ask, request, session)).toMatchObject({
+      status: "ready",
+      body: { kind: "command", command: "ls" },
+      fields: { tool_name: "Bash", tool_input: { command: "ls" } },
+      whole: true,
+    });
+  });
+
+  it("takes a plan's text from its ask, beside the rest of its call", () => {
+    const request = ev(1, "approval_request", "Approve plan", {
+      tool_name: "ExitPlanMode",
+      tool_input: { plan: "# Plan", allowedPrompts: [{ tool: "Bash", prompt: "run tests" }] },
+    });
+    expect(approvalRequest(plan("# Plan", "approve"), null, session)).toEqual({ status: "loading" });
+    expect(approvalRequest(plan("# Plan", "approve"), request, session)).toMatchObject({
+      body: { kind: "plan", plan: "# Plan" },
+      warnings: ["Extra permissions or network access"],
+      whole: true,
+    });
+    // A plan from Waypoint's own plan mode has no call to read.
+    // Its source shows under the rendered view.
+    expect(approvalRequest(plan("# Plan", "approve_plan"), null, session)).toEqual({
+      status: "ready",
+      body: { kind: "plan", plan: "# Plan" },
+      fields: { plan: "# Plan" },
+      warnings: [],
+      unverified: false,
+      whole: true,
+      lockNote: null,
+    });
+    expect(approvalRequest(plan(" ", "approve_plan"), null, session)).toMatchObject({ whole: false, lockNote: "No plan text" });
+  });
+
+  it("answers a screen dialog for any approval read off one, but Waypoint's own plan", () => {
+    expect(answersScreenDialog(approval("Bash", { command: "ls" }), true)).toBe(true);
+    expect(answersScreenDialog(plan("# Plan", "approve"), true)).toBe(true);
+    expect(answersScreenDialog(plan("# Plan", "approve_plan"), true)).toBe(false);
+    expect(answersScreenDialog(approval("Bash", { command: "ls" }), false)).toBe(false);
+  });
+
+  it("leaves a plan read off the screen undecided, whatever its ask carries", () => {
+    const request = ev(1, "approval_request", "Approve plan", {
+      tool_name: "ExitPlanMode",
+      tool_input: { plan: "# Plan" },
+      interaction: { kind: "plan_approval" },
+    });
+    expect(approvalRequest(plan("# Plan", "approve"), request, { cwd: "/w", fromScreen: true })).toMatchObject({
+      unverified: true,
+      whole: false,
+    });
   });
 });
 
@@ -307,8 +438,8 @@ describe("answering and deciding", () => {
     expect(api.approveSession).toHaveBeenCalledWith("h", "t", "s1", "accept", undefined, "p1");
     await decideAsk("h", "t", plan("approve_plan"), "accept", "go");
     expect(api.approvePlan).toHaveBeenCalledWith("h", "t", "s1", "p1", "accept", "go");
-    await decideAsk("h", "t", plan("approve_plan"), "allow_for_session", undefined);
-    expect(api.approvePlan).toHaveBeenLastCalledWith("h", "t", "s1", "p1", "acceptForSession", undefined);
+    await decideAsk("h", "t", plan("approve_plan"), "decline", undefined);
+    expect(api.approvePlan).toHaveBeenLastCalledWith("h", "t", "s1", "p1", "decline", undefined);
   });
 
   it("retries a 409 on the way", async () => {

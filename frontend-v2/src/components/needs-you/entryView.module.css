@@ -1,0 +1,25 @@
+.chips {
+  display: inline-flex;
+  gap: 10px;
+}
+
+.pending {
+  color: var(--brass-text);
+}
+
+.gate {
+  display: inline-flex;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.gate > :last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.answered {
+  flex: none;
+  color: var(--muted);
+}

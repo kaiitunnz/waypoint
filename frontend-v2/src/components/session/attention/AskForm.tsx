@@ -1,5 +1,8 @@
 "use client";
 
+import type { KeyboardEvent } from "react";
+
+import { isModifiedEnterShortcut } from "@waypoint/web-core/keyboard";
 import { NOT_READY_MESSAGE } from "@waypoint/web-core/pendingAskActions";
 import {
   askFormState,
@@ -7,6 +10,7 @@ import {
   askToolUseId,
   clearAskAnswers,
   serializeAnswers,
+  type AskFormState,
   type AskUserQuestion,
 } from "@waypoint/web-core/session/askQuestion";
 import type { EventRecord } from "@waypoint/web-core/types";
@@ -33,11 +37,27 @@ export function AskForm({ event, questions, headed = false }: AskFormProps) {
   if (!toolUseId) return null;
   const formState = askFormState(controller.snapshot, event, controller.resolution(toolUseId));
   if (formState === "resolved" || formState === "gone") return null;
+  return <AskFormView toolUseId={toolUseId} questions={questions} headed={headed} formState={formState} />;
+}
 
+interface AskFormViewProps {
+  toolUseId: string;
+  questions: AskUserQuestion[];
+  headed?: boolean;
+  formState: Exclude<AskFormState, "resolved" | "gone">;
+  // What another surface is doing with this question; it holds the form while busy.
+  held?: AskPhase;
+  // Cmd/Ctrl+Enter anywhere in the form sends it.
+  submitKey?: boolean;
+}
+
+export function AskFormView({ toolUseId, questions, headed = false, formState, held, submitKey }: AskFormViewProps) {
+  const controller = useAskController();
   const draft = controller.draft(toolUseId);
   const operation = controller.operation(toolUseId);
   const failure = controller.failure(toolUseId);
-  const busy = operation !== null;
+  const waiting = held?.state === "sending" || held?.state === "sent";
+  const busy = operation !== null || waiting;
   const actionable = formState === "actionable";
   const { hasAnswer } = askFormView(questions, draft);
   const canSend = actionable && !busy && hasAnswer;
@@ -48,16 +68,27 @@ export function AskForm({ event, questions, headed = false }: AskFormProps) {
     if (payload) void controller.answer(toolUseId, payload.text, payload.answers);
   };
   const cancel = () => void controller.cancel(toolUseId);
+  // The note field handles the shortcut itself; a focused option must not toggle.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!submitKey || event.defaultPrevented || !isModifiedEnterShortcut(event)) return;
+    event.preventDefault();
+    submit();
+  };
 
-  const phase: AskPhase = busy
+  const phase: AskPhase = operation
     ? { state: "sending", retrying: controller.retrying(toolUseId) }
     : failure
-      ? { state: "error", message: failure.notReady ? NOT_READY_MESSAGE : failure.message }
-      : { state: "idle" };
+      ? {
+          state: "error",
+          message: failure.notReady ? NOT_READY_MESSAGE : failure.message,
+          // Not while another surface holds the question.
+          retry: busy ? undefined : failure.operation === "send" ? submit : cancel,
+        }
+      : (held ?? { state: "idle" });
   const reattach = formState === "unavailable" && controller.canReattach && !failure;
 
   return (
-    <div className={styles.form}>
+    <div className={styles.form} onKeyDown={onKeyDown}>
       <QuestionEditor
         questions={questions}
         headed={headed}
@@ -75,11 +106,7 @@ export function AskForm({ event, questions, headed = false }: AskFormProps) {
           </ActionChip>
         </div>
       ) : (
-        <AskStatus
-          availability={formState === "loading" ? "starting" : formState}
-          phase={phase}
-          onRetry={failure ? (failure.operation === "send" ? submit : cancel) : undefined}
-        />
+        <AskStatus availability={formState === "loading" ? "starting" : formState} phase={phase} />
       )}
       <div className={styles.actions}>
         <Button variant="primary" size="sm" disabled={!canSend} busy={operation === "send"} onClick={submit}>

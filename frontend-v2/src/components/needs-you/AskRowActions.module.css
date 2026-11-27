@@ -1,0 +1,37 @@
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 2px;
+  padding: 0 12px 10px 28px;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.buttons > :first-child {
+  margin-right: 4px;
+}
+
+.noteButton {
+  margin-left: auto;
+}
+
+.note {
+  width: 100%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .buttons > button {
+    min-height: 28px;
+  }
+
+  .noteButton {
+    height: 28px;
+  }
+}

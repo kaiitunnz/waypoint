@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 
-import { RouteSkeleton } from "@/components/shell/RouteSkeleton";
+import { decodeNeedsId } from "@waypoint/web-core/needsYou";
+
+import { ItemDetail } from "@/components/needs-you/ItemDetail";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -10,5 +12,7 @@ export const metadata: Metadata = { title: "Needs you" };
 
 export default async function Page({ params }: Props) {
   const { id } = await params;
-  return <RouteSkeleton title="Needs you" subject={id} back={{ href: "/inbox", label: "Needs you" }} />;
+  const decoded = decodeNeedsId(id);
+  // Keyed by id so moving between items starts a fresh view.
+  return <ItemDetail key={decoded} id={decoded} />;
 }

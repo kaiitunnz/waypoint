@@ -3,6 +3,10 @@
 
 import {
   BoardChannel,
+  InboxItem,
+  ManagerStateResponse,
+  ManagerSummary,
+  ManagerTicket,
   ManagerTicketListQuery,
   ManagerTicketScale,
   ManagerTicketSort,
@@ -119,6 +123,111 @@ export const AWAITING_STATES: ReadonlySet<ManagerTicketState> = new Set([
 
 export function isAwaiting(state: ManagerTicketState): boolean {
   return AWAITING_STATES.has(state);
+}
+
+// ─── Gates: tickets waiting on a human decision ───
+
+// Highest priority first.
+export function awaitingTickets(tickets: ManagerTicket[]): ManagerTicket[] {
+  return tickets
+    .filter((ticket) => isAwaiting(ticket.state))
+    .sort((a, b) => a.priority.localeCompare(b.priority));
+}
+
+// The number of a pull request URL or `#123` reference.
+export function prNumber(pr: string): string | null {
+  const match = pr.match(/\/pull\/(\d+)|#(\d+)|\/(\d+)(?:$|[/?#])/);
+  return match ? match[1] ?? match[2] ?? match[3] ?? null : null;
+}
+
+export interface GateView {
+  gate: "PR review" | "Spec review" | "Blocked";
+  // What the human is asked to do.
+  summary: string;
+}
+
+export function gateView(ticket: ManagerTicket): GateView {
+  const gate =
+    ticket.state === "review_requested"
+      ? "PR review"
+      : ticket.state === "spec_review"
+        ? "Spec review"
+        : "Blocked";
+  const num = ticket.pr_url ? prNumber(ticket.pr_url) : null;
+  const summary =
+    ticket.state === "review_requested" && ticket.pr_url
+      ? `Review PR${num ? ` #${num}` : ""} and merge, request changes, or abort.`
+      : ticket.state === "spec_review"
+        ? "Approve the spec, request changes, or reject."
+        : "The tech-lead is blocked and needs your decision.";
+  return { gate, summary };
+}
+
+export function gateHeadline(ticket: ManagerTicket): string {
+  if (ticket.state === "spec_review") return "Spec ready for review";
+  if (ticket.state !== "review_requested") return "Blocked, needs your decision";
+  const num = ticket.pr_url ? prNumber(ticket.pr_url) : null;
+  return num ? `PR #${num} ready to merge` : "Ready for review";
+}
+
+// An awaiting ticket of one manager, with the inbox item that asks about it.
+export interface BoardGate {
+  managerId: string;
+  project: string;
+  channelPrefix: string | null;
+  ticket: ManagerTicket;
+  // Null when the ticket names no item or the item is gone.
+  item: InboxItem | null;
+}
+
+// A manager's gates, before their items are read.
+export function managerGates(manager: ManagerSummary, state: ManagerStateResponse): BoardGate[] {
+  return awaitingTickets(state.tickets).map((ticket) => ({
+    managerId: manager.id,
+    project: manager.project,
+    channelPrefix: state.config?.render_context?.ticket_channel_prefix ?? null,
+    ticket,
+    item: null,
+  }));
+}
+
+export interface GateRead {
+  gates: BoardGate[];
+  // Ids of the managers that could not be read.
+  failed: string[];
+}
+
+// A manager that could not be read keeps the gates it had. Null while nothing is
+// known: no gate seen yet, and a manager unread.
+export function mergeGates(previous: BoardGate[] | null, read: GateRead): BoardGate[] | null {
+  if (read.failed.length === 0) return read.gates;
+  const kept = (previous ?? []).filter((gate) => read.failed.includes(gate.managerId));
+  const merged = [...read.gates, ...kept];
+  return previous === null && merged.length === 0 ? null : merged;
+}
+
+export function gateKey(gate: BoardGate): string {
+  return `gate:${gate.managerId}:${gate.ticket.id}`;
+}
+
+export function gateTime(gate: BoardGate): string {
+  return gate.ticket.awaiting_since ?? gate.ticket.updated_at;
+}
+
+// The ticket's pull request, when it is a link a browser can open.
+export function gatePrUrl(ticket: ManagerTicket): string | null {
+  return ticket.pr_url && /^https?:\/\//.test(ticket.pr_url) ? ticket.pr_url : null;
+}
+
+export function gateBoardHref(gate: BoardGate): string {
+  return gate.channelPrefix
+    ? `/board?channel=${encodeURIComponent(`${gate.channelPrefix}${gate.ticket.id}`)}`
+    : "/board";
+}
+
+// The human has replied, and the ticket has not moved on yet.
+export function isGateAnswered(gate: BoardGate): boolean {
+  return gate.item?.status === "resolved";
 }
 
 // ─── Ticket state → lamp tone + label ───

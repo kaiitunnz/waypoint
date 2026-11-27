@@ -1303,6 +1303,11 @@ class PendingAskApproval(BaseModel):
     tool_use_id: str | None = None
     # The type or name of the Claude subagent asking, when it is one.
     subagent: str | None = None
+    # The agent's description of the call.
+    summary: str | None = None
+    # What the request carries beside its tool input, such as a command and the
+    # access it asks for. Long strings are cut like ``tool_input``'s.
+    request: dict[str, Any] | None = None
 
 
 class PendingAskPlan(BaseModel):

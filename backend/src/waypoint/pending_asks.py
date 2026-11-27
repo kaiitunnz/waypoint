@@ -15,7 +15,7 @@ from waypoint.backends.approvals import (
 )
 from waypoint.backends.base import PendingPlanApproval, PlanApprovalLifecycle
 from waypoint.backends.capabilities import BackendCapabilities
-from waypoint.backends.events import INTERACTION_METADATA_KEY
+from waypoint.backends.events import INTERACTION_METADATA_KEY, SUMMARY_METADATA_KEY
 from waypoint.pending_questions import is_question_lifecycle_event
 from waypoint.schemas import (
     EventKind,
@@ -158,6 +158,8 @@ def _approval_ask(
     tool_name = _text(event.metadata.get("tool_name"))
     raw_input = event.metadata.get("tool_input")
     tool_input = _cut_strings(raw_input) if isinstance(raw_input, dict) else None
+    raw_request = event.metadata.get("request")
+    summary = _text(event.metadata.get(SUMMARY_METADATA_KEY))
     title = _cut(
         _text(interaction.get("title"))
         or (f"Approve {tool_name}" if tool_name else "Approval requested")
@@ -176,6 +178,10 @@ def _approval_ask(
             decisions=capabilities.approval_decisions,
             supports_note=capabilities.supports_approval_note,
             subagent=_text(event.metadata.get("subagent")),
+            summary=_cut(summary) if summary else None,
+            request=(
+                _cut_strings(raw_request) if isinstance(raw_request, dict) else None
+            ),
             **_call_identity(event),
         ),
     )

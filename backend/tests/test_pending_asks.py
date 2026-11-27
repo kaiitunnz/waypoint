@@ -408,6 +408,34 @@ async def test_short_tool_input_is_not_flagged(env: Env) -> None:
     assert item.approval.tool_input_truncated is False
 
 
+async def test_approval_carries_the_call_summary_and_request(env: Env) -> None:
+    env.transport.ids = ("c1",)
+    request = {"command": "cat a", "additionalPermissions": {"network": True}}
+    await approval(
+        env.runtime,
+        "c1",
+        tool_name=None,
+        extra={"summary": "Read `a`", "request": {**request, "reason": "x" * 3000}},
+    )
+
+    item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
+
+    assert item.approval.summary == "Read `a`"
+    assert item.approval.request is not None
+    assert item.approval.request["command"] == "cat a"
+    assert item.approval.request["additionalPermissions"] == {"network": True}
+    assert len(item.approval.request["reason"]) == TEXT_LIMIT + 1
+
+
+async def test_approval_without_a_summary_has_none(env: Env) -> None:
+    env.transport.ids = ("a1",)
+    await approval(env.runtime, "a1")
+
+    item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
+
+    assert item.approval.summary is None and item.approval.request is None
+
+
 async def test_toolless_approval_uses_its_text(env: Env) -> None:
     env.transport.ids = ("c1",)
     await approval(

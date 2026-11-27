@@ -6,7 +6,7 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import { useNow } from "@waypoint/web-core/hooks/useNow";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
-import { formatSessionTime, lampWord, sessionLamp } from "@waypoint/web-core/sessionPresentation";
+import { formatSessionTime, lampWord, sessionLamp, showsUnread, spokenStatus } from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import { rankSessionsForSwitcher, SWITCHER_SECTION_LABELS, type SwitcherSection } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
@@ -70,6 +70,7 @@ export function SessionRail({ currentId, onClose, onPick }: SessionRailProps) {
   const row = (session: SessionRecord, section: SwitcherSection) => {
     const lamp = sessionLamp(session, feed.askSessionIds.has(session.id));
     const word = lampWord(lamp, session.status);
+    const unread = showsUnread(session);
     const ask = asks.find((item) => item.session_id === session.id);
     const exited = section === "exited";
     // Needs-you rows keep their ask line.
@@ -80,14 +81,24 @@ export function SessionRail({ currentId, onClose, onPick }: SessionRailProps) {
           href={sessionHref(session.id)}
           onNavigate={onPick && (() => onPick(session.id !== currentId))}
           aria-current={session.id === currentId ? "page" : undefined}
-          className={cx(styles.item, session.id === currentId && styles.on, single && styles.single, exited && styles.exited)}
+          className={cx(
+            styles.item,
+            unread && styles.unread,
+            session.id === currentId && styles.on,
+            single && styles.single,
+            lamp === "exited" && styles.exited,
+          )}
         >
-          <StatusLamp state={lamp} size="sm" label={word} />
+          <StatusLamp state={lamp} size="sm" label={spokenStatus(word, unread)} />
           <span className={styles.name}>{session.title}</span>
           <span className={styles.time}>{formatSessionTime(session.last_event_at, now)}</span>
           {single ? null : (
             <span className={styles.sub}>
-              {section === "needs" && ask ? ask.title : <ActivityLine fallback={word} activity={activities.get(session.id)} bright={lamp === "done"} />}
+              {section === "needs" && ask ? (
+                ask.title
+              ) : (
+                <ActivityLine fallback={word} activity={activities.get(session.id)} bright={unread && lamp === "idle"} />
+              )}
             </span>
           )}
         </Link>

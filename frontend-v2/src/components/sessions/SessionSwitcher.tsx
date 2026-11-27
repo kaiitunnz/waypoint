@@ -10,6 +10,8 @@ import {
   formatSessionTime,
   lampWord,
   sessionLamp,
+  showsUnread,
+  spokenStatus,
 } from "@waypoint/web-core/sessionPresentation";
 import { HOME_HIDDEN_SOURCES } from "@waypoint/web-core/sessionSections";
 import { sessionHref } from "@waypoint/web-core/shellNav";
@@ -29,6 +31,7 @@ import { SearchInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
+import { cx } from "@/lib/cx";
 import { useShowExited } from "@/lib/show-exited";
 import { usePointerUI } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
@@ -126,6 +129,7 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const renderEntry = (entry: SwitcherEntry, index: number) => {
     const { session } = entry;
     const lamp = sessionLamp(session, askSessionIds.has(session.id));
+    const unread = showsUnread(session);
     const heading =
       entry.section !== "exited" && entry.section !== entries[index - 1]?.section
         ? SWITCHER_SECTION_LABELS[entry.section]
@@ -139,12 +143,12 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
           id={`${listId}-${session.id}`}
           aria-selected={index === selected}
           tabIndex={-1}
-          className={styles.option}
+          className={cx(styles.option, unread && styles.unread, lamp === "exited" && styles.exited)}
           onMouseMove={() => setActive(index)}
           onClick={() => open(session)}
         >
           <span className={styles.lamp}>
-            <StatusLamp state={lamp} label={lampWord(lamp, session.status)} />
+            <StatusLamp state={lamp} label={spokenStatus(lampWord(lamp, session.status), unread)} />
           </span>
           <span className={styles.text}>
             <span className={styles.title}>{highlighted(session.title, entry.positions)}</span>

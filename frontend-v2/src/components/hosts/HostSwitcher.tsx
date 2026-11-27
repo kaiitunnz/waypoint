@@ -28,7 +28,7 @@ export function HostSwitcher() {
   const lamp: { state: LampState; label: string } = sshBlocked
     ? { state: "error", label: "SSH disconnected" }
     : connection === "open"
-      ? { state: "done", label: "Live" }
+      ? { state: "online", label: "Live" }
       : { state: "working", label: "Connecting" };
   const name = describeHost(host, { targetName: activeTarget?.name, recents });
 

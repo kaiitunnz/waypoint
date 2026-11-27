@@ -32,7 +32,7 @@ import { Toggle } from "@/components/ui/Toggle";
 import { PageHeader } from "@/components/ui/PageHeader";
 import styles from "./Gallery.module.css";
 
-const LAMPS: LampState[] = ["needs", "working", "done", "error", "idle", "exited"];
+const LAMPS: LampState[] = ["needs", "working", "error", "idle", "exited", "online", "offline", "unknown"];
 
 export function Gallery() {
   const { toast } = useToast();
@@ -176,10 +176,14 @@ export function Gallery() {
 
       <SectionHeading title="List rows" count={4} action="See all" />
       <List>
-        <ListRow lamp="needs" title="Fix held-message race" status="Which fix should I ship?" trailing="09:16" />
-        <ListRow lamp="idle" title="Paper figures" compact trailing="Yesterday" />
+        <ListRow lamp="needs" unread title="Fix held-message race" status="Which fix should I ship?" trailing="09:16" />
+        <ListRow lamp="idle" unread title="Queue backoff, unread" single trailing="12m" />
+        <ListRow lamp="idle" unread={false} title="Paper figures" single trailing="Yesterday" />
+        <ListRow lamp="error" unread={false} title="Nightly sweep" single trailing="Mon" />
+        <ListRow lamp="exited" unread={false} dimmed title="Old release notes" single trailing="Nov 20" />
         <ListRow
           lamp="working"
+          unread={false}
           title="Heatmap keyboard access"
           status="Running npm run lint"
           trailing="2m"

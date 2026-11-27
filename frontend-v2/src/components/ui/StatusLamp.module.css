@@ -5,7 +5,6 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  overflow: visible;
 }
 
 .sm {
@@ -21,20 +20,16 @@
     0 0 0 4px color-mix(in srgb, var(--brass) 70%, transparent);
 }
 
+/* Working: a half arc turning on a faint track. Reduced motion leaves it still. */
 .working {
-  border: 1.5px solid var(--working);
-  overflow: hidden;
+  border: 2px solid color-mix(in srgb, var(--working) 18%, transparent);
+  border-top-color: var(--working);
+  border-right-color: var(--working);
+  animation: turn 1.6s linear infinite;
 }
 
-.working::after {
-  content: "";
-  position: absolute;
-  inset: 0 50% 0 0;
-  background: var(--working);
-}
-
-.done {
-  background: var(--done);
+.sm.working {
+  border-width: 1.75px;
 }
 
 .error {
@@ -42,14 +37,33 @@
   border-radius: 2px;
 }
 
-.idle {
+.idle,
+.unknown {
   border: 1.5px solid var(--faint);
 }
 
-.exited {
-  border: 1.5px dashed var(--faint);
+.online {
+  background: var(--done);
+}
+
+/* An exited session and an offline host draw nothing; the box keeps the column. */
+.exited,
+.offline {
+  background: none;
 }
 
 .flat {
   box-shadow: none;
+}
+
+@keyframes turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .working {
+    animation: none;
+  }
 }

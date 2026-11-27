@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type { SessionActivity } from "@waypoint/web-core/activity";
-import { formatSessionTime, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
+import { formatSessionTime, showsUnread, spokenStatus, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
@@ -12,6 +12,7 @@ import { StatusLamp } from "@/components/ui/StatusLamp";
 import { ActivityLine } from "./ActivityLine";
 import { PinMark } from "./PinMark";
 import styles from "./SessionRows.module.css";
+import { cx } from "@/lib/cx";
 
 interface RowProps {
   session: SessionRecord;
@@ -40,14 +41,19 @@ export function LiveRow({
   previews,
   activity,
 }: Omit<RowProps, "agent"> & PreviewProps) {
+  const unread = showsUnread(session);
   return (
     <ListRow
       href={href(session)}
       lamp={lamp}
-      lampLabel={word}
+      lampLabel={spokenStatus(word, unread)}
       title={session.title}
       single={!previews}
-      status={previews ? <ActivityLine fallback={word} activity={activity} bright={lamp === "done"} /> : undefined}
+      unread={unread}
+      dimmed={lamp === "exited"}
+      status={
+        previews ? <ActivityLine fallback={word} activity={activity} bright={unread && lamp === "idle"} /> : undefined
+      }
       trailing={time(session, now)}
       actions={menu}
     />
@@ -63,13 +69,15 @@ export function CompactRow({
   menu,
   detailed,
 }: RowProps & { detailed: boolean }) {
+  const unread = showsUnread(session);
   return (
     <ListRow
       href={href(session)}
       lamp={lamp}
-      lampLabel={word}
+      lampLabel={spokenStatus(word, unread)}
       title={session.title}
       compact
+      unread={unread}
       dimmed={lamp === "exited"}
       trailing={
         detailed ? (
@@ -96,17 +104,22 @@ export function LiveTile({
   previews,
   activity,
 }: RowProps & PreviewProps) {
+  const unread = showsUnread(session);
+  const exited = lamp === "exited";
   return (
     <li className={styles.tileItem}>
-      <Link href={href(session)} className={styles.tile}>
+      <Link
+        href={href(session)}
+        className={cx(styles.tile, unread ? styles.unread : styles.read, exited && styles.exited)}
+      >
         <span className={styles.head}>
           <span className={styles.name}>{session.title}</span>
           <span className={styles.time}>{time(session, now)}</span>
         </span>
         <span className={styles.step}>
-          <StatusLamp state={lamp} size="sm" label={word} />
+          {exited ? null : <StatusLamp state={lamp} size="sm" label={spokenStatus(word, unread)} />}
           {previews ? (
-            <ActivityLine fallback={word} activity={activity} bright={lamp === "done"} progressStyle="long" />
+            <ActivityLine fallback={word} activity={activity} bright={unread && lamp === "idle"} progressStyle="long" />
           ) : (
             word
           )}
@@ -120,12 +133,14 @@ export function LiveTile({
 
 export function ResultRow({ session, lamp, word, now, agent, menu }: RowProps) {
   const where = [agent, session.repo_name, session.branch].filter(Boolean).join(", ");
+  const unread = showsUnread(session);
   return (
     <ListRow
       href={href(session)}
       lamp={lamp}
-      lampLabel={word}
+      lampLabel={spokenStatus(word, unread)}
       title={session.title}
+      unread={unread}
       dimmed={lamp === "exited"}
       status={where}
       trailing={

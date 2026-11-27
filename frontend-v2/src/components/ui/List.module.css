@@ -121,7 +121,17 @@
   height: 22px;
 }
 
+.read .title {
+  font-weight: 400;
+  color: var(--text);
+}
+
+.unread .trailing {
+  color: var(--text-strong);
+}
+
 .dimmed .title {
+  font-weight: 400;
   color: var(--muted);
 }
 

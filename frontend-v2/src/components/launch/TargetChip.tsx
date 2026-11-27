@@ -19,7 +19,7 @@ const needsPassword = (target: LaunchTargetSummary | null) => target?.auth === "
 
 function lampFor(target: LaunchTargetSummary | null): { state: LampState; label: string } {
   if (needsPassword(target)) return { state: "error", label: "SSH password required" };
-  return { state: "done", label: target ? "SSH target" : "This host" };
+  return { state: "online", label: target ? "SSH target" : "This host" };
 }
 
 // "on <target> ▾": where the session launches, this host or an SSH target. A

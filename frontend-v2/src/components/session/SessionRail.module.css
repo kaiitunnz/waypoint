@@ -82,10 +82,14 @@
 .name {
   overflow: hidden;
   font-size: var(--f-body);
-  font-weight: 600;
   color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.unread .name {
+  font-weight: 600;
+  color: var(--text-strong);
 }
 
 .on .name {
@@ -95,6 +99,10 @@
 .time {
   font-size: var(--f-meta);
   color: var(--faint);
+}
+
+.unread .time {
+  color: var(--text-strong);
 }
 
 .sub {
@@ -113,6 +121,10 @@
 .exited .name {
   font-weight: 400;
   color: var(--muted);
+}
+
+.exited .time {
+  color: var(--faint);
 }
 
 @media not all and (hover: hover) and (pointer: fine) {

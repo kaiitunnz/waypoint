@@ -80,12 +80,14 @@ describe("syncServerClock", () => {
     // The server is a second ahead.
     vi.setSystemTime(SERVER - 1000);
     const host = freshHost();
-    const read = async (at: number) => {
+    const read = async (at: number | null) => {
       serve(at);
       await syncServerClock(host);
       return serverClockOffset();
     };
     expect(await read(SERVER - 1000)).toBe(0);
+    // An answer without a date leaves what is known.
+    expect(await read(null)).toBe(0);
     expect(await read(SERVER)).toBe(1600);
     expect(await read(SERVER - 1000)).toBe(1600);
   });

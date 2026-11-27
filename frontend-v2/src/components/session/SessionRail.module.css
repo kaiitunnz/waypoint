@@ -133,6 +133,9 @@
 }
 
 .time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: var(--f-meta);
   color: var(--faint);
 }

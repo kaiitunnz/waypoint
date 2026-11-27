@@ -32,6 +32,17 @@ interface PreviewProps {
 const href = (session: SessionRecord) => sessionHref(session.id);
 const time = (session: SessionRecord, now: number) => formatSessionTime(session.last_event_at, now);
 
+// A row's time, with the pin glyph where no Pinned heading says it is pinned.
+function PinnedTime({ session, now }: { session: SessionRecord; now: number }) {
+  if (!session.pinned_at) return time(session, now);
+  return (
+    <span className={styles.pinned}>
+      <PinMark />
+      {time(session, now)}
+    </span>
+  );
+}
+
 export function LiveRow({
   session,
   lamp,
@@ -70,6 +81,7 @@ export function CompactRow({
   detailed,
 }: RowProps & { detailed: boolean }) {
   const unread = showsUnread(session);
+  const when = <PinnedTime session={session} now={now} />;
   return (
     <ListRow
       href={href(session)}
@@ -83,10 +95,10 @@ export function CompactRow({
         detailed ? (
           <span className={styles.trail}>
             <span className={styles.agent}>{agent}</span>
-            <span className={styles.when}>{time(session, now)}</span>
+            <span className={styles.when}>{when}</span>
           </span>
         ) : (
-          time(session, now)
+          when
         )
       }
       actions={menu}
@@ -143,16 +155,7 @@ export function ResultRow({ session, lamp, word, now, agent, menu }: RowProps) {
       unread={unread}
       dimmed={lamp === "exited"}
       status={where}
-      trailing={
-        session.pinned_at ? (
-          <span className={styles.pinned}>
-            <PinMark />
-            {time(session, now)}
-          </span>
-        ) : (
-          time(session, now)
-        )
-      }
+      trailing={<PinnedTime session={session} now={now} />}
       actions={menu}
     />
   );

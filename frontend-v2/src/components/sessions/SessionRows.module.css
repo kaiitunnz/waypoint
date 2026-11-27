@@ -15,8 +15,9 @@
 }
 
 .when {
+  display: inline-flex;
+  justify-content: flex-end;
   min-width: 56px;
-  text-align: right;
 }
 
 /* The agent would crush the title in a narrow list. */

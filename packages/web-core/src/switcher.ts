@@ -1,5 +1,6 @@
 import { rankItems } from "./fuzzy";
 import { byRecency } from "./sessionHistory";
+import { byPin } from "./sessionSections";
 import type { SessionRecord } from "./types";
 
 const SWITCHER_SECTIONS = ["needs", "pinned", "live", "exited"] as const;
@@ -21,7 +22,7 @@ export interface SwitcherEntry {
 }
 
 function sectionOf(session: SessionRecord, askSessionIds: ReadonlySet<string>): SwitcherSection {
-  if (session.status === "exited") return session.pinned_at ? "pinned" : "exited";
+  if (session.status === "exited") return "exited";
   if (askSessionIds.has(session.id)) return "needs";
   return session.pinned_at ? "pinned" : "live";
 }
@@ -30,8 +31,8 @@ const where = (session: SessionRecord) =>
   [session.repo_name, session.branch, session.cwd].filter(Boolean).join(" ");
 
 // Fuzzy over title, then repo, branch and directory. A blank query keeps every
-// session, newest first; a query ranks within each section, so the section order
-// never changes.
+// session, newest first, except that pinned ones head Exited, newest pin first; a
+// query ranks within each section, so the section order never changes.
 export function rankSessionsForSwitcher(
   sessions: SessionRecord[],
   askSessionIds: ReadonlySet<string>,
@@ -42,6 +43,8 @@ export function rankSessionsForSwitcher(
   for (const session of [...sessions].sort(byRecency)) {
     bySection.get(sectionOf(session, askSessionIds))?.push(session);
   }
+  // Unpinned ones tie, so they stay newest first.
+  bySection.get("exited")?.sort(byPin);
   return SWITCHER_SECTIONS.flatMap((section) =>
     rankItems(bySection.get(section) ?? [], needle, (s) => s.title, where).map(
       ({ item, positions }): SwitcherEntry => ({ session: item, section, positions }),

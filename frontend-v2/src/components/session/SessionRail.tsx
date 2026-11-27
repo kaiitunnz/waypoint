@@ -22,6 +22,7 @@ import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { ActivityLine } from "@/components/sessions/ActivityLine";
 import { ExitedGroup } from "@/components/sessions/ExitedGroup";
+import { PinMark } from "@/components/sessions/PinMark";
 import { SessionMenu, type SessionAction } from "@/components/sessions/SessionMenu";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
 import { useExitedSessions } from "@/components/sessions/useExitedSessions";
@@ -49,6 +50,8 @@ interface RailRowProps {
   asked: boolean;
   // The second line, or null for a one-line row.
   sub: ReactNode;
+  // Under a heading that does not say it is pinned.
+  pinMark: boolean;
   menuOpen: boolean;
   onMenuOpen: (open: boolean) => void;
   menuSubtitle: string;
@@ -63,6 +66,7 @@ function RailRow({
   now,
   asked,
   sub,
+  pinMark,
   menuOpen,
   onMenuOpen,
   menuSubtitle,
@@ -99,7 +103,10 @@ function RailRow({
       >
         <StatusLamp state={lamp} size="sm" label={spokenStatus(lampWord(lamp, session.status), unread)} />
         <span className={styles.name}>{session.title}</span>
-        <span className={styles.time}>{formatSessionTime(session.last_event_at, now)}</span>
+        <span className={styles.time}>
+          {pinMark ? <PinMark /> : null}
+          {formatSessionTime(session.last_event_at, now)}
+        </span>
         {single ? null : <span className={styles.sub}>{sub}</span>}
       </Link>
       <span className={styles.actions}>
@@ -145,13 +152,22 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
     for (const entry of entries) groups[entry.section].push(entry.session);
     return groups;
   }, [entries]);
-  const { pinned, live, exited: exitedLive } = grouped;
+  const { pinned, live, exited } = grouped;
+  // Pinned exited sessions head the Exited group; the rest merge with the history.
+  const pinnedExited = useMemo(() => exited.filter((session) => session.pinned_at), [exited]);
+  const exitedLive = useMemo(() => exited.filter((session) => !session.pinned_at), [exited]);
 
   // The previews follow the rows that show them: pinned and live, not the exited.
   const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
   const [previews] = useConversationPreviews();
   const activities = useSessionActivity(host, token, previewed, handleAuthFailure, previews);
-  const { count: exitedCount, listed, paging } = useExitedSessions({ query: "", live: exitedLive, enabled: showExited, remember: true });
+  const { count: exitedCount, listed, paging } = useExitedSessions({
+    query: "",
+    live: exitedLive,
+    lead: pinnedExited,
+    enabled: showExited,
+    remember: true,
+  });
   const asks = feed.pendingAsks?.items ?? [];
 
   // The session whose menu is open, held here so a row that changes section keeps it.
@@ -182,6 +198,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
         now={now}
         asked={asked}
         sub={sub}
+        pinMark={section === "exited" && Boolean(session.pinned_at)}
         menuOpen={menuFor === session.id}
         onMenuOpen={(open) => setMenuFor((held) => (open ? session.id : held === session.id ? null : held))}
         menuSubtitle={agentModelLabel(session, catalog)}

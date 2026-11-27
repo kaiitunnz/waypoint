@@ -904,6 +904,7 @@ async def _run_exited_reconnect(resumes: bool) -> bool:
     runtime._command_for_backend.return_value = ["claude", "--resume", "thread-1"]
     runtime._record_system_event = AsyncMock()
     runtime.storage.update_session = MagicMock()
+    runtime.storage.get_session.return_value = None
 
     plugin._conversation_exists = AsyncMock(return_value=resumes)  # type: ignore[method-assign]
     plugin._spawn_rate_limit_watcher = MagicMock()  # type: ignore[method-assign]
@@ -955,6 +956,7 @@ async def test_exited_reconnect_clears_resolved_model() -> None:
     runtime._command_for_backend.return_value = ["claude", "--resume", "thread-1"]
     runtime._record_system_event = AsyncMock()
     runtime.storage.update_session = MagicMock()
+    runtime.storage.get_session.return_value = None
 
     plugin._conversation_exists = AsyncMock(return_value=True)  # type: ignore[method-assign]
     plugin._spawn_rate_limit_watcher = MagicMock()  # type: ignore[method-assign]

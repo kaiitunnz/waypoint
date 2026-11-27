@@ -225,6 +225,7 @@ class TranscriptTailer:
             )
             self._partial = b""
 
+        relocated: str | None = None
         for raw_line in lines:
             line = raw_line.strip()
             if not line:
@@ -237,6 +238,12 @@ class TranscriptTailer:
                     extra={"session_id": self._session_id, "line": raw_line[:200]},
                 )
                 continue
+            if record.get("type") == "relocated":
+                # Claude's note of the folder it moved this transcript to. The
+                # records' own ``cwd`` also follows a shell ``cd``.
+                folder = record.get("relocatedCwd")
+                if isinstance(folder, str) and folder:
+                    relocated = folder
             if record.get("type") == "assistant":
                 # Before the normalizer, so the divider precedes the new-model turn.
                 await self._maybe_observe_model(record)
@@ -255,6 +262,12 @@ class TranscriptTailer:
                 )
             if record.get("type") == "assistant":
                 await self._maybe_publish_context_usage(record)
+        # After the records: the offset is already past them, so a lookup cut
+        # short by a restart must not take any with it.
+        if relocated is not None:
+            await self._plugin.follow_relocation(
+                self._runtime, self._session_id, relocated
+            )
 
     async def _maybe_observe_model(self, record: dict[str, Any]) -> None:
         """Record a real assistant reply's model, adopt it into the selection

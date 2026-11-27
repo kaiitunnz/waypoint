@@ -89,6 +89,8 @@ def _restart_runtime() -> tuple[MagicMock, MagicMock]:
     runtime._command_for_backend.return_value = ["claude", "--resume", "thread-1"]
     runtime._record_system_event = AsyncMock()
     runtime.storage.update_session = MagicMock()
+    # The plugin falls back to the record it was passed.
+    runtime.storage.get_session.return_value = None
     return runtime, target
 
 

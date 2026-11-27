@@ -93,6 +93,7 @@ from waypoint.backends.claude_tty.byte_source import (
 )
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
+from waypoint.backends.events import mark_important
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.plugin import TmuxPlugin
@@ -797,6 +798,7 @@ class ClaudeTtyPlugin:
         await runtime._record_system_event(
             session.id,
             f"Folder {session.cwd} no longer exists; relaunching in {folder}",
+            metadata=mark_important({}),
         )
         return updated or session
 

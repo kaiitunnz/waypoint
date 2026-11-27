@@ -375,8 +375,10 @@ async def test_relaunch_leaves_a_removed_folder(
     assert start_tailer.call_args.args[3] == launch
     assert runtime.storage.session.cwd == launch
     assert runtime.storage.session.transport_state["launch_cwd"] == launch
-    notes = [call.args[1] for call in runtime._record_system_event.call_args_list]
-    assert f"Folder {tmp_path / 'removed'} no longer exists" in notes[0]
+    note = runtime._record_system_event.call_args_list[0]
+    assert f"Folder {tmp_path / 'removed'} no longer exists" in note.args[1]
+    # The Summary view shows it.
+    assert note.kwargs["metadata"] == {"visibility": "important"}
 
 
 async def test_reattach_keeps_a_moved_folder_that_exists(

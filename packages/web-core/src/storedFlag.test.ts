@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { readStoredFlag, storedFlag, writeStoredFlag } from "./storedFlag";
+import { readStoredFlag, storedFlag, windowStorage, writeStoredFlag } from "./storedFlag";
 
 function memoryStorage() {
   const data = new Map<string, string>();
@@ -117,6 +117,21 @@ describe("storedFlag", () => {
     flag.set(false);
     storage.setItem("g", "1");
     expect(flag.get()).toBe(true);
+  });
+
+  it("keeps a window's choice in its session storage alone", () => {
+    const sessionStorage = memoryStorage();
+    const localStorage = memoryStorage();
+    localStorage.setItem("w", "1");
+    vi.stubGlobal("window", { sessionStorage, localStorage });
+    const flag = storedFlag("w", false, windowStorage);
+    // A choice another window or an older build kept in the browser is not this window's.
+    expect(flag.get()).toBe(false);
+    flag.set(true);
+    expect(sessionStorage.data.get("w")).toBe("1");
+    flag.set(false);
+    expect(sessionStorage.data.has("w")).toBe(false);
+    expect(localStorage.data.get("w")).toBe("1");
   });
 
   it("hears a change made in another tab", () => {

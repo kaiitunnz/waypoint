@@ -44,8 +44,17 @@ function browserStorage(): Storage | null {
   }
 }
 
-// A flag remembered in this browser, `fallback` until a choice is made. Every reader of
-// one key agrees, in this tab and across tabs.
+// Storage of this window alone: it survives a reload, and a new window starts empty.
+export function windowStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+// A flag remembered in this browser, or in the `storage` given, `fallback` until a
+// choice is made. Every reader of one key agrees wherever they share that storage.
 export function storedFlag(key: string, fallback: boolean, storage: () => Storage | null = browserStorage): StoredFlag {
   return {
     get: () => unsaved.get(key) ?? readStoredFlag(storage(), key, fallback),

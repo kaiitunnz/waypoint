@@ -43,6 +43,7 @@
     "./sessionSections": "./src/sessionSections.ts",
     "./shellNav": "./src/shellNav.ts",
     "./store": "./src/store.ts",
+    "./storedFlag": "./src/storedFlag.ts",
     "./switcher": "./src/switcher.ts",
     "./tailnet": "./src/tailnet.ts",
     "./tailnet-server": "./src/tailnet-server.ts",

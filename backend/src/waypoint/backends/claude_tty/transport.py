@@ -163,7 +163,7 @@ class ClaudeTtyTransport(TmuxTransport):
         )
         target = self._target(session)
         # Before the Esc, so the tailer cannot read its marker first. The marker
-        # adds no note: the runtime notes a Stop, and a restart notes itself.
+        # adds no note: the runtime notes a Stop, and a restart records none.
         self._plugin.expect_interrupt(session.id)
         await self.adapter.send_bytes(target, b"\x1b")
         # Retried here: the tailer takes several polls to raise a dialog that

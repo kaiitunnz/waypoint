@@ -110,7 +110,6 @@
   white-space: nowrap;
 }
 
-/* An offline host draws no lamp; the row reads dimmed. */
 .offline .name {
   color: var(--muted);
 }

@@ -9,7 +9,7 @@ import styles from "./WorkingRow.module.css";
 
 interface WorkingRowProps {
   step: string | null;
-  // When the turn started, as epoch ms; unknown leaves the time out.
+  // Epoch ms; null leaves the time out.
   startedAt: number | null;
 }
 
@@ -25,7 +25,6 @@ function Elapsed({ since }: { since: number }) {
   );
 }
 
-// Ends the transcript while a turn runs.
 export function WorkingRow({ step, startedAt }: WorkingRowProps) {
   return (
     <div className={styles.row}>

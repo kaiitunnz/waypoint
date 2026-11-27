@@ -103,7 +103,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
     setPaneBesideTerminal(false);
   };
   const goHome = useCallback(() => router.replace("/"), [router]);
-  // The rail's menus act on any session; only this screen's own one changes it.
+  // The rail's menus act on any session; only a change to the open one affects this screen.
   const { setSession } = stream;
   const onRemoved = useCallback((removed: string) => (removed === id ? goHome() : undefined), [id, goHome]);
   const onUpdated = useCallback(

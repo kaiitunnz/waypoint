@@ -38,7 +38,6 @@ interface PreviewProps {
 const href = (session: SessionRecord) => sessionHref(session.id);
 const time = (session: SessionRecord, now: number) => formatSessionTime(session.last_event_at, now);
 
-// A row's time, with the pin glyph where no Pinned heading says it is pinned.
 function RowTime({ session, now }: { session: SessionRecord; now: number }) {
   if (!session.pinned_at) return time(session, now);
   return (
@@ -85,17 +84,15 @@ export function CompactRow({
   menu,
   detailed,
 }: RowProps & { detailed: boolean }) {
-  const unread = showsUnread(session);
   const when = <RowTime session={session} now={now} />;
   return (
     <ListRow
       href={href(session)}
       lamp={lamp}
-      lampLabel={spokenStatus(word, unread)}
+      lampLabel={word}
       title={session.title}
       compact
-      unread={unread}
-      dimmed={lamp === "exited"}
+      dimmed
       trailing={
         detailed ? (
           <span className={styles.trail}>
@@ -124,7 +121,7 @@ export function LiveTile({
   const unread = showsUnread(session);
   return (
     <li className={styles.tileItem}>
-      <Link href={href(session)} className={cx(styles.tile, unread ? styles.unread : styles.read)}>
+      <Link href={href(session)} className={cx(styles.tile, unread && styles.unread)}>
         <span className={styles.head}>
           <span className={styles.name}>{session.title}</span>
           <span className={styles.time}>{time(session, now)}</span>

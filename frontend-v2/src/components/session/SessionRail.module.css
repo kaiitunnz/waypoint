@@ -93,11 +93,11 @@
   height: 34px;
 }
 
-.single .actions {
-  height: 100%;
-}
-
 @media (hover: hover) and (pointer: fine) {
+  .single .actions {
+    height: 100%;
+  }
+
   .actions {
     opacity: 0;
   }
@@ -177,9 +177,5 @@
     height: 1px;
     overflow: hidden;
     clip-path: inset(50%);
-  }
-
-  .single .actions {
-    height: 1px;
   }
 }

@@ -18,7 +18,6 @@ import {
   spokenStatus,
   type SessionLamp,
 } from "@waypoint/web-core/sessionPresentation";
-import { buildSections } from "@waypoint/web-core/sessionSections";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import { rankSessionsForSwitcher, SWITCHER_SECTION_LABELS, type SwitcherSection } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
@@ -62,7 +61,6 @@ interface RailRowProps {
   onNavigate?: () => void;
 }
 
-// The row opens its session; its menu opens from the ⋯, a right click or a long press.
 function RailRow({
   session,
   current,
@@ -82,7 +80,7 @@ function RailRow({
   const single = sub === null;
   const onContextMenu = (event: MouseEvent) => {
     press.onContextMenu(event);
-    // On touch the long press opens the menu; Android fires this for it too.
+    // Android also fires this for a long press, which opens the menu itself.
     if (!pointer) return;
     event.preventDefault();
     onMenuOpen(true);
@@ -154,12 +152,10 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
     for (const entry of entries) groups[entry.section].push(entry.session);
     return groups;
   }, [entries]);
-  const { pinned, live } = grouped;
+  const { pinned, live, exited } = grouped;
   // Pinned exited sessions head the Exited group; the rest merge with the history.
-  const { pinnedExited, exited } = useMemo(
-    () => buildSections(feed.visible, feed.askSessionIds),
-    [feed.visible, feed.askSessionIds],
-  );
+  const pinnedExited = useMemo(() => exited.filter((session) => session.pinned_at), [exited]);
+  const unpinnedExited = useMemo(() => exited.filter((session) => !session.pinned_at), [exited]);
 
   // The previews follow the rows that show them: pinned and live, not the exited.
   const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
@@ -167,7 +163,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
   const activities = useSessionActivity(host, token, previewed, handleAuthFailure, previews);
   const { count: exitedCount, listed, paging } = useExitedSessions({
     query: "",
-    live: exited,
+    live: unpinnedExited,
     lead: pinnedExited,
     enabled: showExited,
     remember: true,
@@ -176,7 +172,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
 
   // The session whose menu is open, held here so a row that changes section keeps it.
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const drawn = [...grouped.needs, ...pinned, ...live, ...(showExited ? listed.items : [])];
+  const drawn = [...SECTIONS.flatMap((section) => grouped[section]), ...(showExited ? listed.items : [])];
   if (menuFor !== null && !drawn.some((session) => session.id === menuFor)) setMenuFor(null);
 
   const row = (session: SessionRecord, section: SwitcherSection) => {
@@ -203,7 +199,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
         sub={sub}
         pinMark={section !== "pinned" && Boolean(session.pinned_at)}
         menuOpen={menuFor === session.id}
-        onMenuOpen={(open) => setMenuFor((held) => (open ? session.id : held === session.id ? null : held))}
+        onMenuOpen={(open) => setMenuFor(open ? session.id : null)}
         menuSubtitle={agentModelLabel(session, catalog)}
         onAction={onAction}
         onNavigate={onPick && (() => onPick(session.id !== currentId))}

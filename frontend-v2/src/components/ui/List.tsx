@@ -25,8 +25,7 @@ interface ListRowProps {
   compact?: boolean;
   // One line that keeps the title's type.
   single?: boolean;
-  // A session's read state: unread is semibold and bright with a bright time, read
-  // is regular. Left out, the row has no read state.
+  // A session's read state; a row without it keeps the default type.
   unread?: boolean;
   dimmed?: boolean;
   href?: string;

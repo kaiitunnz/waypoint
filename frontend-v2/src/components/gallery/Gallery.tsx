@@ -174,7 +174,7 @@ export function Gallery() {
         <Meter label="Unknown" value={null} className={styles.meter} />
       </div>
 
-      <SectionHeading title="List rows" count={4} action="See all" />
+      <SectionHeading title="List rows" count={7} action="See all" />
       <List>
         <ListRow lamp="needs" unread title="Fix held-message race" status="Which fix should I ship?" trailing="09:16" />
         <ListRow lamp="idle" unread title="Queue backoff, unread" single trailing="12m" />

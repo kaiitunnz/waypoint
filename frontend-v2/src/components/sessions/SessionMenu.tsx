@@ -12,7 +12,6 @@ export interface ScreenAction extends MenuButtonItem {
   run: () => void;
 }
 
-// A menu its caller opens from elsewhere too passes both.
 type HeldOpen = Pick<MenuButtonProps, "open" | "onOpenChange">;
 
 interface ActionMenuProps extends HeldOpen {

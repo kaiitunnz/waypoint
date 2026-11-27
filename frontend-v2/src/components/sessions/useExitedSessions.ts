@@ -26,7 +26,7 @@ interface ExitedOptions {
   // The exited sessions the live list still carries.
   live: SessionRecord[];
   // Rows that lead the page: pinned exited sessions, or pinned search matches.
-  lead?: SessionRecord[];
+  lead: SessionRecord[];
   // Whether to load the rows; the count is always kept.
   enabled: boolean;
   // Keep how many pages are shown across remounts of the plain Exited group.
@@ -55,11 +55,11 @@ export function useExitedSessions({ query, live, lead, enabled, remember }: Exit
   const counted = useSessionHistory({ ...common, query: "", withItems: false });
   const history = useSessionHistory({ ...common, query, withItems: true, enabled, pageSize: EXITED_PAGE_SIZE });
   // A session pinned a moment ago can still be in the cached history.
-  const unled = useMemo(() => {
-    const leading = new Set(lead?.map((session) => session.id));
+  const rest = useMemo(() => {
+    const leading = new Set(lead.map((session) => session.id));
     return history.items.filter((session) => !leading.has(session.id));
   }, [history.items, lead]);
-  const listed = useMergedSessionPage(live, { ...history, items: unled }, true, 1, limit, lead);
+  const listed = useMergedSessionPage(live, { ...history, items: rest }, true, 1, limit, lead);
   const paging: ExitedPaging = {
     loading: history.pending || listed.filling,
     failed: Boolean(history.error),
@@ -71,5 +71,5 @@ export function useExitedSessions({ query, live, lead, enabled, remember }: Exit
     },
   };
   // History holds no pinned session, so the leading rows add to the count.
-  return { count: (lead?.length ?? 0) + live.length + (counted.total ?? 0), listed, paging };
+  return { count: lead.length + live.length + (counted.total ?? 0), listed, paging };
 }

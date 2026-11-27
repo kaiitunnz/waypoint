@@ -1,5 +1,5 @@
+/* A state with no rule of its own, exited or offline, draws nothing and keeps the column. */
 .lamp {
-  position: relative;
   display: inline-block;
   flex: none;
   width: 10px;
@@ -20,7 +20,7 @@
     0 0 0 4px color-mix(in srgb, var(--brass) 70%, transparent);
 }
 
-/* Working: a half arc turning on a faint track. Reduced motion leaves it still. */
+/* Working: a half arc turning on a faint track. */
 .working {
   border: 2px solid color-mix(in srgb, var(--working) 18%, transparent);
   border-top-color: var(--working);
@@ -44,12 +44,6 @@
 
 .online {
   background: var(--done);
-}
-
-/* An exited session and an offline host draw nothing; the box keeps the column. */
-.exited,
-.offline {
-  background: none;
 }
 
 .flat {

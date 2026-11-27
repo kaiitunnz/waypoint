@@ -9,6 +9,7 @@ import { Flyout } from "@/components/ui/Flyout";
 import { Icon } from "@/components/ui/Icon";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
 import { useShellData } from "@/lib/shell-data";
+import { sshLamp } from "@/lib/ssh";
 
 import { SshConnectDialog } from "./SshConnectDialog";
 import styles from "./HostSwitcher.module.css";
@@ -28,7 +29,8 @@ export function HostSwitcher() {
   const lamp: { state: LampState; label: string } = sshBlocked
     ? { state: "error", label: "SSH disconnected" }
     : connection === "open"
-      ? { state: "online", label: "Live" }
+      ? // The lamp stands beside a chosen SSH target's name, so it answers for the target.
+        { state: activeTarget ? sshLamp(activeTarget) : "online", label: "Live" }
       : { state: "working", label: "Connecting" };
   const name = describeHost(host, { targetName: activeTarget?.name, recents });
 

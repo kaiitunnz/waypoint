@@ -24,6 +24,7 @@ import { switchHost } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { PROBE_LABEL } from "@/lib/probe";
 import { useShellData } from "@/lib/shell-data";
+import { sshLamp } from "@/lib/ssh";
 
 import { HostPicker } from "./HostPicker";
 import styles from "./SwitcherPanel.module.css";
@@ -57,7 +58,14 @@ export function SwitcherPanel({ recents, onDone, onConnectRequest }: SwitcherPan
       query,
     });
   }, [host, snapshot, recents, query]);
-  const sshRows = useMemo(() => buildSshRows(launchTargets.targets, query), [launchTargets.targets, query]);
+  const sshRows = useMemo(
+    () =>
+      buildSshRows(launchTargets.targets, query).map((row) => ({
+        ...row,
+        online: sshLamp(launchTargets.targets.find((t) => t.id === row.targetId)),
+      })),
+    [launchTargets.targets, query],
+  );
 
   const current: Selection = activeId
     ? { kind: "ssh", targetId: activeId, name: "" }

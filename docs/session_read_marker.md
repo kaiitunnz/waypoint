@@ -2,8 +2,7 @@
 
 Every session record carries `read_at`: activity at or before that instant has
 been seen. A session is **unread** while `last_event_at > read_at`. Clients use
-the marker to show activity the human has not looked at yet (unread type in the
-v2 session lists).
+the marker to show activity the human has not looked at yet.
 
 ```
 unread = read_at != null && last_event_at > read_at
@@ -44,7 +43,6 @@ restart does not turn restored sessions unread.
 ## Unread
 
 The v2 session lists show an unread session with a semibold bright title and a
-bright time; a read row is regular, and an exited row stays dimmed. Any event
-recorded outside a lifecycle step moves `last_event_at`, system notes included,
-so unread means the session has activity the human has not seen. The rule is one
-comparison with no per-agent knowledge of what counts as a turn.
+bright time. A read row is regular, and an exited session is dimmed and never
+shows as unread. Any event recorded outside a lifecycle step, system notes
+included, moves `last_event_at`.

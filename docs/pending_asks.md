@@ -65,8 +65,8 @@ listed as a plain `approval`.
 
 ## Call verification
 
-A transport that reads its dialogs off a screen cannot assume a request names
-the call a reply answers. Its approval and plan items say so:
+Approval and plan items from a transport that reads dialogs off a screen say
+whether they name the call a reply answers:
 
 | Field | Meaning |
 | --- | --- |
@@ -74,22 +74,21 @@ the call a reply answers. Its approval and plan items say so:
 | `tool_use_id` | The matched call, when one was matched |
 | `subagent` | The kind of subagent asking, when the request is a subagent's |
 
-All three are `null` on items from a transport that names its calls natively, so
-a client gates only screen-read transports on `call_verified`.
+These fields are `null` on items from a transport that names its calls natively,
+so a client gates only screen-read transports on `call_verified`.
 
 For `claude_tty`:
 
-- A tool approval is verified when the pending calls in the transcript, or in the
-  named subagent's transcript, that agree with everything the dialog shows are a
-  single call, or identical calls of one transcript, which prompt in order.
-  `tool_input` is then that call's whole input. A call Claude has not written to
-  its transcript while the dialog is up, which is common on the main thread,
-  stays unverified.
+- A tool approval is verified when exactly one pending call, in the main
+  transcript or the named subagent's, agrees with everything the dialog shows.
+  Identical calls of one transcript are taken oldest first. `tool_input` is then
+  the call's whole input. A call Claude has not written to its transcript while
+  the dialog is up, which is common on the main thread, stays unverified.
 - A plan approval is verified when its text is the content of the plan file the
   dialog names. An unreadable file leaves the item unverified and without text,
   listed as a plain `approval`.
-- A reply is refused with the usual `400` when the terminal no longer shows the
-  request, and the request on screen is raised as a new item.
+- A reply is refused with `400` when the terminal no longer shows the request,
+  and the request on screen is raised as a new item.
 
 ## Bounded payloads
 

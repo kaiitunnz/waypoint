@@ -712,8 +712,8 @@ Resume on a tmux or `claude_tty` pane presses Enter; when this method reports a
 typed message on the pre-Enter snapshot, the runtime marks the session
 `running`. Without it, resume leaves the status to the transport. Resume refuses
 with `InputBlockedError` (409) while `pane_shows_blocking_dialog` reports a
-dialog. Claude implements it; `claude_tty` delegates to its composed Claude
-agent.
+dialog, and on `claude_tty` also while the composer is not drawn. Claude
+implements it; `claude_tty` delegates to its composed Claude agent.
 
 ## Token & context usage
 
@@ -848,12 +848,10 @@ restart-with-resume only for effort changes. Thread discovery/import reads the
 same `~/.claude/projects` transcript store as `claude_code`, so the same
 Claude threads appear under both backend ids.
 
-A permission dialog has no wire protocol, so the tailer reads it off the pane,
-looks the call up in the main or subagent transcripts, and names it only when
-that is certain; a plan approval's text is read from the plan file. A reply
-presses the option's digit, after checking the pane still shows the request.
-Messages are typed only while the composer is drawn, so a popup, recognized or
-not, never receives them.
+`claude_tty` reads permission dialogs off the pane and names the call each asks
+about ([call verification](pending_asks.md#call-verification)). A reply presses
+the option's digit only while the pane still shows the request, and messages are
+typed only while the composer is drawn.
 
 `/clear` starts a new conversation in a new transcript, whose `derived-from`
 header record names the old thread with `via: "clear"`. After a `/clear` sent

@@ -12,6 +12,10 @@ working folder changes (a worktree, ``/cd``). When the file at the last known
 path is missing or replaced, a source finds it again by thread id. A moved file
 keeps its identity, so the tailer's offset stays valid.
 
+A source also reads the files around the transcript, off the tail loop's cursor:
+the transcript's tail, its subagents' transcripts, and any file by path (the
+plan file). Those reads degrade to ``None`` or an empty list.
+
 Every read returns a :class:`TranscriptRead`. ``observed=False`` means "nothing
 actionable this tick" — a pre-first-turn missing file, an unresolved remote
 glob, a throttled poll, or a transport error backing off; the tailer does
@@ -22,11 +26,13 @@ background tailer loop treats a raised exception as fatal, so all remote failure
 modes degrade to an unobserved read that retries with backoff.
 """
 
+import json
 import logging
 import os
 import posixpath
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -57,6 +63,10 @@ READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
 _SEARCH_BACKOFF = 1.0
 # Cap on that wait, which doubles.
 _MAX_SEARCH_BACKOFF = 10.0
+# Subagent transcripts under ``<transcript stem>/subagents/``; a workflow's
+# agents sit one folder further down.
+_SUBAGENT_PATTERNS = ("agent-*.jsonl", "workflows/*/agent-*.jsonl")
+_META_LIMIT = 64 * 1024
 
 
 def _single(ids: list[str]) -> str | None:
@@ -171,6 +181,40 @@ class TranscriptRead:
         self.identity = identity
 
 
+@dataclass(frozen=True)
+class Tail:
+    """The end of a file. ``truncated`` says earlier bytes were left out."""
+
+    data: bytes
+    truncated: bool = False
+
+
+@dataclass(frozen=True)
+class SubagentTranscript:
+    path: str
+    agent_type: str | None
+    name: str | None
+
+
+def _subagent(path: str, meta: bytes) -> SubagentTranscript:
+    try:
+        fields = json.loads(meta)
+    except ValueError:
+        fields = None
+    if not isinstance(fields, dict):
+        fields = {}
+    agent_type, name = fields.get("agentType"), fields.get("name")
+    return SubagentTranscript(
+        path=path,
+        agent_type=agent_type if isinstance(agent_type, str) else None,
+        name=name if isinstance(name, str) else None,
+    )
+
+
+def _meta_path(transcript: str) -> str:
+    return transcript.removesuffix(".jsonl") + ".meta.json"
+
+
 class TranscriptByteSource(Protocol):
     def read_from(
         self, offset: int, *, metadata_only: bool = False, force: bool = False
@@ -184,7 +228,22 @@ class TranscriptByteSource(Protocol):
         ...
 
 
-class ClaudeTranscriptSource(TranscriptByteSource, Protocol):
+class TranscriptTreeReader(Protocol):
+    def read_transcript_tail(self, limit: int) -> Tail | None:
+        """The last ``limit`` bytes of the session's transcript. Never raises."""
+        ...
+
+    def list_subagents(self) -> list[SubagentTranscript]:
+        """The transcript's subagent transcripts. Never raises."""
+        ...
+
+    def read_tail(self, path: str, limit: int) -> Tail | None:
+        """The last ``limit`` bytes of a file on the session's host, or None
+        when it can't be read. Never raises."""
+        ...
+
+
+class ClaudeTranscriptSource(TranscriptByteSource, TranscriptTreeReader, Protocol):
     def find_clear_successor(
         self, parent_thread_id: str, max_age_seconds: float
     ) -> str | None:
@@ -234,6 +293,45 @@ class LocalTranscriptByteSource:
         return TranscriptRead(
             observed=True, data=data, size=opened.st_size, identity=identity
         )
+
+    def read_transcript_tail(self, limit: int) -> Tail | None:
+        # Its own search: the tail loop's backoff may still be waiting.
+        path = self._path
+        if _stat(path) is None:
+            try:
+                found = find_local_transcript(
+                    self._cwd, self._thread_id, self._config_dir
+                )
+            except OSError:
+                return None
+            if found is None:
+                return None
+            path = found
+        return self.read_tail(str(path), limit)
+
+    def list_subagents(self) -> list[SubagentTranscript]:
+        root = self._path.with_suffix("") / "subagents"
+        found = []
+        try:
+            for pattern in _SUBAGENT_PATTERNS:
+                for path in sorted(root.glob(pattern)):
+                    try:
+                        meta = Path(_meta_path(str(path))).read_bytes()
+                    except OSError:
+                        meta = b""
+                    found.append(_subagent(str(path), meta))
+        except OSError:
+            return []
+        return found
+
+    def read_tail(self, path: str, limit: int) -> Tail | None:
+        try:
+            with Path(path).expanduser().open("rb") as fh:
+                start = max(0, os.fstat(fh.fileno()).st_size - limit)
+                fh.seek(start)
+                return Tail(fh.read(limit), truncated=start > 0)
+        except (OSError, RuntimeError):
+            return None
 
     def _locate(self, force: bool) -> os.stat_result | None:
         """Stat the transcript, searching for it when the known path lost it.
@@ -350,6 +448,52 @@ class RemoteClaudeTranscriptByteSource:
                 root, "projects/*/*.jsonl", parent_thread_id, max_age_seconds
             )
         )
+
+    def read_transcript_tail(self, limit: int) -> Tail | None:
+        if (path := self._transcript_path()) is None:
+            return None
+        return self.read_tail(path, limit)
+
+    def list_subagents(self) -> list[SubagentTranscript]:
+        if (path := self._transcript_path()) is None:
+            return []
+        root = path.removesuffix(".jsonl") + "/subagents"
+        found = []
+        try:
+            for pattern in _SUBAGENT_PATTERNS:
+                for transcript in self._fs.glob(root, pattern):
+                    meta = self._fs.read_range(_meta_path(transcript), 0, _META_LIMIT)
+                    found.append(
+                        _subagent(
+                            transcript,
+                            meta.data if isinstance(meta, RemoteRead) else b"",
+                        )
+                    )
+        except Exception:
+            self._warn_once("subagents", "remote subagent listing failed")
+            return []
+        return found
+
+    def read_tail(self, path: str, limit: int) -> Tail | None:
+        try:
+            read = self._fs.read_range(path, 0, limit)
+            if isinstance(read, RemoteRead) and read.size > limit:
+                read = self._fs.read_range(path, read.size - limit, limit)
+                if isinstance(read, RemoteRead):
+                    return Tail(read.data, truncated=True)
+        except Exception:
+            self._warn_once("tail", "remote file read failed")
+            return None
+        return Tail(read.data) if isinstance(read, RemoteRead) else None
+
+    def _transcript_path(self) -> str | None:
+        if self._path is not None:
+            return self._path
+        try:
+            return self._resolve()
+        except Exception:
+            self._warn_once("read-error", "remote transcript read failed")
+            return None
 
     def _read(self, offset: int, metadata_only: bool) -> TranscriptRead:
         if self._path is None:

@@ -70,8 +70,13 @@ export function useSessionActivity(
     statuses.current = new Map(sessions.map((session) => [session.id, session.status]));
     const held = cache.get(host);
     for (const session of sessions) {
-      if (held?.get(session.id)?.lastEventAt === session.last_event_at) {
+      const cached = held?.get(session.id);
+      if (cached?.lastEventAt === session.last_event_at) {
         loader.current?.seed(session.id, session.last_event_at);
+        // Another reader of the cache may have loaded it since this one last did.
+        setActivities((current) =>
+          current.get(session.id) === cached.activity ? current : new Map(current).set(session.id, cached.activity),
+        );
       }
       loader.current?.request(session.id, session.last_event_at);
     }

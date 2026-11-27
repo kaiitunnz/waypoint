@@ -4,7 +4,7 @@ import { connectionLabel, type ConnectionState } from "./session/connection";
 import type { SessionRecord, SessionStatus } from "./types";
 
 // What a session is doing; an exited one draws no lamp. Lamps differ by shape and
-// fill as well as hue. Unread activity is told by type, not by a lamp.
+// fill as well as hue.
 export type SessionLamp = "needs" | "working" | "error" | "idle" | "exited";
 
 export function isUnread(session: SessionRecord): boolean {
@@ -15,6 +15,11 @@ export function isUnread(session: SessionRecord): boolean {
 // Whether a list row reads as unread; an exited row stays dimmed whatever it holds.
 export function showsUnread(session: SessionRecord): boolean {
   return session.status !== "exited" && isUnread(session);
+}
+
+// A preview line is bright where it reports a finished turn nobody has seen.
+export function brightPreview(session: SessionRecord, lamp: SessionLamp): boolean {
+  return lamp === "idle" && showsUnread(session);
 }
 
 // A row's spoken state: type alone says nothing to a screen reader.

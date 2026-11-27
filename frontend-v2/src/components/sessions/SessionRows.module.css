@@ -84,11 +84,6 @@
   color: var(--text-strong);
 }
 
-.exited .name {
-  font-weight: 400;
-  color: var(--muted);
-}
-
 .step {
   display: flex;
   align-items: center;

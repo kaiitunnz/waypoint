@@ -158,12 +158,7 @@
 }
 
 .exited .name {
-  font-weight: 400;
   color: var(--muted);
-}
-
-.exited .time {
-  color: var(--faint);
 }
 
 /* Touch opens the menu by a long press; the button stays for a screen reader. */

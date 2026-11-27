@@ -10,6 +10,7 @@ import {
   sessionLamp,
   sessionStanding,
   shortModelLabel,
+  brightPreview,
   showsUnread,
   spokenStatus,
 } from "./sessionPresentation";
@@ -90,6 +91,15 @@ describe("showsUnread", () => {
   it("is spoken after the state's word", () => {
     expect(spokenStatus("Idle", true)).toBe("Idle, unread");
     expect(spokenStatus("Idle", false)).toBe("Idle");
+  });
+});
+
+describe("brightPreview", () => {
+  it("brightens the line of an unread finished turn only", () => {
+    const unread = session({ read_at: "2026-01-01T00:00:00Z", last_event_at: "2026-01-01T00:01:00Z" });
+    expect(brightPreview(unread, "idle")).toBe(true);
+    expect(brightPreview(unread, "working")).toBe(false);
+    expect(brightPreview(session(), "idle")).toBe(false);
   });
 });
 

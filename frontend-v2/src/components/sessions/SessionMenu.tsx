@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 import type { SessionRecord } from "@waypoint/web-core/types";
 
-import { MenuButton, type MenuButtonItem } from "@/components/ui/MenuButton";
+import { MenuButton, type MenuButtonItem, type MenuButtonProps } from "@/components/ui/MenuButton";
 
 export type SessionAction = "pin" | "unpin" | "rename" | "terminate" | "delete";
 
@@ -13,10 +13,7 @@ export interface ScreenAction extends MenuButtonItem {
 }
 
 // A menu its caller opens from elsewhere too passes both.
-interface HeldOpen {
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-}
+type HeldOpen = Pick<MenuButtonProps, "open" | "onOpenChange">;
 
 interface ActionMenuProps extends HeldOpen {
   label: string;

@@ -14,7 +14,7 @@ export interface MenuButtonItem {
   disabled?: boolean;
 }
 
-interface MenuButtonProps {
+export interface MenuButtonProps {
   // The spoken name of the button.
   label: string;
   // The heading of the touch sheet.

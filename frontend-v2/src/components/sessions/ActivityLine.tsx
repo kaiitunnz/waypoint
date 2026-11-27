@@ -10,7 +10,7 @@ interface ActivityLineProps {
   fallback: string;
   // Still loading when undefined; null when it could not be loaded.
   activity: SessionActivity | null | undefined;
-  // A finished turn reads brighter than a running step.
+  // An unread finished turn reads brighter.
   bright?: boolean;
   // "4/7" on a row, "4 of 7" on a tile.
   progressStyle?: "short" | "long";

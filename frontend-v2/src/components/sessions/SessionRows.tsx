@@ -2,7 +2,13 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type { SessionActivity } from "@waypoint/web-core/activity";
-import { formatSessionTime, showsUnread, spokenStatus, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
+import {
+  brightPreview,
+  formatSessionTime,
+  showsUnread,
+  spokenStatus,
+  type SessionLamp,
+} from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
@@ -33,7 +39,7 @@ const href = (session: SessionRecord) => sessionHref(session.id);
 const time = (session: SessionRecord, now: number) => formatSessionTime(session.last_event_at, now);
 
 // A row's time, with the pin glyph where no Pinned heading says it is pinned.
-function PinnedTime({ session, now }: { session: SessionRecord; now: number }) {
+function RowTime({ session, now }: { session: SessionRecord; now: number }) {
   if (!session.pinned_at) return time(session, now);
   return (
     <span className={styles.pinned}>
@@ -61,9 +67,8 @@ export function LiveRow({
       title={session.title}
       single={!previews}
       unread={unread}
-      dimmed={lamp === "exited"}
       status={
-        previews ? <ActivityLine fallback={word} activity={activity} bright={unread && lamp === "idle"} /> : undefined
+        previews ? <ActivityLine fallback={word} activity={activity} bright={brightPreview(session, lamp)} /> : undefined
       }
       trailing={time(session, now)}
       actions={menu}
@@ -81,7 +86,7 @@ export function CompactRow({
   detailed,
 }: RowProps & { detailed: boolean }) {
   const unread = showsUnread(session);
-  const when = <PinnedTime session={session} now={now} />;
+  const when = <RowTime session={session} now={now} />;
   return (
     <ListRow
       href={href(session)}
@@ -117,21 +122,17 @@ export function LiveTile({
   activity,
 }: RowProps & PreviewProps) {
   const unread = showsUnread(session);
-  const exited = lamp === "exited";
   return (
     <li className={styles.tileItem}>
-      <Link
-        href={href(session)}
-        className={cx(styles.tile, unread ? styles.unread : styles.read, exited && styles.exited)}
-      >
+      <Link href={href(session)} className={cx(styles.tile, unread ? styles.unread : styles.read)}>
         <span className={styles.head}>
           <span className={styles.name}>{session.title}</span>
           <span className={styles.time}>{time(session, now)}</span>
         </span>
         <span className={styles.step}>
-          {exited ? null : <StatusLamp state={lamp} size="sm" label={spokenStatus(word, unread)} />}
+          <StatusLamp state={lamp} size="sm" label={spokenStatus(word, unread)} />
           {previews ? (
-            <ActivityLine fallback={word} activity={activity} bright={unread && lamp === "idle"} progressStyle="long" />
+            <ActivityLine fallback={word} activity={activity} bright={brightPreview(session, lamp)} progressStyle="long" />
           ) : (
             word
           )}
@@ -155,7 +156,7 @@ export function ResultRow({ session, lamp, word, now, agent, menu }: RowProps) {
       unread={unread}
       dimmed={lamp === "exited"}
       status={where}
-      trailing={<PinnedTime session={session} now={now} />}
+      trailing={<RowTime session={session} now={now} />}
       actions={menu}
     />
   );

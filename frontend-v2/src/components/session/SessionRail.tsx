@@ -10,12 +10,15 @@ import { useLongPress } from "@waypoint/web-core/hooks/useLongPress";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import {
   agentModelLabel,
+  brightPreview,
   formatSessionTime,
   lampWord,
   sessionLamp,
   showsUnread,
   spokenStatus,
+  type SessionLamp,
 } from "@waypoint/web-core/sessionPresentation";
+import { buildSections } from "@waypoint/web-core/sessionSections";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import { rankSessionsForSwitcher, SWITCHER_SECTION_LABELS, type SwitcherSection } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
@@ -47,7 +50,7 @@ interface RailRowProps {
   session: SessionRecord;
   current: boolean;
   now: number;
-  asked: boolean;
+  lamp: SessionLamp;
   // The second line, or null for a one-line row.
   sub: ReactNode;
   // Under a heading that does not say it is pinned.
@@ -64,7 +67,7 @@ function RailRow({
   session,
   current,
   now,
-  asked,
+  lamp,
   sub,
   pinMark,
   menuOpen,
@@ -75,7 +78,6 @@ function RailRow({
 }: RailRowProps) {
   const pointer = usePointerUI();
   const press = useLongPress(() => onMenuOpen(true));
-  const lamp = sessionLamp(session, asked);
   const unread = showsUnread(session);
   const single = sub === null;
   const onContextMenu = (event: MouseEvent) => {
@@ -152,10 +154,12 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
     for (const entry of entries) groups[entry.section].push(entry.session);
     return groups;
   }, [entries]);
-  const { pinned, live, exited } = grouped;
+  const { pinned, live } = grouped;
   // Pinned exited sessions head the Exited group; the rest merge with the history.
-  const pinnedExited = useMemo(() => exited.filter((session) => session.pinned_at), [exited]);
-  const exitedLive = useMemo(() => exited.filter((session) => !session.pinned_at), [exited]);
+  const { pinnedExited, exited } = useMemo(
+    () => buildSections(feed.visible, feed.askSessionIds),
+    [feed.visible, feed.askSessionIds],
+  );
 
   // The previews follow the rows that show them: pinned and live, not the exited.
   const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
@@ -163,7 +167,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
   const activities = useSessionActivity(host, token, previewed, handleAuthFailure, previews);
   const { count: exitedCount, listed, paging } = useExitedSessions({
     query: "",
-    live: exitedLive,
+    live: exited,
     lead: pinnedExited,
     enabled: showExited,
     remember: true,
@@ -176,8 +180,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
   if (menuFor !== null && !drawn.some((session) => session.id === menuFor)) setMenuFor(null);
 
   const row = (session: SessionRecord, section: SwitcherSection) => {
-    const asked = feed.askSessionIds.has(session.id);
-    const lamp = sessionLamp(session, asked);
+    const lamp = sessionLamp(session, feed.askSessionIds.has(session.id));
     const ask = asks.find((item) => item.session_id === session.id);
     // Needs-you rows keep their ask line.
     const single = section === "exited" || (!previews && section !== "needs");
@@ -187,7 +190,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
       <ActivityLine
         fallback={lampWord(lamp, session.status)}
         activity={activities.get(session.id)}
-        bright={showsUnread(session) && lamp === "idle"}
+        bright={brightPreview(session, lamp)}
       />
     );
     return (
@@ -196,9 +199,9 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
         session={session}
         current={session.id === currentId}
         now={now}
-        asked={asked}
+        lamp={lamp}
         sub={sub}
-        pinMark={section === "exited" && Boolean(session.pinned_at)}
+        pinMark={section !== "pinned" && Boolean(session.pinned_at)}
         menuOpen={menuFor === session.id}
         onMenuOpen={(open) => setMenuFor((held) => (open ? session.id : held === session.id ? null : held))}
         menuSubtitle={agentModelLabel(session, catalog)}

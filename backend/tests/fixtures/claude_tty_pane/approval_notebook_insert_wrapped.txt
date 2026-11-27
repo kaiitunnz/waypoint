@@ -1,0 +1,17 @@
+────────────────────────────────────────────────────────────
+ Edit notebook
+ /tmp/probe/repo/nb.ipynb
+ Insert new cell for cell c1 (code)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 total = [aaaa, bbbb, cccc, dddd, eeee, ffff, gggg, hh
+    hh, iiii, jjjj, kkkk, llll, mmmm, nnnn, oooo, pppp, q
+    qqq]
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to insert this cell into nb.ipynb?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file
+      edits and common file commands) for this session
+      (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

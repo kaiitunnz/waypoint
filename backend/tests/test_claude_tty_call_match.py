@@ -672,3 +672,87 @@ def test_a_wrapped_new_file_keeps_its_spaces(first: str, matches: bool) -> None:
 def test_a_narrow_subagent_dialog_matches_its_call() -> None:
     call = _bash("mkdir -p probe_sub_dir", "Create probe_sub_dir directory")
     assert match_call(_dialog("approval_bash_subagent_narrow.txt"), [call]) == call
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "old", "new"),
+    [
+        ("x = 1  # TODO", "x = 1", "# TODO", ""),
+        ("def f(a, b, c):", "def f(a,  c):", "b,", ""),
+    ],
+)
+def test_a_removal_may_leave_spaces_behind(
+    before: str, after: str, old: str, new: str
+) -> None:
+    rows = (" 2 -beta\n 2 +BETA", f" 2 -{before}\n 2 +{after}")
+    edit = {"file_path": f"{CWD}/notes.txt", "old_string": old, "new_string": new}
+    call = _call("Edit", edit)
+    assert match_call(_dialog("approval_edit.txt", rows), [call]) == call
+
+
+_TOTAL = (
+    "total = [" + ", ".join(letter * 4 for letter in "abcdefghijklmnopqrstuv") + "]"
+)
+_INSERTED = _TOTAL.partition(", rrrr")[0] + "]"
+
+
+@pytest.mark.parametrize(
+    ("fixture", "name", "source", "extra"),
+    [
+        ("approval_overwrite_wrapped.txt", "Write", _TOTAL, {}),
+        (
+            "approval_notebook_replace_wrapped.txt",
+            "NotebookEdit",
+            _TOTAL,
+            {"edit_mode": "replace"},
+        ),
+        (
+            "approval_notebook_insert_wrapped.txt",
+            "NotebookEdit",
+            _INSERTED,
+            {"edit_mode": "insert", "cell_type": "code"},
+        ),
+    ],
+    ids=["overwrite", "cell-replaced", "cell-inserted"],
+)
+def test_each_dialog_wraps_at_its_own_width(
+    fixture: str, name: str, source: str, extra: dict[str, str]
+) -> None:
+    def call(text: str) -> PendingCall:
+        if name == "Write":
+            return _call(name, {"file_path": f"{CWD}/o.txt", "content": f"{text}\n"})
+        cell = {"notebook_path": f"{CWD}/nb.ipynb", "cell_id": "c1"}
+        return _call(name, {**cell, **extra, "new_source": text})
+
+    dialog = _dialog(fixture)
+    assert match_call(dialog, [call(source)]) == call(source)
+    # A word split over two rows has no space in it.
+    split = source.replace("jjjj", "j jjj").replace("hhhh", "hh hh")
+    assert match_call(dialog, [call(split)]) is None
+
+
+def test_a_double_width_character_that_did_not_fit_leaves_no_space() -> None:
+    # At 57 columns a row holds 56, so the 26th character moves to the next row.
+    drawn = ("a" + "漢" * 25, "漢" * 5)
+    rows = f"  1 {drawn[0]}\n    {drawn[1]}\n"
+    screen = (FIXTURES / "approval_write_wrapped.txt").read_text()
+    start, end = screen.index("  1 "), screen.index("  2 ")
+    dialog = parse_approval(screen[:start] + rows + screen[end:])
+    assert dialog is not None
+    content = "a" + "漢" * 30 + "\nrm -rf build /\n"
+    call = _call("Write", {"file_path": f"{CWD}/n.py", "content": content})
+    assert match_call(dialog, [call]) == call
+
+
+def test_an_edits_short_row_ends_at_a_space() -> None:
+    # The row ending "word37" is one column short of the pane: the space after it
+    # was trimmed. Another dialog's margin would join the two words.
+    total = "total = " + " + ".join(f"value_number_{i:02d}" for i in range(12))
+    tail = "word37 word38 word39\n"
+    edit = {
+        "file_path": "/tmp/probe/repo/wrap.py",
+        "old_string": tail + total,
+        "new_string": tail + total.replace("_11", "_99"),
+    }
+    call = _call("Edit", edit)
+    assert match_call(_dialog("approval_edit_wrapped_lines.txt"), [call]) == call

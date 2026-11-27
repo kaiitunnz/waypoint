@@ -7,8 +7,8 @@ dialog does not draw is not compared.
 
 Whitespace in commands and file lines is compared run by run: any run counts as
 one space, so its length is not compared, and a run at a line's end is not
-either. A space is missing from the drawn rows only where a row filled to the
-dialog's edge goes straight on into the next.
+either. Wrapped rows are joined without a space only where the upper row is
+filled to the dialog's edge.
 """
 
 import json
@@ -53,9 +53,12 @@ _HUNK_BREAKS = frozenset({"...", "…", "⋮"})
 _NO_NEWLINE = "\\ No newline"
 # Unchanged lines a diff shows around a change, unless the file ends sooner.
 _DIFF_CONTEXT = 3
-# Columns a full row stops short of the dialog's width: a new file's rows keep a
-# margin, a diff's rows run to the edge.
-_NEW_FILE_MARGIN = 1
+# Columns a full row stops short of the dialog's width. A file edit's diff runs to
+# the edge.
+_EDIT_MARGIN = 0
+# A written file, new or overwritten, and a replaced notebook cell.
+_WRITE_MARGIN = 1
+_INSERTED_CELL_MARGIN = 3
 _ARGUMENT_RE = re.compile(r"^\s*([\w-]+):(?:\s(.*))?$")
 # What a Bash dialog draws for a call without a description.
 _NO_DESCRIPTION = "Run shell command"
@@ -174,16 +177,22 @@ def _as_drawn(text: str) -> str:
     return "\n".join([*(_collapse(line).rstrip() for line in lines), _collapse(last)])
 
 
-def _unwrap(rows: list[tuple[str, str]], width: int, margin: int = 0) -> str:
+def _unwrap(rows: list[tuple[str, str]], width: int, margin: int) -> str:
     """The file line drawn over ``rows``, each ``(row, its part of the line)``.
 
     A row filled to ``margin`` columns short of ``width`` goes straight on into
-    the next. A shorter one was cut at a space, which the capture trims.
+    the next, as does one a column shorter when a double-width character, which
+    did not fit, comes next. A shorter row was cut at a space, which the capture
+    trims.
     """
-    drawn, full = "", True
+    drawn, above = "", None
     for row, part in rows:
-        drawn += part if full else f" {part}"
-        full = columns(row.rstrip()) >= width - margin
+        if above is not None:
+            wide_next = columns(part[:1]) == 2
+            if columns(above.rstrip()) < width - margin - wide_next:
+                drawn += " "
+        drawn += part
+        above = row
     return _collapse(drawn).rstrip()
 
 
@@ -272,7 +281,7 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
             if not isinstance(content, str):
                 return False
             if heading in _NEW_FILE_HEADINGS:
-                return _new_file_matches(body, content, dialog.width, _NEW_FILE_MARGIN)
+                return _new_file_matches(body, content, dialog.width, _WRITE_MARGIN)
             return _overwrite_matches(body, content, dialog.width)
         case "Edit":
             return _edits_match(body, [call.input], dialog.width)
@@ -311,8 +320,7 @@ def _notebook_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:
         return False
     body = dialog.body or []
     if mode == "insert":
-        # No capture shows a wrapped cell, so no margin is assumed.
-        return _new_file_matches(body, source, dialog.width, margin=0)
+        return _new_file_matches(body, source, dialog.width, _INSERTED_CELL_MARGIN)
     # A replacement is drawn as a diff of the cell. Without an added line it may
     # be plain numbered code, whose lines can start with "-" themselves.
     added = any(marker == "+" for _, marker, _ in _diff_entries(body))
@@ -403,7 +411,7 @@ def _overwrite_matches(body: list[str], content: str, width: int) -> bool:
         return not content.strip()
     if not all(
         0 < number <= len(lines)
-        and _unwrap(rows, width) == _collapse(lines[number - 1]).rstrip()
+        and _unwrap(rows, width, _WRITE_MARGIN) == _collapse(lines[number - 1]).rstrip()
         for number, _, rows in new
     ):
         return False
@@ -418,7 +426,9 @@ def _side(entries: list[_DiffEntry], without: str, width: int) -> str:
     """One side of a diff: all its lines but those marked ``without``, each ended
     by a newline."""
     return "".join(
-        _unwrap(rows, width) + "\n" for _, marker, rows in entries if marker != without
+        _unwrap(rows, width, _EDIT_MARGIN) + "\n"
+        for _, marker, rows in entries
+        if marker != without
     )
 
 
@@ -443,7 +453,8 @@ def _edits_match(body: list[str], edits: list[Any], width: int) -> bool:
         if not found or (found > 1 and not edit.get("replace_all")):
             return False
         text = text.replace(target, _as_drawn(new))
-    return text == _side(entries, "-", width)
+    # What a replacement leaves can hold a run of two spaces, or one at an end.
+    return _as_drawn(text) == _side(entries, "-", width)
 
 
 # ── other tools ──

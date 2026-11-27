@@ -608,3 +608,67 @@ def test_a_pdf_read_matches_the_pages_drawn() -> None:
     assert match_call(dialog, [call]) == call
     other = _call("Read", {**SHOWN_READ, "pages": "1-4"})
     assert match_call(dialog, [other]) is None
+
+
+@pytest.mark.parametrize(
+    ("new_string", "matches"),
+    [("rm -rf build /", True), ("rm -rf build/", False), ("rm-rf build/", False)],
+)
+def test_a_diffs_spaces_are_compared(new_string: str, matches: bool) -> None:
+    dialog = _dialog("approval_edit.txt", (" 2 +BETA", " 2 +rm -rf build /"))
+    edit = {
+        "file_path": f"{CWD}/notes.txt",
+        "old_string": "beta",
+        "new_string": new_string,
+    }
+    call = _call("Edit", edit)
+    assert (match_call(dialog, [call]) == call) is matches
+
+
+_VALUES = "values = [" + ", ".join(f"v{i}" for i in range(45)) + "]"
+_ALPHAS = "    x    =    [" + "  ".join(f"alpha{i}" for i in range(41)) + "]"
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "matches"),
+    [
+        (_VALUES, _VALUES.replace("v33", "v99"), True),
+        ("v33", "v99", True),
+        # A space dropped inside a row, and one where a row goes straight on.
+        (_VALUES, _VALUES.replace("v33", "v99").replace("v1, v2,", "v1,v2,"), False),
+        (_VALUES, _VALUES.replace("v33", "v99").replace("v28, v29", "v28,v29"), False),
+    ],
+)
+def test_a_wrapped_diff_line_keeps_its_spaces(
+    old: str, new: str, matches: bool
+) -> None:
+    dialog = _dialog("approval_edit_wrapped_spaces.txt")
+    edit = {"file_path": f"{CWD}/w.py", "old_string": old, "new_string": new}
+    call = _call("Edit", edit)
+    assert (match_call(dialog, [call]) == call) is matches
+
+
+@pytest.mark.parametrize(
+    ("first", "matches"),
+    [
+        (_ALPHAS, True),
+        # The length of a run is not compared.
+        (_ALPHAS.replace("    x    =", " x ="), True),
+        (_ALPHAS.replace("alpha1  alpha2", "alpha1alpha2"), False),
+        # The row above was cut at this space: it did not run to the edge, and
+        # the capture shows nothing of the space.
+        (_ALPHAS.replace("alpha10  alpha11", "alpha10alpha11"), False),
+        (_ALPHAS.replace("alpha39  alpha40", "alpha39alpha40"), False),
+        (_ALPHAS.replace("alpha4  alpha5", "alpha4alpha5"), False),
+    ],
+)
+def test_a_wrapped_new_file_keeps_its_spaces(first: str, matches: bool) -> None:
+    dialog = _dialog("approval_write_wrapped.txt")
+    content = f"{first}\nrm -rf build /\n"
+    call = _call("Write", {"file_path": f"{CWD}/n.py", "content": content})
+    assert (match_call(dialog, [call]) == call) is matches
+
+
+def test_a_narrow_subagent_dialog_matches_its_call() -> None:
+    call = _bash("mkdir -p probe_sub_dir", "Create probe_sub_dir directory")
+    assert match_call(_dialog("approval_bash_subagent_narrow.txt"), [call]) == call

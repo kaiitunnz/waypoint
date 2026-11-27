@@ -1,10 +1,14 @@
 """Which pending tool call a permission dialog is asking about.
 
 The dialog is only evidence: a call is named when everything the dialog draws of
-it agrees, and only one call can be meant. Runs of whitespace within a line are
-not told apart, and an input the dialog does not draw is not compared. Anything
-unread or unrecognized matches nothing, since a wrong name gets another call
-approved.
+it agrees, and only one call can be meant. Anything unread or unrecognized
+matches nothing, since a wrong name gets another call approved. An input the
+dialog does not draw is not compared.
+
+Whitespace in commands and file lines is compared run by run: any run counts as
+one space, so its length is not compared, and a run at a line's end is not
+either. A space is missing from the drawn rows only where a row filled to the
+dialog's edge goes straight on into the next.
 """
 
 import json
@@ -49,6 +53,9 @@ _HUNK_BREAKS = frozenset({"...", "…", "⋮"})
 _NO_NEWLINE = "\\ No newline"
 # Unchanged lines a diff shows around a change, unless the file ends sooner.
 _DIFF_CONTEXT = 3
+# Columns a full row stops short of the dialog's width: a new file's rows keep a
+# margin, a diff's rows run to the edge.
+_NEW_FILE_MARGIN = 1
 _ARGUMENT_RE = re.compile(r"^\s*([\w-]+):(?:\s(.*))?$")
 # What a Bash dialog draws for a call without a description.
 _NO_DESCRIPTION = "Run shell command"
@@ -155,6 +162,31 @@ def _spells(text: str, lines: Sequence[str]) -> bool:
     return position == len(target)
 
 
+def _collapse(text: str) -> str:
+    """``text`` with each run of whitespace within a line as one space."""
+    return re.sub(r"[^\S\n]+", " ", text)
+
+
+def _as_drawn(text: str) -> str:
+    """``text`` as the lines of a file are read back off a dialog: runs of
+    whitespace collapsed, and none at the end of a line."""
+    *lines, last = text.split("\n")
+    return "\n".join([*(_collapse(line).rstrip() for line in lines), _collapse(last)])
+
+
+def _unwrap(rows: list[tuple[str, str]], width: int, margin: int = 0) -> str:
+    """The file line drawn over ``rows``, each ``(row, its part of the line)``.
+
+    A row filled to ``margin`` columns short of ``width`` goes straight on into
+    the next. A shorter one was cut at a space, which the capture trims.
+    """
+    drawn, full = "", True
+    for row, part in rows:
+        drawn += part if full else f" {part}"
+        full = columns(row.rstrip()) >= width - margin
+    return _collapse(drawn).rstrip()
+
+
 # ── Bash ──
 
 
@@ -224,7 +256,8 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
         return False
     if call.name == "Read":
         shown, _, drawn_range = (dialog.target or "").partition(" ·")
-        if _squash(drawn_range) != _squash(_read_range(call.input)):
+        # A wrapped path can lose the spaces of the range after it.
+        if "".join(drawn_range.split()) != "".join(_read_range(call.input).split()):
             return False
     elif call.name == "NotebookEdit":
         shown = dialog.target or ""
@@ -239,13 +272,13 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
             if not isinstance(content, str):
                 return False
             if heading in _NEW_FILE_HEADINGS:
-                return _new_file_matches(body, content)
-            return _overwrite_matches(body, content)
+                return _new_file_matches(body, content, dialog.width, _NEW_FILE_MARGIN)
+            return _overwrite_matches(body, content, dialog.width)
         case "Edit":
-            return _edits_match(body, [call.input])
+            return _edits_match(body, [call.input], dialog.width)
         case "MultiEdit":
             edits = call.input.get("edits")
-            return isinstance(edits, list) and _edits_match(body, edits)
+            return isinstance(edits, list) and _edits_match(body, edits, dialog.width)
         case "NotebookEdit":
             return _notebook_matches(dialog, call)
         case _:
@@ -278,11 +311,12 @@ def _notebook_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:
         return False
     body = dialog.body or []
     if mode == "insert":
-        return _new_file_matches(body, source)
+        # No capture shows a wrapped cell, so no margin is assumed.
+        return _new_file_matches(body, source, dialog.width, margin=0)
     # A replacement is drawn as a diff of the cell. Without an added line it may
     # be plain numbered code, whose lines can start with "-" themselves.
     added = any(marker == "+" for _, marker, _ in _diff_entries(body))
-    return added and _overwrite_matches(body, source)
+    return added and _overwrite_matches(body, source, dialog.width)
 
 
 def _path_matches(shown: str, path: str, call: PendingCall) -> bool:
@@ -302,30 +336,39 @@ def _path_matches(shown: str, path: str, call: PendingCall) -> bool:
     return shown in forms
 
 
-def _new_file_matches(body: list[str], content: str) -> bool:
+def _new_file_matches(body: list[str], content: str, width: int, margin: int) -> bool:
     """Every line of the new file is shown under its number, and no other."""
-    shown: dict[int, list[str]] = {}
-    current: list[str] | None = None
+    shown: dict[int, list[tuple[str, str]]] = {}
+    current: list[tuple[str, str]] | None = None
+    # Where the code starts; a wrapped row is blank before it, whatever it
+    # starts with.
+    gutter = 0
     for line in body:
-        if numbered := _NUMBERED_RE.match(line.rstrip()):
-            current = shown[int(numbered.group(1))] = [numbered.group(2) or ""]
-        elif current is not None:
-            current.append(line)
+        if current is not None and not line[:gutter].strip():
+            current.append((line, line[gutter:]))
+        elif numbered := _NUMBERED_RE.match(line.rstrip()):
+            gutter = numbered.end(1) + 1
+            current = shown[int(numbered.group(1))] = [(line, numbered.group(2) or "")]
         elif line.strip():
             return not content.strip()
     lines = content.splitlines() if content.strip() else []
     return sorted(shown) == list(range(1, len(lines) + 1)) and all(
-        _spells(text, shown[number]) for number, text in enumerate(lines, 1)
+        _unwrap(shown[number], width, margin) == _collapse(text).rstrip()
+        for number, text in enumerate(lines, 1)
     )
 
 
-def _diff_entries(body: list[str]) -> list[tuple[int, str, list[str]]]:
-    """``(line number, marker, wrapped segments)`` for each line of a diff.
+type _DiffEntry = tuple[int, str, list[tuple[str, str]]]
+
+
+def _diff_entries(body: list[str]) -> list[_DiffEntry]:
+    """``(line number, marker, rows)`` for each line of a diff, as ``_unwrap``
+    takes its rows.
 
     A long line goes on below with its marker repeated in the same column. Any
     other line is the dialog's own, such as a note that the diff is partial.
     """
-    entries: list[tuple[int, str, list[str]]] = []
+    entries: list[_DiffEntry] = []
     # Where the markers stand, the same on every line of one diff.
     column = 0
     for line in body:
@@ -335,20 +378,22 @@ def _diff_entries(body: list[str]) -> list[tuple[int, str, list[str]]]:
         match = _DIFF_LINE_RE.match(text)
         if match and column in (0, match.start(2)):
             column = match.start(2)
-            entries.append((int(match.group(1)), match.group(2), [match.group(3)]))
+            rows = [(line, match.group(3))]
+            entries.append((int(match.group(1)), match.group(2), rows))
         elif (numbered := _NUMBERED_RE.match(text)) and column in (
             0,
             numbered.end(1) + 1,
         ):
             # An empty context line has nothing after its number.
-            entries.append((int(numbered.group(1)), " ", [numbered.group(2) or ""]))
+            rows = [(line, numbered.group(2) or "")]
+            entries.append((int(numbered.group(1)), " ", rows))
         elif entries and line[:column].isspace():
             if line[column : column + 1] == entries[-1][1]:
-                entries[-1][2].append(line[column + 1 :])
+                entries[-1][2].append((line, line[column + 1 :]))
     return entries
 
 
-def _overwrite_matches(body: list[str], content: str) -> bool:
+def _overwrite_matches(body: list[str], content: str, width: int) -> bool:
     """Whether the diff's new side is ``content``: its lines under their numbers,
     and nothing left out where a diff would have shown it."""
     lines = content.splitlines()
@@ -357,8 +402,9 @@ def _overwrite_matches(body: list[str], content: str) -> bool:
     if not new:
         return not content.strip()
     if not all(
-        0 < number <= len(lines) and _spells(lines[number - 1], segments)
-        for number, _, segments in new
+        0 < number <= len(lines)
+        and _unwrap(rows, width) == _collapse(lines[number - 1]).rstrip()
+        for number, _, rows in new
     ):
         return False
     markers = [marker for _, marker, _ in entries]
@@ -368,29 +414,21 @@ def _overwrite_matches(body: list[str], content: str) -> bool:
     )
 
 
-def _squash(text: str) -> str:
-    """``text`` without whitespace within its lines, which wrapping adds and drops
-    unmarked. Line breaks are kept."""
-    return "\n".join("".join(line.split()) for line in text.split("\n"))
-
-
-def _side(entries: list[tuple[int, str, list[str]]], without: str) -> str:
-    """One side of a diff, squashed: all its lines but those marked ``without``,
-    each ended by a newline."""
+def _side(entries: list[_DiffEntry], without: str, width: int) -> str:
+    """One side of a diff: all its lines but those marked ``without``, each ended
+    by a newline."""
     return "".join(
-        "".join(_squash(segment) for segment in segments) + "\n"
-        for _, marker, segments in entries
-        if marker != without
+        _unwrap(rows, width) + "\n" for _, marker, rows in entries if marker != without
     )
 
 
-def _edits_match(body: list[str], edits: list[Any]) -> bool:
+def _edits_match(body: list[str], edits: list[Any], width: int) -> bool:
     """Whether making ``edits`` to what the diff removes from gives what it adds,
     line for line, so the diff shows these edits and no other change."""
     entries = _diff_entries(body)
     if all(marker == " " for _, marker, _ in entries):
         return False
-    text = _side(entries, "+")
+    text = _side(entries, "+", width)
     for edit in edits:
         if not isinstance(edit, dict):
             return False
@@ -399,13 +437,13 @@ def _edits_match(body: list[str], edits: list[Any]) -> bool:
             return False
         if not old.strip():
             return False
-        target = _squash(old)
+        target = _as_drawn(old)
         found = text.count(target)
         # Without ``replace_all`` Claude requires the text to occur once.
         if not found or (found > 1 and not edit.get("replace_all")):
             return False
-        text = text.replace(target, _squash(new))
-    return text == _side(entries, "-")
+        text = text.replace(target, _as_drawn(new))
+    return text == _side(entries, "-", width)
 
 
 # ── other tools ──

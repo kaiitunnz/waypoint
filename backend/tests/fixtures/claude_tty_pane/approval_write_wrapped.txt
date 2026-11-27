@@ -1,0 +1,22 @@
+─────────────────────────────────────────────────────────
+ Create file
+ n.py
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1     x    =    [alpha0  alpha1  alpha2  alpha3  alpha
+    4  alpha5  alpha6  alpha7  alpha8  alpha9  alpha10
+    alpha11  alpha12  alpha13  alpha14  alpha15  alpha16
+      alpha17  alpha18  alpha19  alpha20  alpha21  alpha
+    22  alpha23  alpha24  alpha25  alpha26  alpha27  alp
+    ha28  alpha29  alpha30  alpha31  alpha32  alpha33  a
+    lpha34  alpha35  alpha36  alpha37  alpha38  alpha39
+     alpha40]
+  2 rm -rf build /
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create n.py?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file
+      edits and common file commands) for this session
+      (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

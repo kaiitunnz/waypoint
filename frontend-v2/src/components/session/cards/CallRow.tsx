@@ -1,6 +1,5 @@
 "use client";
 
-import { foldLines } from "@waypoint/web-core/session/foldText";
 import { formatCallDuration, type CallView } from "@waypoint/web-core/session/toolRun";
 
 import { cx } from "@/lib/cx";
@@ -18,11 +17,10 @@ import { TodoItems } from "./TodoItems";
 import { FOLD_LINES } from "./useFold";
 
 function Prose({ caption, text }: { caption: string; text: string }) {
-  const { total } = foldLines(text, Infinity);
   return (
     <>
       <div className={styles.caption}>{caption}</div>
-      <Clamped lines={FOLD_LINES} more={total > FOLD_LINES ? `Show all ${total} lines` : undefined} frame={styles.prose}>
+      <Clamped lines={FOLD_LINES} frame={styles.prose}>
         <Markdown text={text} />
       </Clamped>
     </>
@@ -98,7 +96,9 @@ export function CallRow({ row }: { row: CallView }) {
           ) : (
             <FoldedText text={reply.text} className={styles.out} />
           )}
-          {reply.cut ? <div className={styles.cut}>Preview of a longer report</div> : null}
+          {reply.cut ? (
+            <div className={styles.cut}>{reply.kind === "report" ? "Preview of a longer report" : "Preview of longer output"}</div>
+          ) : null}
         </div>
       ) : null}
       {row.attachments.length > 0 ? (

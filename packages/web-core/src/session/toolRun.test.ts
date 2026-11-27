@@ -447,7 +447,7 @@ describe("describeCall subagents", () => {
 
   it("shows a deferred command's report as output, and keeps the output of one that was not deferred", () => {
     const make = claudeCall("Bash", { command: "make" });
-    const notice = notification({ status: "failed", result_preview: "built" });
+    const notice = notification({ kind: "background_command", status: "failed", result_preview: "built" });
     expect(reportedFor([make, answer("started", { result_deferred: true })], notice)).toMatchObject({
       reply: output("built"),
       status: "failed",
@@ -456,6 +456,48 @@ describe("describeCall subagents", () => {
       reply: output("started in the background"),
       status: "done",
     });
+  });
+
+  it("shows an agent's report on any call its notification names", () => {
+    const send = claudeCall("SendMessage", { to: "a1", message: "And four." });
+    const sent = answer('{"success":true,"message":"Message sent"}');
+    expect(reportedFor([send, sent], notification({ status: "completed", result_preview: "four" }))).toMatchObject({
+      name: { tool: "SendMessage" },
+      reply: report("four"),
+      status: "done",
+      durationMs: 8000,
+    });
+    expect(only(send, sent)?.reply?.kind).toBe("output");
+  });
+
+  it("reads a launch whose call is not loaded from the notification, not the acknowledgement", () => {
+    const [item] = run([ev(3, "tool_result", "Async agent launched", { item_id: "a", result_deferred: true })]);
+    if (item.kind !== "pair") throw new Error("expected a pair");
+    const notice = notification({ status: "completed", result_preview: "2 files", summary: 'Agent "List docs" finished' });
+    expect(describeCall({ ...item, pair: { ...item.pair, report: notice } })).toMatchObject({
+      label: 'Agent "List docs" finished',
+      reply: report("2 files"),
+    });
+    expect(describeCall(item)).toMatchObject({ label: "", reply: null, status: "pending" });
+  });
+
+  it("carries the report files of the notification that stands in", () => {
+    const spec = (id: string) => ({ id, filename: `${id}.md`, kind: "file", size: 5000 });
+    const files = { attachments: [spec("spill"), spec("transcript")], inline_attachment_ids: ["spill"] };
+    const notice = (kind: string) => {
+      const event = notification({ kind, status: "completed", result_preview: "start", result_truncated: true });
+      return { ...event, metadata: { ...event.metadata, ...files } };
+    };
+    // An agent's captured output file is its transcript, not its report.
+    expect(reported(notice("agent"))?.attachments.map((file) => file.id)).toEqual(["spill"]);
+    const make = [claudeCall("Bash", { command: "make" }), answer("started", { result_deferred: true })];
+    const row = reportedFor(make, notice("background_command"));
+    expect(row?.reply).toEqual(output("start", true));
+    expect(row?.attachments.map((file) => file.id)).toEqual(["spill", "transcript"]);
+  });
+
+  it("leaves a deferred call out of the calls still running", () => {
+    expect(pendingCallOf(run([agent, answer("launched", { result_deferred: true })]))).toBeUndefined();
   });
 
   it("reads OpenCode's task call, whose tool name differs", () => {
@@ -530,6 +572,15 @@ describe("describeCall output of other tools", () => {
       only(codexItem("tool_call", "app:find", "dynamicToolCall", {}, "app:find"), codexItem("tool_result", "app:find", "dynamicToolCall", items, "app:find"))
         ?.reply,
     ).toEqual(output("one\n[inputImage]"));
+  });
+
+  it("names the media of a failed result too", () => {
+    const content = [{ type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo" } }];
+    const shot = claudeCall("mcp__browser__screenshot", {});
+    expect(only(shot, result(3, "a", "iVBORw0KGgo", { is_error: true, payload: { content } }))).toMatchObject({
+      status: "failed",
+      reply: output("[image]"),
+    });
   });
 
   it("shows nothing more for a result whose call is not loaded and names no tool", () => {

@@ -4,6 +4,7 @@ import { isTodoListEvent, readTodoEntries, summarizeTodos, type TodoEntry } from
 import type { AttachmentSpec, EventRecord } from "../types";
 import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
 import { formatDuration } from "./cardText";
+import { taskNoteReport } from "./taskNoteBody";
 import {
   callArgumentsForEvent,
   commandForEvent,
@@ -322,46 +323,57 @@ const NAMED_CATEGORIES: ReadonlySet<Category> = new Set(["other", "monitor", "fo
 const replyWith = (kind: CallReply["kind"], text: string | null, cut = false): CallReply | null =>
   text ? { kind, text, cut } : null;
 
-function replyOf(call: EventRecord | null, result: EventRecord, tool: string | null): CallReply | null {
-  const text = cleanOutput(commandOutputForEvent(result));
+function replyOf(call: EventRecord | null, result: EventRecord, tool: string | null, prompted: boolean): CallReply | null {
+  const text = cleanOutput(resultContentForEvent(result) ?? commandOutputForEvent(result));
   if (tool === "Bash" || result.metadata?.is_error === true) return replyWith("output", text);
   const delegation = delegationForEvent(result);
   if (delegation) return replyWith("report", delegation.report);
   const category = categoryOf(tool);
   // Only a call that carried a prompt answers with a report.
-  if (category === "agent") return subagentRequestForEvent(call ?? result).prompt ? replyWith("report", text) : null;
+  if (category === "agent") return prompted ? replyWith("report", text) : null;
   // categoryOf(null) is "other": a result whose call is not loaded may name no tool.
   if (tool === null || category !== "other") return null;
-  const returned = resultContentForEvent(result) ?? text;
-  return returned === call?.text.trim() || returned === tool ? null : replyWith("output", returned);
+  return text === call?.text.trim() || text === tool ? null : replyWith("output", text);
 }
 
 interface Outcome {
   status: CallView["status"];
   endedBy: EventRecord | null;
   reply: CallReply | null;
+  // The summary and report files of a task notification that stands in for the result.
+  summary: string | null;
+  attachments: AttachmentSpec[];
 }
 
-// A deferred result only acknowledges the launch. The task notification about such a call,
-// or about any subagent call, stands in for its result.
-function outcomeOf(child: LeafItem, call: EventRecord | null, result: EventRecord | null, tool: string | null): Outcome {
-  const subagent = categoryOf(tool) === "agent";
+const NO_NOTICE = { summary: null, attachments: [] };
+
+// A task notification stands in for a call's result when it reports an agent, when the
+// result is deferred (it only acknowledges the launch), and for any subagent call.
+function outcomeOf(
+  call: EventRecord | null,
+  result: EventRecord | null,
+  tool: string | null,
+  report: EventRecord | undefined,
+  prompted: boolean,
+): Outcome {
   const deferred = result?.metadata?.result_deferred === true;
-  const report = child.kind === "pair" && (deferred || subagent) ? child.pair.report : undefined;
   const note = report ? parseTaskNotification(report) : null;
-  if (report && note) {
+  if (report && note && (note.kind === "agent" || deferred || categoryOf(tool) === "agent")) {
     const preview = note.resultPreview ? cleanOutput(note.resultPreview) : null;
     return {
       status: note.status && note.status !== "completed" ? "failed" : "done",
       endedBy: report,
-      reply: replyWith(subagent ? "report" : "output", preview, note.resultTruncated),
+      reply: replyWith(note.kind === "agent" ? "report" : "output", preview, note.resultTruncated),
+      summary: note.summary,
+      attachments: taskNoteReport(note, report).specs,
     };
   }
-  if (!result || deferred) return { status: "pending", endedBy: null, reply: null };
+  if (!result || deferred) return { ...NO_NOTICE, status: "pending", endedBy: null, reply: null };
   return {
+    ...NO_NOTICE,
     status: result.metadata?.is_error === true ? "failed" : "done",
     endedBy: result,
-    reply: replyOf(call, result, tool),
+    reply: replyOf(call, result, tool, prompted),
   };
 }
 
@@ -387,7 +399,13 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
   const filePath =
     subject !== null ? null : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
   const shownPath = filePath === null ? null : relativeToCwd(filePath, cwd);
-  const preview = previewForToolEvent(event, badge.label);
+  const delegation = delegationForEvent(event);
+  // Another tool's `prompt` or `agent` argument is not a request to a subagent.
+  const request = category === "agent" || delegation ? subagentRequestForEvent(event) : null;
+  const outcome = outcomeOf(call, result, tool, child.kind === "pair" ? child.pair.report : undefined, Boolean(request?.prompt));
+  // A launch acknowledgement says nothing about a call that is not loaded.
+  const preview =
+    !call && result?.metadata?.result_deferred === true ? (outcome.summary ?? "") : previewForToolEvent(event, badge.label);
   const todos = tool === "TodoWrite" ? ([result, call].map((e) => (e ? readTodoEntries(e) : null)).find((entries) => entries !== null) ?? null) : null;
   const progress = todos ? summarizeTodos(todos) : null;
   const label = todos
@@ -398,10 +416,6 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
   const stats = diff && isFileEditToolName(tool) ? diff : null;
 
   const description = category === "agent" ? filledText(input?.description) : null;
-  const delegation = delegationForEvent(event);
-  // Another tool's `prompt` or `agent` argument is not a request to a subagent.
-  const request = category === "agent" || delegation ? subagentRequestForEvent(event) : null;
-  const outcome = outcomeOf(child, call, result, tool);
 
   // A result alone, such as a spawned subagent's notice, is labelled by its text.
   const named = tool !== null && (NAMED_CATEGORIES.has(category) || (category === "agent" && call !== null && !description));
@@ -431,6 +445,9 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
     prompt: request?.prompt ?? null,
     reply: outcome.reply,
     diff,
-    attachments: child.kind === "pair" ? toolPairAttachments(child.pair) : attachmentSpecsFor(child.event),
+    attachments: [
+      ...(child.kind === "pair" ? toolPairAttachments(child.pair) : attachmentSpecsFor(child.event)),
+      ...outcome.attachments,
+    ],
   };
 }

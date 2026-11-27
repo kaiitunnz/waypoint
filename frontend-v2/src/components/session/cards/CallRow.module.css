@@ -80,11 +80,13 @@
   color: var(--faint);
 }
 
+/* The machine-text inset, set as prose. */
 .prose {
-  padding: 6px 9px;
-  border-radius: 8px;
-  background: var(--sunken);
-  line-height: 1.45;
+  composes: block from "./FoldedText.module.css";
+  font-family: inherit;
+  font-size: inherit;
+  line-height: var(--lh-bubble);
+  white-space: normal;
   color: var(--text);
 }
 

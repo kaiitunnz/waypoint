@@ -22,8 +22,8 @@ background tailer loop treats a raised exception as fatal, so all remote failure
 modes degrade to an unobserved read that retries with backoff.
 
 A source also reads the files around the transcript, off the tail loop's cursor:
-the transcript's tail, its subagents' transcripts, and any file by path (the
-plan file). A read that fails gives ``None``; an empty list means nothing there.
+the transcript, its subagents' transcripts, and any file by path (the plan
+file). A read that fails gives ``None``; an empty list means nothing there.
 """
 
 import json
@@ -46,6 +46,7 @@ from waypoint.backends.claude_code.threads import (
 from waypoint.backends.transcript_fs_remote import (
     RemoteMissing,
     RemoteRead,
+    RemoteStat,
     RemoteTranscriptFilesystem,
 )
 from waypoint.backends.transcript_fs_remote_script import find_clear_successors
@@ -63,9 +64,9 @@ READ_LIMIT = 256 * 1024  # max bytes fetched per remote read
 _SEARCH_BACKOFF = 1.0
 # Cap on that wait, which doubles.
 _MAX_SEARCH_BACKOFF = 10.0
-# Subagent transcripts under ``<transcript stem>/subagents/``; a workflow's
-# agents sit one folder further down.
-_SUBAGENT_PATTERNS = ("agent-*.jsonl", "workflows/*/agent-*.jsonl")
+# Where under ``<transcript stem>/subagents/`` the agents' files sit; a
+# workflow's agents are one folder further down.
+_SUBAGENT_FOLDERS = ("", "workflows/*/")
 # The most of a subagent's meta file read; it is one small JSON object.
 _META_LIMIT = 64 * 1024
 
@@ -191,14 +192,25 @@ class Tail:
 
 
 @dataclass(frozen=True)
+class FileChunk:
+    """Bytes read from an offset, with the file's size and ``(device, inode)``."""
+
+    data: bytes
+    size: int
+    identity: tuple[int, int]
+
+
+@dataclass(frozen=True)
 class SubagentTranscript:
     path: str
     agent_type: str | None
     name: str | None
     finished: bool = False
+    # The transcript's size and modification time when it was listed.
+    version: tuple[int, int] = (0, 0)
 
 
-def _subagent(path: str, meta: bytes) -> SubagentTranscript:
+def _subagent(path: str, meta: bytes, version: tuple[int, int]) -> SubagentTranscript:
     try:
         fields = json.loads(meta)
     except ValueError:
@@ -211,6 +223,7 @@ def _subagent(path: str, meta: bytes) -> SubagentTranscript:
         agent_type=agent_type if isinstance(agent_type, str) else None,
         name=name if isinstance(name, str) else None,
         finished=fields.get("finished") is True,
+        version=version,
     )
 
 
@@ -234,8 +247,9 @@ class TranscriptByteSource(Protocol):
 class TranscriptTreeReader(Protocol):
     """Reads of the files around a session's transcript. None of them raise."""
 
-    def read_transcript_tail(self, limit: int) -> Tail | None:
-        """The last ``limit`` bytes of the session's transcript."""
+    def transcript_file(self) -> str | None:
+        """The path of the session's transcript, or None when it can't be
+        found."""
         ...
 
     def list_subagents(self) -> list[SubagentTranscript] | None:
@@ -251,6 +265,11 @@ class TranscriptTreeReader(Protocol):
     def file_size(self, path: str) -> int | None:
         """The size of a file on the session's host, or None when it can't be
         asked."""
+        ...
+
+    def read_range(self, path: str, offset: int, limit: int) -> FileChunk | None:
+        """Up to ``limit`` bytes of a file from ``offset``, or None when it
+        can't be read."""
         ...
 
     def home_dir(self) -> str | None:
@@ -314,32 +333,29 @@ class LocalTranscriptByteSource:
             observed=True, data=data, size=opened.st_size, identity=identity
         )
 
-    def read_transcript_tail(self, limit: int) -> Tail | None:
+    def transcript_file(self) -> str | None:
         # Its own search: the tail loop's backoff may still be waiting.
-        path = self._path
-        if _stat(path) is None:
-            try:
-                found = find_local_transcript(
-                    self._cwd, self._thread_id, self._config_dir
-                )
-            except OSError:
-                return None
-            if found is None:
-                return None
-            path = found
-        return self.read_tail(str(path), limit)
+        if _stat(self._path) is not None:
+            return str(self._path)
+        try:
+            found = find_local_transcript(self._cwd, self._thread_id, self._config_dir)
+        except OSError:
+            return None
+        return None if found is None else str(found)
 
     def list_subagents(self) -> list[SubagentTranscript] | None:
         root = self._path.with_suffix("") / "subagents"
         found = []
         try:
-            for pattern in _SUBAGENT_PATTERNS:
-                for path in sorted(root.glob(pattern)):
+            for folder in _SUBAGENT_FOLDERS:
+                for path in sorted(root.glob(f"{folder}agent-*.jsonl")):
+                    st = path.stat()
                     try:
                         meta = Path(_meta_path(str(path))).read_bytes()
                     except FileNotFoundError:
                         meta = b""
-                    found.append(_subagent(str(path), meta))
+                    version = (st.st_size, st.st_mtime_ns)
+                    found.append(_subagent(str(path), meta, version))
         except OSError:
             return None
         return found
@@ -362,6 +378,15 @@ class LocalTranscriptByteSource:
                 start = max(0, os.fstat(fh.fileno()).st_size - limit)
                 fh.seek(start)
                 return Tail(fh.read(limit), truncated=start > 0)
+        except (OSError, RuntimeError):
+            return None
+
+    def read_range(self, path: str, offset: int, limit: int) -> FileChunk | None:
+        try:
+            with Path(path).expanduser().open("rb") as fh:
+                st = os.fstat(fh.fileno())
+                fh.seek(offset)
+                return FileChunk(fh.read(limit), st.st_size, _stat_identity(st))
         except (OSError, RuntimeError):
             return None
 
@@ -445,6 +470,9 @@ class RemoteClaudeTranscriptByteSource:
         self._identity: tuple[int, int] | None = None
         self._config_root: str | None = None
         self._home: str | None = None
+        # Each subagent meta file's bytes, with the size and modification time
+        # they were read at. A resumed agent's meta is rewritten.
+        self._metas: dict[str, tuple[tuple[int, int], bytes]] = {}
         self._next_read_at = 0.0  # monotonic deadline; 0 = read immediately
         self._backoff = _STEADY_INTERVAL
         self._warned: set[str] = set()
@@ -482,34 +510,53 @@ class RemoteClaudeTranscriptByteSource:
             )
         )
 
-    def read_transcript_tail(self, limit: int) -> Tail | None:
-        if (path := self._transcript_path()) is None:
+    def transcript_file(self) -> str | None:
+        if self._path is not None:
+            return self._path
+        try:
+            return self._resolve()
+        except Exception:
+            self._warn_once("read-error", "remote transcript read failed")
             return None
-        return self.read_tail(path, limit)
 
     def list_subagents(self) -> list[SubagentTranscript] | None:
-        if (path := self._transcript_path()) is None:
+        if (path := self.transcript_file()) is None:
             return None
         root = path.removesuffix(".jsonl") + "/subagents"
         found = []
         try:
-            for pattern in _SUBAGENT_PATTERNS:
-                if (transcripts := self._fs.probe_glob(root, pattern)) is None:
+            for folder in _SUBAGENT_FOLDERS:
+                # Transcripts and their metas in one listing.
+                if (files := self._fs.glob_stat(root, f"{folder}agent-*")) is None:
                     return None
-                for transcript in transcripts:
-                    meta = self._fs.read_range(_meta_path(transcript), 0, _META_LIMIT)
+                stats = {file.path: file for file in files}
+                for file in files:
+                    if not file.path.endswith(".jsonl"):
+                        continue
+                    meta = self._meta(stats.get(_meta_path(file.path)))
                     if meta is None:
                         return None
-                    found.append(
-                        _subagent(
-                            transcript,
-                            meta.data if isinstance(meta, RemoteRead) else b"",
-                        )
-                    )
+                    version = (file.size, file.mtime_ns)
+                    found.append(_subagent(file.path, meta, version))
         except Exception:
             self._warn_once("subagents", "remote subagent listing failed")
             return None
         return found
+
+    def _meta(self, listed: RemoteStat | None) -> bytes | None:
+        """A meta file's bytes, read again only when its listing changed; empty
+        when there is none, None when it can't be read."""
+        if listed is None:
+            return b""
+        version = (listed.size, listed.mtime_ns)
+        cached = self._metas.get(listed.path)
+        if cached is not None and cached[0] == version:
+            return cached[1]
+        if (read := self._fs.read_range(listed.path, 0, _META_LIMIT)) is None:
+            return None
+        data = read.data if isinstance(read, RemoteRead) else b""
+        self._metas[listed.path] = (version, data)
+        return data
 
     def home_dir(self) -> str | None:
         if self._home is None:
@@ -520,35 +567,27 @@ class RemoteClaudeTranscriptByteSource:
         return self._home
 
     def file_size(self, path: str) -> int | None:
-        try:
-            read = self._fs.read_range(path, 0, 0)
-        except Exception:
-            self._warn_once("tail", "remote file read failed")
-            return None
-        return read.size if isinstance(read, RemoteRead) else None
+        chunk = self.read_range(path, 0, 0)
+        return None if chunk is None else chunk.size
 
     def read_tail(self, path: str, limit: int) -> Tail | None:
         # Sized first, so a long file's head is not downloaded to be dropped.
         if (size := self.file_size(path)) is None:
             return None
         start = max(0, size - limit)
+        if (chunk := self.read_range(path, start, limit)) is None:
+            return None
+        return Tail(chunk.data, truncated=start > 0)
+
+    def read_range(self, path: str, offset: int, limit: int) -> FileChunk | None:
         try:
-            read = self._fs.read_range(path, start, limit)
+            read = self._fs.read_range(path, offset, limit)
         except Exception:
             self._warn_once("tail", "remote file read failed")
             return None
         if not isinstance(read, RemoteRead):
             return None
-        return Tail(read.data, truncated=start > 0)
-
-    def _transcript_path(self) -> str | None:
-        if self._path is not None:
-            return self._path
-        try:
-            return self._resolve()
-        except Exception:
-            self._warn_once("read-error", "remote transcript read failed")
-            return None
+        return FileChunk(read.data, read.size, read.identity)
 
     def _read(self, offset: int, metadata_only: bool) -> TranscriptRead:
         if self._path is None:

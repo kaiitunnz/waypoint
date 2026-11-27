@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from claude_tty_transcripts import (
     CWD,
     THREAD,
@@ -13,26 +15,33 @@ from claude_tty_transcripts import (
     use,
     write_subagent,
 )
+from waypoint.backends.claude_tty import pending_calls as pending_calls_mod
 from waypoint.backends.claude_tty.byte_source import (
+    FileChunk,
     LocalTranscriptByteSource,
-    Tail,
 )
-from waypoint.backends.claude_tty.pending_calls import TranscriptCalls, pending_calls
+from waypoint.backends.claude_tty.pending_calls import PendingCall, TranscriptCalls
 
 
-def ids(data: bytes, *, truncated: bool = False) -> list[str]:
-    return [c.tool_use_id for c in pending_calls(Tail(data, truncated=truncated))]
+def pending(tmp_path: Path, data: bytes) -> list[PendingCall]:
+    source, main = session_tree(tmp_path)
+    main.write_bytes(data)
+    return TranscriptCalls(source).candidates(None)
 
 
-def test_calls_without_a_result_are_pending() -> None:
+def ids(calls: list[PendingCall]) -> list[str]:
+    return [c.tool_use_id for c in calls]
+
+
+def test_calls_without_a_result_are_pending(tmp_path: Path) -> None:
     data = jsonl(
         use("a", "Bash", {"command": "ls"}),
         use("b", "Bash", {"command": "pwd"}),
         result("a"),
     )
-    assert ids(data) == ["b"]
-    (call,) = pending_calls(Tail(data))
-    assert (call.name, call.input, call.cwd, call.transcript) == (
+    (call,) = pending(tmp_path, data)
+    assert (call.tool_use_id, call.name, call.input, call.cwd, call.transcript) == (
+        "b",
         "Bash",
         {"command": "pwd"},
         CWD,
@@ -40,26 +49,100 @@ def test_calls_without_a_result_are_pending() -> None:
     )
 
 
-def test_only_the_latest_message_can_be_pending() -> None:
+def test_only_the_latest_message_can_be_pending(tmp_path: Path) -> None:
     data = jsonl(
         use("a", "Bash", {"command": "ls"}, msg="msg-1"),
         use("b", "Bash", {"command": "pwd"}, msg="msg-2"),
     )
-    assert ids(data) == ["b"]
+    assert ids(pending(tmp_path, data)) == ["b"]
 
 
-def test_a_new_prompt_ends_every_call() -> None:
-    call = use("a", "Bash", {"command": "ls"})
-    assert ids(jsonl(call, prompt("[Request interrupted by user]"))) == []
-    assert ids(jsonl(call, prompt("injected context", isMeta=True))) == ["a"]
+@pytest.mark.parametrize(
+    ("injected", "left"),
+    [
+        (prompt("[Request interrupted by user]"), []),
+        (prompt("injected context", isMeta=True), ["a"]),
+    ],
+)
+def test_a_new_prompt_ends_every_call(
+    tmp_path: Path, injected: dict, left: list[str]
+) -> None:
+    data = jsonl(use("a", "Bash", {"command": "ls"}), injected)
+    assert ids(pending(tmp_path, data)) == left
 
 
-def test_history_copies_and_partial_lines_are_ignored() -> None:
+def test_history_copies_are_ignored_and_a_partial_line_waits(tmp_path: Path) -> None:
+    source, main = session_tree(tmp_path)
     blob = {**use("old", "Bash", {"command": "ls"}), "type": "api-request-blob"}
-    data = jsonl(use("a", "Bash", {"command": "ls"}), blob) + b'{"type": "assis'
-    assert ids(data) == ["a"]
-    cut = b'put": {}}]}}\n' + jsonl(use("a", "Bash", {"command": "ls"}))
-    assert ids(cut, truncated=True) == ["a"]
+    second = jsonl(use("b", "Bash", {"command": "ls"}))
+    main.write_bytes(jsonl(use("a", "Bash", {"command": "ls"}), blob) + second[:20])
+    calls = TranscriptCalls(source)
+    assert ids(calls.candidates(None)) == ["a"]
+    with main.open("ab") as fh:
+        fh.write(second[20:])
+    assert ids(calls.candidates(None)) == ["a", "b"]
+
+
+def test_a_window_starting_mid_record_skips_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    last = jsonl(use("a", "Bash", {"command": "ls"}))
+    monkeypatch.setattr(pending_calls_mod, "_FIRST_WINDOW", len(last) + 10)
+    data = jsonl(use("old", "Bash", {"command": "x" * 100}, msg="msg-0")) + last
+    assert ids(pending(tmp_path, data)) == ["a"]
+
+
+class _Counting(LocalTranscriptByteSource):
+    """Records how many bytes each ranged read returned."""
+
+    def __init__(self, cwd: str, thread_id: str, config_dir: str) -> None:
+        super().__init__(cwd, thread_id, config_dir)
+        self.reads: list[int] = []
+
+    def read_range(self, path: str, offset: int, limit: int) -> FileChunk | None:
+        chunk = super().read_range(path, offset, limit)
+        assert chunk is not None
+        self.reads.append(len(chunk.data))
+        return chunk
+
+
+def test_a_followed_transcript_is_read_only_for_what_was_appended(
+    tmp_path: Path,
+) -> None:
+    _, main = session_tree(tmp_path)
+    main.write_bytes(jsonl(use("a", "Bash", {"command": "x" * 1000})))
+    source = _Counting(CWD, THREAD, str(tmp_path / "config"))
+    calls = TranscriptCalls(source)
+    calls.candidates(None)
+    added = jsonl(use("b", "Bash", {"command": "ls"}))
+    with main.open("ab") as fh:
+        fh.write(added)
+    source.reads.clear()
+    assert ids(calls.candidates(None)) == ["a", "b"]
+    assert ids(calls.candidates(None)) == ["a", "b"]
+    assert source.reads == [len(added), 0]
+
+
+@pytest.mark.parametrize("change", ["too far behind", "replaced"])
+def test_a_transcript_that_cannot_be_followed_is_read_afresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    source, main = session_tree(tmp_path)
+    main.write_bytes(jsonl(use("a", "Bash", {"command": "ls"})))
+    calls = TranscriptCalls(source)
+    (first,) = calls.candidates(None)
+    fresh = jsonl(use("b", "Bash", {"command": "ls"}, msg="msg-2"))
+    if change == "replaced":
+        other = main.with_suffix(".new")
+        other.write_bytes(jsonl(prompt("p" * 500)) + fresh)
+        other.rename(main)
+    else:
+        monkeypatch.setattr(pending_calls_mod, "_GAP_LIMIT", 64)
+        monkeypatch.setattr(pending_calls_mod, "_FIRST_WINDOW", len(fresh) + 5)
+        with main.open("ab") as fh:
+            fh.write(jsonl(prompt("p" * 500)) + fresh)
+    assert ids(calls.candidates(None)) == ["b"]
+    assert calls.is_resolved(first)
 
 
 def test_candidates_come_from_the_transcript_the_dialog_names(tmp_path: Path) -> None:
@@ -148,17 +231,25 @@ def test_a_call_behind_a_large_result_is_still_pending(tmp_path: Path) -> None:
     assert calls.is_resolved(bash)
 
 
-def test_a_carried_call_ends_only_on_what_ends_it() -> None:
-    (call,) = pending_calls(Tail(jsonl(use("a", "Bash", {"command": "ls"}))))
-
-    def held(data: bytes) -> bool:
-        return call in pending_calls(Tail(data), carried=call)
-
-    assert held(b"")
-    assert held(jsonl(result("other")))
-    assert not held(jsonl(result("a")))
-    assert not held(jsonl(prompt("stop")))
-    assert not held(jsonl(use("b", "Bash", {"command": "ls"}, msg="msg-2")))
+@pytest.mark.parametrize(
+    ("record", "resolved"),
+    [
+        (result("other"), False),
+        (result("a"), True),
+        (prompt("stop"), True),
+        (use("b", "Bash", {"command": "ls"}, msg="msg-2"), True),
+    ],
+)
+def test_a_call_ends_only_on_what_ends_it(
+    tmp_path: Path, record: dict, resolved: bool
+) -> None:
+    source, main = session_tree(tmp_path)
+    main.write_bytes(jsonl(use("a", "Bash", {"command": "ls"})))
+    calls = TranscriptCalls(source)
+    (call,) = calls.candidates(None)
+    assert not calls.is_resolved(call)
+    append(main, record)
+    assert calls.is_resolved(call) is resolved
 
 
 def test_a_subagent_transcript_is_read_again_once_it_grows(tmp_path: Path) -> None:
@@ -179,3 +270,18 @@ def test_missing_transcript_yields_nothing(tmp_path: Path) -> None:
     assert calls.candidates(None) == []
     assert calls.candidates("general-purpose") == []
     assert source.read_tail(str(tmp_path / "plan.md"), 10) is None
+    assert source.read_range(str(tmp_path / "plan.md"), 0, 10) is None
+
+
+def test_a_resumed_subagent_is_a_candidate_again(tmp_path: Path) -> None:
+    source, main = session_tree(tmp_path)
+    records = jsonl(use("sub-1", "Bash", {"command": "ls"}), result("sub-1"))
+    sub = write_subagent(
+        main, "a1", "general-purpose", records, meta={"finished": True}
+    )
+    calls = TranscriptCalls(source)
+    assert calls.candidates("general-purpose") == []
+    # Resuming it rewrites the meta without ``finished``.
+    sub.with_suffix(".meta.json").write_text('{"agentType": "general-purpose"}')
+    append(sub, use("sub-2", "Bash", {"command": "pwd"}, msg="msg-2"))
+    assert ids(calls.candidates("general-purpose")) == ["sub-2"]

@@ -11,7 +11,11 @@ from waypoint.backends.claude_tty.byte_source import (
     RemoteClaudeTranscriptByteSource,
 )
 from waypoint.backends.claude_tty.pending_calls import TranscriptCalls
-from waypoint.backends.transcript_fs_remote import RemoteMissing, RemoteRead
+from waypoint.backends.transcript_fs_remote import (
+    RemoteMissing,
+    RemoteRead,
+    RemoteStat,
+)
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
@@ -262,6 +266,8 @@ class _FakeFs:
         self.globs: dict[str, list[str]] = {}
         # Glob patterns the host cannot be asked about.
         self.unreachable: set[str] = set()
+        # Modification times by path; 0 when not set.
+        self.mtimes: dict[str, int] = {}
 
     def glob(self, root: str, pattern: str) -> list[str]:
         self.glob_calls += 1
@@ -271,8 +277,15 @@ class _FakeFs:
             return list(self.globs.get(pattern, []))
         return list(self.glob_result)
 
-    def probe_glob(self, root: str, pattern: str) -> list[str] | None:
-        return None if pattern in self.unreachable else self.glob(root, pattern)
+    def glob_stat(self, root: str, pattern: str) -> list[RemoteStat] | None:
+        if pattern in self.unreachable:
+            return None
+        assert self.files is not None
+        return [
+            RemoteStat(path, len(self.files[path]), self.mtimes.get(path, 0))
+            for path in self.glob(root, pattern)
+            if path in self.files
+        ]
 
     def read_range(
         self, path: str, offset: int, limit: int
@@ -592,7 +605,7 @@ def test_remote_reads_the_files_around_the_transcript() -> None:
     }
     fs.globs = {
         f"projects/*/{TID}.jsonl": [f"{base}.jsonl"],
-        "agent-*.jsonl": [subagent],
+        "agent-*": [subagent, f"{base}/subagents/agent-a1.meta.json"],
     }
     fs.expand = {"~": "/home/u"}
     source = _remote_source(fs, _session())
@@ -607,6 +620,53 @@ def test_remote_reads_the_files_around_the_transcript() -> None:
     assert source.read_tail("/home/u/.claude/plans/missing.md", 4) is None
 
     # One of the two listings fails: what the other found is not the whole set.
-    fs.unreachable = {"workflows/*/agent-*.jsonl"}
+    fs.unreachable = {"workflows/*/agent-*"}
     assert source.list_subagents() is None
     assert calls.candidates("general-purpose") == []
+
+
+def test_a_remote_look_reads_only_what_changed() -> None:
+    base = f"/home/u/.claude/projects/p/{TID}"
+    main = f"{base}.jsonl"
+    live, done = (f"{base}/subagents/agent-{n}" for n in ("live", "done"))
+    fs = _FakeFs()
+    fs.files = {
+        main: jsonl(use("main-1", "Bash", {"command": "ls"})),
+        f"{live}.jsonl": jsonl(use("sub-1", "Bash", {"command": "pwd"})),
+        f"{live}.meta.json": b'{"agentType": "general-purpose"}',
+        f"{done}.jsonl": jsonl(use("old", "Bash", {"command": "id"})),
+        f"{done}.meta.json": b'{"agentType": "general-purpose", "finished": true}',
+    }
+    fs.globs = {
+        f"projects/*/{TID}.jsonl": [main],
+        "agent-*": [path for path in fs.files if "/subagents/" in path],
+    }
+    calls = TranscriptCalls(_remote_source(fs, _session()))
+
+    def found(agent: str | None) -> list[str]:
+        return [c.tool_use_id for c in calls.candidates(agent)]
+
+    assert found(None) == ["main-1"]
+    assert found("general-purpose") == ["sub-1"]
+
+    # Nothing changed: no meta or subagent transcript is read again, and the
+    # main transcript is asked only for what follows what was read.
+    fs.read_calls.clear()
+    assert found("general-purpose") == ["sub-1"]
+    assert fs.read_calls == []
+    assert found(None) == ["main-1"]
+    assert [(path, offset) for path, offset, _ in fs.read_calls] == [
+        (main, len(fs.files[main]))
+    ]
+
+    # A resumed agent's meta is rewritten and its transcript grows.
+    fs.files[f"{done}.meta.json"] = b'{"agentType": "general-purpose"}'
+    seen = len(fs.files[f"{done}.jsonl"])
+    fs.files[f"{done}.jsonl"] += jsonl(use("new", "Bash", {"command": "w"}, "msg-2"))
+    fs.read_calls.clear()
+    assert sorted(found("general-purpose")) == ["new", "sub-1"]
+    assert {path for path, _, _ in fs.read_calls} == {
+        f"{done}.meta.json",
+        f"{done}.jsonl",
+    }
+    assert seen < len(fs.files[f"{done}.jsonl"])

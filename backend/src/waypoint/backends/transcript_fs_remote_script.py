@@ -18,6 +18,8 @@ Output schema (always one line, ``SENTINEL`` immediately followed by JSON,
     {"target": str} | {"error": str}            # readlink
     {"entries": [str, ...]} | {"error": str}    # listdir
     {"paths": [str, ...]}                       # glob
+    {"files": [[str, int, int], ...]}           # glob_stat: path, size, mtime_ns
+      | {"error": str}
     {"ids": [str, ...]} | {"error": str}        # find_clear_successors
     {"size": int, "device": int, "inode": int,  # read_range
      "data_b64": str} | {"missing": true} | {"error": str}
@@ -152,6 +154,23 @@ def op_glob(config_dir, pattern):
     emit({"paths": matches})
 
 
+def op_glob_stat(root, pattern):
+    # ``glob`` with each match's size and modification time, so a caller can
+    # tell which files changed without a round trip for each.
+    base = os.path.expanduser(root)
+    files = []
+    for match in sorted(_glob.glob(os.path.join(base, pattern))):
+        try:
+            st = os.stat(match)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            emit({"error": str(exc)})
+            return
+        files.append([match, st.st_size, st.st_mtime_ns])
+    emit({"files": files})
+
+
 def _cleared_from(head, parent_id):
     for line in head.split(b"\n")[:_HEADER_LINES]:
         try:
@@ -257,6 +276,7 @@ OPS: dict[str, Callable[..., None]] = {
     "symlink": op_symlink,
     "copy_file": op_copy_file,
     "glob": op_glob,
+    "glob_stat": op_glob_stat,
     "read_range": op_read_range,
     "find_clear_successors": op_find_clear_successors,
     "expanduser": op_expanduser,

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from waypoint.backends.claude_tty.byte_source import (
+    FileChunk,
     LocalTranscriptByteSource,
     SubagentTranscript,
     Tail,
@@ -97,7 +98,7 @@ def write_subagent(
 class NoTranscriptTree:
     """For a fake source whose session has no files around its transcript."""
 
-    def read_transcript_tail(self, limit: int) -> Tail | None:
+    def transcript_file(self) -> str | None:
         return None
 
     def list_subagents(self) -> list[SubagentTranscript] | None:
@@ -107,6 +108,9 @@ class NoTranscriptTree:
         return None
 
     def file_size(self, path: str) -> int | None:
+        return None
+
+    def read_range(self, path: str, offset: int, limit: int) -> FileChunk | None:
         return None
 
     def home_dir(self) -> str | None:

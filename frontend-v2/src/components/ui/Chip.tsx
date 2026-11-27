@@ -23,7 +23,6 @@ export function Chip({ recommended, quiet, selected, compact, className, childre
       aria-pressed={selected}
       className={cx(
         styles.chip,
-        recommended && styles.rec,
         quiet && styles.quiet,
         selected && styles.selected,
         compact && styles.compact,

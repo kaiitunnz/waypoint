@@ -13,11 +13,6 @@
   white-space: nowrap;
 }
 
-/* Marked by its border and label only: a fill is what selection looks like. */
-.rec {
-  border-color: color-mix(in srgb, var(--brass) 45%, transparent);
-}
-
 .label {
   flex: none;
   font-size: var(--f-meta);

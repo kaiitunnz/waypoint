@@ -700,6 +700,44 @@ def test_pending_approval_ids_are_empty_before_the_adapter_exists() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("actions", "summary"),
+    [
+        (
+            [{"type": "read", "command": "cat a", "name": "a", "path": "a"}],
+            "Read `a`",
+        ),
+        ([{"type": "unknown", "command": "rm a"}], None),
+    ],
+)
+async def test_command_approval_event_carries_the_summary(
+    actions: list[dict[str, Any]], summary: str | None
+) -> None:
+    emitted: list = []
+    adapter, fake = make_parked_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    await adapter.send_input("sess", "start")
+    handler = fake.approval_handler
+    assert handler is not None
+    reader = asyncio.create_task(
+        asyncio.to_thread(
+            handler,
+            "item/commandExecution/requestApproval",
+            {"itemId": "cmd-1", "command": "cat a", "commandActions": actions},
+        )
+    )
+    while not any(kind == EventKind.APPROVAL_REQUEST for _, kind, *_ in emitted):
+        await asyncio.sleep(0.01)
+    metadata = next(e[3] for e in emitted if e[1] == EventKind.APPROVAL_REQUEST)
+
+    assert metadata.get("summary") == summary
+
+    assert await adapter.respond_to_approval("sess", "approve")
+    await asyncio.wait_for(reader, timeout=2)
+    assert await adapter.terminate_session("sess") is True
+
+
+@pytest.mark.asyncio
 async def test_interrupt_cancels_a_pending_approval_first() -> None:
     emitted: list = []
     adapter, fake = make_parked_adapter(emitted)

@@ -26,6 +26,7 @@ from waypoint.backends.codex.event_registry import (
     render_notification,
 )
 from waypoint.backends.codex.normalize import (
+    approval_summary,
     diff_preview_for_approval,
     diff_preview_for_notification,
     error_text,
@@ -52,6 +53,7 @@ from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metada
 from waypoint.backends.events import (
     INTERACTION_METADATA_KEY,
     InteractionEnvelope,
+    set_summary,
 )
 from waypoint.backends.task_notifications import CAPTURE_DISABLED
 from waypoint.schemas import (
@@ -437,19 +439,21 @@ class CodexAppServerAdapter:
                 # a card recorded after its invalidation note would never clear.
                 if pending.event.is_set():
                     return
+                metadata: dict[str, Any] = {
+                    "method": method,
+                    "approval_id": pending.approval_id,
+                    "item_id": item_id,
+                    "request": payload,
+                    "status": SessionStatus.WAITING_INPUT,
+                    INTERACTION_METADATA_KEY: interaction.to_metadata(),
+                    **preview_to_metadata(diff_preview),
+                }
+                set_summary(metadata, approval_summary(method, payload))
                 await self._emit_event(
                     state.session_id,
                     EventKind.APPROVAL_REQUEST,
                     approval_text,
-                    {
-                        "method": method,
-                        "approval_id": pending.approval_id,
-                        "item_id": item_id,
-                        "request": payload,
-                        "status": SessionStatus.WAITING_INPUT,
-                        INTERACTION_METADATA_KEY: interaction.to_metadata(),
-                        **preview_to_metadata(diff_preview),
-                    },
+                    metadata,
                     SessionStatus.WAITING_INPUT,
                 )
 

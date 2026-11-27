@@ -18,6 +18,7 @@ from typing import Any
 
 from waypoint.backends.codex import subagents
 from waypoint.backends.codex.normalize import (
+    command_summary,
     error_text,
     extract_item,
     format_plan,
@@ -27,7 +28,7 @@ from waypoint.backends.codex.normalize import (
 )
 from waypoint.backends.codex.questions import async_questions, is_async_message
 from waypoint.backends.diff_preview import build_preview, files_from_unified_diff
-from waypoint.backends.events import mark_detail, mark_important
+from waypoint.backends.events import mark_detail, mark_important, set_summary
 from waypoint.schemas import EventKind, SessionStatus
 
 REASONING_ITEM_KIND = "reasoning"
@@ -153,6 +154,11 @@ def _format_collab_agent_tool(item: dict[str, Any], *, completed: bool) -> str:
     if not bodies:
         return tool
     return f"{tool}\n\n" + "\n\n".join(bodies)
+
+
+def _command_started(item: dict[str, Any]) -> Rendered:
+    metadata = set_summary({}, command_summary(item.get("commandActions")))
+    return _tool_call(f"$ {item.get('command', '')}", metadata)
 
 
 def _command_completed(item: dict[str, Any]) -> Rendered:
@@ -347,7 +353,7 @@ def _function_call_output(item: dict[str, Any]) -> Rendered:
 ITEMS: dict[str, ItemSpec] = {
     "commandExecution": ItemSpec(
         tool_name=lambda item: "Bash",
-        started=lambda item: _tool_call(f"$ {item.get('command', '')}"),
+        started=_command_started,
         completed=_command_completed,
     ),
     "fileChange": ItemSpec(

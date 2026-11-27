@@ -5,11 +5,15 @@ import asyncio
 from typing import Any
 
 import pytest
+from openai_codex.generated.v2_all import Turn
 
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeSessionState
 from waypoint.backends.claude_code.history import convert_transcript_records
 from waypoint.backends.claude_code.normalize import call_summary
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
+from waypoint.backends.codex.event_registry import render_item_started
+from waypoint.backends.codex.history import turns_to_events
+from waypoint.backends.codex.normalize import approval_summary, command_summary
 from waypoint.backends.events import set_summary
 from waypoint.backends.opencode import normalize as opencode
 from waypoint.backends.opencode.sessions import Permission
@@ -252,3 +256,95 @@ def test_opencode_approval_carries_the_call_summary() -> None:
 
     assert described["summary"] == "Map the callers"
     assert "summary" not in bare
+
+
+def _read(name: str) -> dict[str, str]:
+    return {"type": "read", "command": f"cat {name}", "name": name, "path": name}
+
+
+SEARCH = {
+    "type": "search",
+    "command": "rg -n x src",
+    "query": "permission mode",
+    "path": "src",
+}
+UNKNOWN = {"type": "unknown", "command": "git status --short"}
+
+
+@pytest.mark.parametrize(
+    ("actions", "expected"),
+    [
+        ([_read("SKILL.md")], "Read `SKILL.md`"),
+        ([SEARCH], "Search `permission mode`"),
+        ([{**SEARCH, "query": None}], "Search `src`"),
+        ([{"type": "search", "command": "rg x"}], "Search files"),
+        ([{"type": "listFiles", "command": "ls src", "path": "src"}], "List `src`"),
+        ([{"type": "listFiles", "command": "ls"}], "List files"),
+        ([_read("a.py"), SEARCH], "Read `a.py`, search `permission mode`"),
+        ([_read("a.py"), _read("a.py")], "Read `a.py`"),
+        ([UNKNOWN], None),
+        ([_read("a.py"), UNKNOWN], None),
+        ([_read("a`b")], None),
+        ([{"type": "write", "command": "tee a"}], None),
+        ([], None),
+        (None, None),
+    ],
+)
+def test_codex_command_summary(actions: Any, expected: str | None) -> None:
+    assert command_summary(actions) == expected
+
+
+def _command_item(actions: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "commandExecution",
+        "id": "item-1",
+        "command": "/bin/bash -lc 'cat SKILL.md'",
+        "cwd": "/work",
+        "status": "completed",
+        "commandActions": actions,
+        "aggregatedOutput": "text",
+        "exitCode": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("actions", "expected"),
+    [([_read("SKILL.md")], "Read `SKILL.md`"), ([UNKNOWN], None)],
+)
+def test_codex_live_and_imported_commands(
+    actions: list[dict[str, Any]], expected: str | None
+) -> None:
+    item = _command_item(actions)
+    turn = Turn.model_validate(
+        {
+            "id": "turn-1",
+            "status": "completed",
+            "startedAt": 1_700_000_000,
+            "completedAt": 1_700_000_010,
+            "items": [item],
+        }
+    )
+
+    started = render_item_started(item)
+    [imported, result] = turns_to_events([turn], "sess")
+
+    assert started is not None
+    assert started.metadata.get("summary") == expected
+    assert imported.kind is EventKind.TOOL_CALL
+    assert imported.metadata.get("summary") == expected
+    assert "summary" not in result.metadata
+
+
+def test_codex_approval_takes_the_parsed_action_and_never_the_reason() -> None:
+    method = "item/commandExecution/requestApproval"
+    params: dict[str, Any] = {
+        "command": "cat SKILL.md",
+        "reason": "Needed to learn the commands",
+        "commandActions": [_read("SKILL.md")],
+    }
+
+    assert approval_summary(method, params) == "Read `SKILL.md`"
+    assert approval_summary(method, {**params, "commandActions": [UNKNOWN]}) is None
+    assert approval_summary(method, {**params, "commandActions": None}) is None
+    assert approval_summary(method, {**params, "command": None}) is None
+    assert approval_summary("item/fileChange/requestApproval", params) is None

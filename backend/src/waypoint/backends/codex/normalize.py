@@ -40,6 +40,43 @@ def error_text(payload: dict[str, Any]) -> str:
     return f"{message} — {details}"
 
 
+def command_summary(actions: Any) -> str | None:
+    """Names a command by the actions Codex parsed from it, or ``None`` unless
+    every one reads, searches or lists: a summary must not name a command by a
+    part of it."""
+    if not isinstance(actions, list) or not actions:
+        return None
+    phrases: dict[str, None] = {}
+    for action in actions:
+        if (phrase := _action_phrase(action)) is None:
+            return None
+        phrases[phrase] = None
+    first, *rest = phrases
+    return ", ".join([first, *(phrase[0].lower() + phrase[1:] for phrase in rest)])
+
+
+def _action_phrase(action: Any) -> str | None:
+    if not isinstance(action, dict):
+        return None
+    fields: tuple[str, ...]
+    bare: str | None
+    match action.get("type"):
+        case "read":
+            fields, verb, bare = ("name",), "Read", None
+        case "search":
+            fields, verb, bare = ("query", "path"), "Search", "Search files"
+        case "listFiles":
+            fields, verb, bare = ("path",), "List", "List files"
+        case _:
+            return None
+    for field in fields:
+        if isinstance(value := action.get(field), str) and value:
+            # Backticks mark the machine strings in a summary, so one inside a
+            # string can't be marked.
+            return None if "`" in value else f"{verb} `{value}`"
+    return bare
+
+
 def extract_item_id(payload: dict[str, Any]) -> str | None:
     candidate = payload.get("itemId")
     if isinstance(candidate, str) and candidate:
@@ -243,6 +280,14 @@ def map_turn_status(value: Any) -> SessionStatus:
     if value == "failed":
         return SessionStatus.ERROR
     return SessionStatus.RUNNING
+
+
+def approval_summary(method: str, params: dict[str, Any]) -> str | None:
+    """A command approval's summary. Its ``reason`` is a detail of the request,
+    not a description of the command."""
+    if method != "item/commandExecution/requestApproval" or not params.get("command"):
+        return None
+    return command_summary(params.get("commandActions"))
 
 
 def format_approval_text(method: str, params: dict[str, Any]) -> str:

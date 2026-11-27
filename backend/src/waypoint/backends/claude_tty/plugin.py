@@ -72,6 +72,14 @@ from waypoint.backends.claude_code.schemas import (
     ClaudeThreadImportRequest,
     ClaudeThreadSummary,
 )
+from waypoint.backends.claude_code.session_folder import (
+    carried_launch_cwd,
+    folder_fields,
+    launch_folder,
+    leave_removed_folder,
+    note_removed_folder,
+    relaunch_folder,
+)
 from waypoint.backends.claude_code.threads import (
     ClaudeThreadInfo,
     find_local_claude_thread,
@@ -84,8 +92,8 @@ from waypoint.backends.claude_tty.byte_source import (
     ClaudeTranscriptSource,
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
+    find_local_transcript,
     resolve_remote_config_root,
-    transcript_path,
 )
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
@@ -827,6 +835,9 @@ class ClaudeTtyPlugin:
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
+        # The caller's snapshot can predate the teardown that stopped a tailer
+        # which moved the session's folder.
+        session = runtime.get_session(session.id)
         state = session.transport_state
         thread_id: str | None = state.get("thread_id")
 
@@ -860,6 +871,8 @@ class ClaudeTtyPlugin:
                 await runtime.tmux.kill_session(old_tmux_session)
 
         launch_target = runtime._find_launch_target(session.launch_target_id)
+        session = await leave_removed_folder(runtime, session)
+        state = session.transport_state
         stored_args = state.get("launch_args")
         # After a transport switch the state is reset to the neutral native-thread
         # handoff (no launch_args); fall back to the persisted custom args so they
@@ -933,7 +946,7 @@ class ClaudeTtyPlugin:
             "pid": target.pane_pid,
             "thread_id": new_thread_id,
             "launch_args": launch_args,
-            **_carried_pre_plan_mode(session.permission_mode, state),
+            **_carried_state(session.permission_mode, state),
         }
         # The respawned pane hasn't confirmed a model yet.
         runtime.storage.update_session(
@@ -995,6 +1008,11 @@ class ClaudeTtyPlugin:
         )
         config_dir = self._config_dir(session)
         new_thread_id = str(uuid.uuid4())
+        folder = await relaunch_folder(runtime, session)
+        # Before the transcript copy, which a refused launch would orphan.
+        runtime._require_pane_folder(launch_target, folder)
+        # Before the pane starts, which a failed git lookup would leave behind.
+        fields = await folder_fields(session, folder)
         # Claude writes a --fork-session transcript only after the first turn.
         # Copying it under the new thread id lets the resumed pane reopen the
         # full history now, and clone_events seeds the event DB so the fork
@@ -1021,7 +1039,7 @@ class ClaudeTtyPlugin:
                 self.id,
                 launch_args,
                 launch_target,
-                session.cwd,
+                folder,
                 allocate_tty=True,
                 session_id=new_session_id,
                 launch_env=session.launch_env,
@@ -1032,7 +1050,7 @@ class ClaudeTtyPlugin:
         raw_log.touch(exist_ok=True)
         try:
             target = await runtime.tmux.start_managed_session(
-                new_session_id, session.cwd, command
+                new_session_id, folder, command
             )
             await runtime.tmux.pipe_output(target.pane, raw_log)
         except TmuxError as exc:
@@ -1051,10 +1069,8 @@ class ClaudeTtyPlugin:
             source=SessionSource.MANAGED,
             transport=self.transport_id,
             title=title,
-            cwd=session.cwd,
+            **fields,
             launch_target_id=session.launch_target_id,
-            repo_name=session.repo_name,
-            branch=session.branch,
             status=SessionStatus.STARTING,
             created_at=now,
             updated_at=now,
@@ -1068,9 +1084,7 @@ class ClaudeTtyPlugin:
                 "pid": target.pane_pid,
                 "thread_id": new_thread_id,
                 "launch_args": launch_args,
-                **_carried_pre_plan_mode(
-                    session.permission_mode, session.transport_state
-                ),
+                **_carried_state(session.permission_mode, session.transport_state),
             },
             permission_mode=session.permission_mode,
             model=session.model,
@@ -1083,6 +1097,7 @@ class ClaudeTtyPlugin:
         runtime.storage.create_session(new_session)
         if materialized:
             runtime.storage.clone_events(session.id, new_session_id)
+        await note_removed_folder(runtime, new_session_id, session, folder)
         await runtime._record_system_event(
             new_session_id,
             f"Claude TUI forked from {session.title or session.id} (thread {new_thread_id})",
@@ -1092,7 +1107,7 @@ class ClaudeTtyPlugin:
             runtime,
             new_session_id,
             new_thread_id,
-            session.cwd,
+            folder,
             start_at_end=materialized,
             config_dir=self._config_dir(new_session),
             launch_target=launch_target,
@@ -1137,14 +1152,14 @@ class ClaudeTtyPlugin:
         launch_target: SshLaunchTargetConfig | None,
     ) -> bool:
         if launch_target is None:
-            src = transcript_path(session.cwd, src_thread_id, config_dir)
-            if not src.exists():
+            src = find_local_transcript(session.cwd, src_thread_id, config_dir)
+            if src is None:
                 return False
-            dst = transcript_path(session.cwd, new_thread_id, config_dir)
-            shutil.copy2(src, dst)
+            # ``--resume`` finds the copy by id from any folder.
+            shutil.copy2(src, src.parent / f"{new_thread_id}.jsonl")
             return True
         fs = RemoteTranscriptFilesystem(launch_target)
-        config_root = resolve_remote_config_root(config_dir, session.cwd, fs)
+        config_root = resolve_remote_config_root(config_dir, launch_folder(session), fs)
         matches = fs.glob_artifacts(session, self, config_root)
         if len(matches) != 1:
             return False
@@ -1239,6 +1254,11 @@ class ClaudeTtyPlugin:
                 detail="claude_tty session has no thread id to resume",
             )
 
+        launch_target = runtime._find_launch_target(session.launch_target_id)
+        if launch_target is None:
+            # Past the kill, a launch refused for a missing folder strands the
+            # session.
+            runtime._require_pane_folder(None, await relaunch_folder(runtime, session))
         old_tmux_session = state.get("tmux_session")
         if old_tmux_session:
             with suppress(TmuxError):
@@ -1247,6 +1267,10 @@ class ClaudeTtyPlugin:
             runtime, session.id, "Pending approval cleared by restart"
         )
         await self._cancel_tailer(session.id)
+        # The tailer may have moved the session's folder up to here.
+        session = runtime.get_session(session.id)
+        session = await leave_removed_folder(runtime, session)
+        state = session.transport_state
 
         stored_args = state.get("launch_args")
         base_args = _scrub_session_args(
@@ -1256,7 +1280,6 @@ class ClaudeTtyPlugin:
             model=merged[0], effort=merged[1], permission_mode=merged[2]
         )
 
-        launch_target = runtime._find_launch_target(session.launch_target_id)
         # The thread file is only written on first input, so a settings change
         # made before the session's first turn has nothing to resume — relaunching
         # with `--resume` makes the CLI exit with "no conversation found" and kills
@@ -1300,14 +1323,10 @@ class ClaudeTtyPlugin:
             "thread_id": thread_id,
             "launch_args": launch_args,
         }
-        # Remember the mode held before entering plan so an ExitPlanMode approval
-        # can restore it (mirroring Chat): set it on the transition into plan;
-        # otherwise carry it while staying in plan and drop it on leaving.
+        # Entering plan, the mode held until now is the one to restore.
         if new_permission_mode == "plan" and session.permission_mode != "plan":
-            if session.permission_mode:
-                new_state["pre_plan_mode"] = session.permission_mode
-        else:
-            new_state.update(_carried_pre_plan_mode(new_permission_mode, state))
+            state = {**state, "pre_plan_mode": session.permission_mode}
+        new_state.update(_carried_state(new_permission_mode, state))
         # The respawn may run a different model; the no-op early return above
         # keeps a benign relaunch from reaching here.
         runtime.storage.update_session(
@@ -1413,11 +1432,12 @@ class ClaudeTtyPlugin:
             ),
             *base_args,
         ]
+        folder = await relaunch_folder(runtime, parent)
         command = runtime._command_for_backend(
             self.id,
             launch_args,
             launch_target,
-            new_session.cwd,
+            folder,
             allocate_tty=True,
             session_id=new_session.id,
             launch_env=parent.launch_env,
@@ -1426,7 +1446,7 @@ class ClaudeTtyPlugin:
         raw_log.parent.mkdir(parents=True, exist_ok=True)
         raw_log.touch(exist_ok=True)
         target = await runtime.tmux.start_managed_session(
-            new_session.id, new_session.cwd, command
+            new_session.id, folder, command
         )
         # Once the pane (a live `claude --resume`) exists, any later failure must
         # kill it before re-raising — otherwise fork_aside's rollback restores the
@@ -1444,12 +1464,14 @@ class ClaudeTtyPlugin:
                     "pid": target.pane_pid,
                     "thread_id": thread_id,
                     "launch_args": launch_args,
-                    **_carried_pre_plan_mode(
+                    **_carried_state(
                         new_session.permission_mode, parent.transport_state
                     ),
                 },
                 status=SessionStatus.STARTING,
+                **await folder_fields(parent, folder),
             )
+            await note_removed_folder(runtime, new_session.id, parent, folder)
             await runtime._record_system_event(
                 new_session.id,
                 f"Promoted side question to a session (resumed thread {thread_id})",
@@ -1462,7 +1484,7 @@ class ClaudeTtyPlugin:
                 runtime,
                 new_session.id,
                 thread_id,
-                new_session.cwd,
+                folder,
                 start_at_end=True,
                 config_dir=self._config_dir(new_session),
                 launch_target=launch_target,
@@ -1618,18 +1640,13 @@ class ClaudeTtyPlugin:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="claude thread not found",
             )
-        cwd_path = Path(info.cwd).expanduser()
-        if not cwd_path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"claude thread cwd {info.cwd} no longer exists; cannot resume",
-            )
+        runtime._require_pane_folder(None, info.cwd)
         if request.thread_id in self._imported_thread_ids(runtime, backend):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude thread already imported",
             )
-        cwd = str(cwd_path)
+        cwd = str(Path(info.cwd).expanduser())
         # Durable effective model — request choice, else the configured default.
         # Pin it on the resume command so the relaunched CLI is deterministic,
         # and persist it as the authoritative context-window denominator.
@@ -1751,20 +1768,21 @@ class ClaudeTtyPlugin:
         return runtime.get_session(session.id)
 
 
-def _carried_pre_plan_mode(
+def _carried_state(
     permission_mode: str | None, source_state: dict[str, Any]
 ) -> dict[str, str]:
-    """``pre_plan_mode`` to keep across a relaunch that stays in plan mode.
+    """The ``transport_state`` entries a relaunch carries over: ``launch_cwd``,
+    and ``pre_plan_mode`` while the session stays in plan mode.
 
-    The tailer restores it when a plan is approved; without it the session
-    would drop to ``default`` instead of the mode it held before plan.
+    The tailer restores ``pre_plan_mode`` when a plan is approved; without it
+    the session would drop to ``default`` instead of the mode it held before
+    plan.
     """
-    if permission_mode != "plan":
-        return {}
+    carried = carried_launch_cwd(source_state)
     pre_plan_mode = source_state.get("pre_plan_mode")
-    if isinstance(pre_plan_mode, str) and pre_plan_mode:
-        return {"pre_plan_mode": pre_plan_mode}
-    return {}
+    if permission_mode == "plan" and isinstance(pre_plan_mode, str) and pre_plan_mode:
+        carried["pre_plan_mode"] = pre_plan_mode
+    return carried
 
 
 class _TailerRun(NamedTuple):

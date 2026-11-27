@@ -21,6 +21,16 @@ async def resolve_git_meta(cwd: str) -> GitMeta:
     return GitMeta(repo_name=repo_name, branch=branch)
 
 
+async def git_common_dir(cwd: str) -> str | None:
+    """The git directory ``cwd``'s repository shares with all its worktrees."""
+    return await _git(
+        Path(cwd).expanduser(),
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    )
+
+
 async def _git(cwd: Path, *args: str) -> str | None:
     try:
         process = await asyncio.create_subprocess_exec(

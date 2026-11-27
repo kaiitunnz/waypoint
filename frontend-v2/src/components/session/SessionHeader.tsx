@@ -41,8 +41,8 @@ export function SessionHeader({ title, standing, agent, onTitle, rail, pane, vie
           </button>
           {standing ? <SessionStatusLine standing={standing} agent={agent} className={styles.sub} /> : null}
         </div>
-        {view}
         {density}
+        {view}
         <PanelButton panel="pane" size="sm" control={pane} />
         {overflow}
       </div>

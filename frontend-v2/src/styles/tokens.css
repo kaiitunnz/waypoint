@@ -97,7 +97,7 @@
   /* The terminal pane. Its ground follows the agent's own TUI theme, not the
      app's, so both surfaces live here and the light theme leaves them alone.
      Plain colours: xterm reads them as values. */
-  --f-term: 13px;
+  --f-term: 12px;
   --term-dark-bg: #090b0f;
   --term-dark-fg: #d3d9e2;
   --term-dark-cursor: #e0bb73;

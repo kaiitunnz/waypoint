@@ -75,7 +75,7 @@ export function turnStart(events: readonly EventRecord[]): TurnStart {
   return { startedAt: Number.isFinite(startedAt) ? startedAt : null, bounded: turn.bounded };
 }
 
-export type FetchOlderEvents = (beforeSequence: number) => Promise<{ events: EventRecord[]; has_more: boolean }>;
+type FetchOlderEvents = (beforeSequence: number) => Promise<{ events: EventRecord[]; has_more: boolean }>;
 
 // Enough pages for all but the longest turns.
 const MAX_PAGES = 25;

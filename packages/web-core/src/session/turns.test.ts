@@ -96,7 +96,6 @@ describe("lastRunIndex", () => {
     expect(turn.kind === "agent" && turn.items.map((item) => runCallsOf(item).length)).toEqual([1, 0]);
     expect(lastRunIndex(turn)).toBe(0);
   });
-
 });
 
 describe("runCallsOf", () => {

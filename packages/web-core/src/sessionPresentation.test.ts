@@ -78,7 +78,6 @@ describe("showsUnread", () => {
     expect(showsUnread(session({ ...unread, status: "exited" }))).toBe(false);
     expect(showsUnread(session())).toBe(false);
   });
-
 });
 
 describe("spokenStatus", () => {

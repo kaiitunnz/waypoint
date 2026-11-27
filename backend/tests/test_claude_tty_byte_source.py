@@ -111,6 +111,12 @@ def test_local_follows_a_moved_transcript_from_the_same_offset(tmp_path: Path) -
     assert read.identity == first.identity
 
 
+def test_local_searches_for_a_cwd_too_long_to_name_a_folder(tmp_path: Path) -> None:
+    _project_file(tmp_path).write_bytes(b"one\n")
+    src = LocalTranscriptByteSource("/" + "x" * 300, TID, str(tmp_path))
+    assert src.read_from(0).data == b"one\n"
+
+
 def test_local_search_runs_only_on_a_miss_and_backs_off(
     tmp_path: Path, monkeypatch
 ) -> None:

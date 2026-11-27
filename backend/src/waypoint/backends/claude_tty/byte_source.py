@@ -136,7 +136,7 @@ def find_local_transcript(
     """The transcript where ``cwd`` puts it, else the only one named after
     ``thread_id`` in any project folder."""
     path = transcript_path(cwd, thread_id, config_dir)
-    if path.exists():
+    if _stat(path) is not None:
         return path
     candidates = local_claude_thread_artifacts(thread_id, config_dir)
     if len(candidates) > 1:

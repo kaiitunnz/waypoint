@@ -7,6 +7,16 @@
   background: var(--plane);
 }
 
+/* An iOS home-screen app can measure dvh short of the screen by the status bar,
+   which leaves a band under the screen; touch fills the layout viewport instead. */
+@media not all and (hover: hover) and (pointer: fine) {
+  .screen {
+    position: fixed;
+    inset: 0;
+    height: auto;
+  }
+}
+
 /* Width rules inside the conversation are container queries on it. Unnamed:
    CSS Modules renames a named container per file. */
 .conv {

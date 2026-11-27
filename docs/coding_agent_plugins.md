@@ -589,6 +589,10 @@ reads only the backend-neutral parts:
   `pending_approval_ids`. A `plan_approval` envelope carries the whole plan in
   `body`; one with an empty body is listed as a plain approval.
 - `metadata["tool_name"]` / `metadata["tool_input"]`, both optional.
+- `metadata["call_verified"]`, `metadata["tool_use_id"]` and
+  `metadata["subagent"]`, set by a transport that reads dialogs off a screen
+  ([call verification](pending_asks.md#call-verification)). Its replies must
+  check the screen still shows the request before pressing a key.
 - The resolution notes `open_approval_requests`
   ([`approvals.py`](../backend/src/waypoint/backends/approvals.py)) understands:
   a system note whose method is `approval.invalidated`, or whose text contains
@@ -843,6 +847,13 @@ permission changes over Claude's stdio control protocol mid-turn and uses
 restart-with-resume only for effort changes. Thread discovery/import reads the
 same `~/.claude/projects` transcript store as `claude_code`, so the same
 Claude threads appear under both backend ids.
+
+A permission dialog has no wire protocol, so the tailer reads it off the pane,
+looks the call up in the main or subagent transcripts, and names it only when
+that is certain; a plan approval's text is read from the plan file. A reply
+presses the option's digit, after checking the pane still shows the request.
+Messages are typed only while the composer is drawn, so a popup, recognized or
+not, never receives them.
 
 `/clear` starts a new conversation in a new transcript, whose `derived-from`
 header record names the old thread with `via: "clear"`. After a `/clear` sent

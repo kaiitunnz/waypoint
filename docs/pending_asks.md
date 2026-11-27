@@ -50,17 +50,45 @@ with "(Recommended)", ignoring case and surrounding whitespace. Answer with
 `POST /api/sessions/{id}/answer-question` (`tool_use_id`, `answer`, `answers`) or
 decline with `.../cancel-question`.
 
-**`approval`** — `{approval_id, tool_name, tool_input, tool_input_truncated, decisions, supports_note}`.
+**`approval`** — `{approval_id, tool_name, tool_input, tool_input_truncated, decisions, supports_note, call_verified, tool_use_id, subagent}`.
 `decisions` is the agent's approval vocabulary and `supports_note` says whether
 a note may accompany the decision. Answer with
-`POST /api/sessions/{id}/approve` (`decision`, `text`, `approval_id`).
+`POST /api/sessions/{id}/approve` (`decision`, `text`, `approval_id`). The last
+three fields are [call verification](#call-verification).
 
-**`plan`** (on `plan_approval` items) — `{plan_id, text, decisions, supports_note, resolve_via}`.
+**`plan`** (on `plan_approval` items) — `{plan_id, text, decisions, supports_note, resolve_via, call_verified, tool_use_id}`.
 `resolve_via` names the endpoint: `approve` answers through
 `POST /api/sessions/{id}/approve` with `approval_id` set to `plan_id`;
 `approve_plan` answers through `POST /api/sessions/{id}/approve-plan` with
 `plan_item_id` set to `plan_id`. An approval request whose plan text is empty is
 listed as a plain `approval`.
+
+## Call verification
+
+A transport that reads its dialogs off a screen cannot assume a request names
+the call a reply answers. Its approval and plan items say so:
+
+| Field | Meaning |
+| --- | --- |
+| `call_verified` | `true`: `tool_name` and `tool_input` are the call the reply answers, or the plan `text` is the plan being approved. `false`: they are the screen's reading, which may be partial or wrong |
+| `tool_use_id` | The matched call, when one was matched |
+| `subagent` | The kind of subagent asking, when the request is a subagent's |
+
+All three are `null` on items from a transport that names its calls natively, so
+a client gates only screen-read transports on `call_verified`.
+
+For `claude_tty`:
+
+- A tool approval is verified when exactly one pending call in the transcript, or
+  in the named subagent's transcript, agrees with everything the dialog shows.
+  `tool_input` is then that call's whole input. A call Claude has not written to
+  its transcript while the dialog is up (often a main-thread edit or web search)
+  stays unverified.
+- A plan approval is verified when its text is the content of the plan file the
+  dialog names. An unreadable file leaves the item unverified and without text,
+  listed as a plain `approval`.
+- A reply is refused with the usual `400` when the terminal no longer shows the
+  request, and the request on screen is raised as a new item.
 
 ## Bounded payloads
 

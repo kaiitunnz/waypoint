@@ -1297,6 +1297,12 @@ class PendingAskApproval(BaseModel):
     tool_input_truncated: bool
     decisions: list[str]
     supports_note: bool
+    # Whether the request names the call it answers; None when the transport's
+    # requests always do.
+    call_verified: bool | None = None
+    tool_use_id: str | None = None
+    # The subagent asking, when it is one.
+    subagent: str | None = None
 
 
 class PendingAskPlan(BaseModel):
@@ -1305,6 +1311,8 @@ class PendingAskPlan(BaseModel):
     decisions: list[str]
     supports_note: bool
     resolve_via: Literal["approve", "approve_plan"]
+    call_verified: bool | None = None
+    tool_use_id: str | None = None
 
 
 class PendingAskBase(BaseModel):

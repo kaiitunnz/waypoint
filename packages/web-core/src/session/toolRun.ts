@@ -1,18 +1,25 @@
 import { attachmentSpecsFor } from "../attachments";
-import { parseEvent, readToolName, toolFilePath, type EventDiffPreview } from "../events";
+import { parseEvent, parseTaskNotification, readToolName, toolFilePath, type EventDiffPreview } from "../events";
 import { isTodoListEvent, readTodoEntries, summarizeTodos, type TodoEntry } from "../todos";
 import type { AttachmentSpec, EventRecord } from "../types";
 import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
 import { formatDuration } from "./cardText";
 import {
+  callArgumentsForEvent,
+  collabPromptForEvent,
+  collabReportForEvent,
   commandForEvent,
   commandOutputForEvent,
+  contentItemsForEvent,
   isAgentToolName,
+  isCollabEvent,
   isFileEditToolName,
   previewForToolEvent,
   toolBadgeFor,
   toolInputForEvent,
+  toolNameParts,
   toolPairAttachments,
+  type ToolNameParts,
 } from "./toolPresentation";
 import { itemKey, primaryEvent, type LeafItem } from "./transcript";
 
@@ -238,7 +245,10 @@ export interface CallView {
   glyph: string;
   // The tool's name, for the glyph's accessible label.
   toolLabel: string;
-  // What the call touched: a path, a command, a pattern; a todo list's progress.
+  // Leads the row of a call whose label does not say which tool ran.
+  name: ToolNameParts | null;
+  // What the call touched: a path, a command, a pattern, its arguments; a todo list's
+  // progress. Empty where the name says it all.
   label: string;
   todos: TodoEntry[] | null;
   // Set for file tools so the directory can be muted; relative to the working directory when inside it.
@@ -251,6 +261,13 @@ export interface CallView {
   status: "pending" | "done" | "failed";
   durationMs: number | null;
   output: string | null;
+  // A subagent call: the kind of agent it started, and as prose what it was asked and
+  // what it reported.
+  agentType: string | null;
+  prompt: string | null;
+  result: string | null;
+  // `result` or `output` is the start of a longer report.
+  cut: boolean;
   diff: EventDiffPreview | null;
   attachments: AttachmentSpec[];
 }
@@ -259,6 +276,8 @@ export interface CallView {
 function cleanOutput(text: string): string | null {
   return text.replace(/\r\n?/g, "\n").replace(/^(?:[ \t]*\n)+/, "").trimEnd() || null;
 }
+
+const textOf = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
 
 // Under half a second the two timestamps say when the events were recorded, not how long the call ran.
 const MIN_DURATION_MS = 500;
@@ -295,6 +314,33 @@ function argumentLines(tool: string | null, input: Record<string, unknown> | nul
   }
 }
 
+const NAMED_CATEGORIES: ReadonlySet<Category> = new Set(["other", "monitor", "followup"]);
+
+interface Reply {
+  output: string | null;
+  result: string | null;
+}
+
+// What a call's result shows: a subagent's report as prose, another tool's output as it is.
+function replyOf(call: EventRecord | null, result: EventRecord, tool: string | null, prompted: boolean): Reply {
+  const category = categoryOf(tool);
+  if (tool === "Bash" || result.metadata?.is_error === true) {
+    return { output: cleanOutput(commandOutputForEvent(result)), result: null };
+  }
+  if (isCollabEvent(result)) {
+    // Closing a subagent repeats the report the wait gave.
+    return { output: null, result: tool === "closeAgent" ? null : collabReportForEvent(result) };
+  }
+  const text = cleanOutput(commandOutputForEvent(result));
+  // Only a call that carried a prompt answers with a report.
+  if (category === "agent") return { output: null, result: prompted ? text : null };
+  if (category !== "other") return { output: null, result: null };
+  const returned = contentItemsForEvent(result) ?? text;
+  // Some results only repeat what the call said.
+  const repeats = returned === call?.text.trim() || returned === tool;
+  return { output: repeats ? null : returned, result: null };
+}
+
 export function pendingCallOf(items: readonly LeafItem[]): LeafItem | undefined {
   return items.findLast((child) => (child.kind === "pair" ? !child.pair.result : child.event.kind === "tool_call"));
 }
@@ -309,8 +355,10 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
   const badge = toolBadgeFor(tool);
   const diff = childDiffPreview(child);
   const input = toolInputForEvent(event);
+  const args = callArgumentsForEvent(event);
+  const category = categoryOf(tool);
   const command = tool === "Bash" ? commandForEvent(event) : null;
-  const subject = (command?.replace(/\r\n?/g, "\n").trim() || null) ?? argumentLines(tool, input, cwd);
+  const subject = (command?.replace(/\r\n?/g, "\n").trim() || null) ?? argumentLines(tool, args, cwd);
   // A call whose arguments read as lines keeps them all; a path alone stands for a file tool.
   const filePath =
     subject !== null ? null : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
@@ -324,21 +372,44 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
       : "Tasks"
     : (shownPath ?? relativizeInText(preview, cwd));
   const stats = diff && isFileEditToolName(tool) ? diff : null;
-  const failed = result?.metadata?.is_error === true;
+
+  const description = category === "agent" ? textOf(args?.description) : null;
+  // A result alone, such as a spawned subagent's notice, is labelled by its text.
+  const named =
+    tool !== null && !todo && (NAMED_CATEGORIES.has(category) || (category === "agent" && call !== null && !description));
+  // With nothing but its name to show, a named row's preview says the name again.
+  const bare = args !== null || isCollabEvent(event) || preview === "No output" || preview === tool;
+  const inputPrompt = category === "agent" ? textOf(input?.prompt) : null;
+
+  // A deferred result only acknowledges the launch; the report is the call's outcome.
+  const deferred = result?.metadata?.result_deferred === true;
+  const report = deferred && child.kind === "pair" ? (child.pair.report ?? null) : null;
+  const note = report ? parseTaskNotification(report) : null;
+  const reply = result && !deferred ? replyOf(call, result, tool, inputPrompt !== null) : null;
+  const reported = note?.resultPreview ? cleanOutput(note.resultPreview) : null;
+  const prose = category === "agent" || isCollabEvent(event);
+  const answered = result !== null && (!deferred || note !== null);
+  const failed = deferred ? Boolean(note?.status && note.status !== "completed") : result?.metadata?.is_error === true;
+
   return {
     key: itemKey(child),
     glyph: badge.glyph,
     toolLabel: badge.label,
-    label: subject ?? label,
+    name: named ? toolNameParts(tool) : null,
+    label: subject ?? (named && bare ? "" : label),
     todos,
     path: shownPath ? splitPath(shownPath) : null,
-    title: filePath ?? preview,
+    title: named ? tool : (filePath ?? preview),
     mono: filePath !== null || subject !== null,
     additions: stats ? stats.totalAdditions : null,
     deletions: stats ? stats.totalDeletions : null,
-    status: !result ? "pending" : failed ? "failed" : "done",
-    durationMs: durationBetween(call, result),
-    output: result && (tool === "Bash" || failed) ? cleanOutput(commandOutputForEvent(result)) : null,
+    status: !answered ? "pending" : failed ? "failed" : "done",
+    durationMs: durationBetween(call, deferred ? report : result),
+    output: deferred ? (prose ? null : reported) : (reply?.output ?? null),
+    agentType: category === "agent" ? (textOf(input?.subagent_type) ?? textOf(input?.agent)) : null,
+    prompt: inputPrompt ?? collabPromptForEvent(event),
+    result: deferred ? (prose ? reported : null) : (reply?.result ?? null),
+    cut: reported !== null && note?.resultTruncated === true,
     diff,
     attachments: child.kind === "pair" ? toolPairAttachments(child.pair) : attachmentSpecsFor(child.event),
   };

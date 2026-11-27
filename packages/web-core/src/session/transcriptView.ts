@@ -1,7 +1,8 @@
+import { parseTaskNotification } from "../events";
 import type { EventRecord } from "../types";
 import { isImportantEvent } from "./importance";
 import { collapseRepeats } from "./repeats";
-import { buildTranscriptItems, collapseSupersededPlanEvents } from "./transcript";
+import { buildTranscriptItems, collapseSupersededPlanEvents, type LeafItem, type TranscriptItem } from "./transcript";
 import { groupTurns, type TranscriptTurn } from "./turns";
 
 // Summary shows the important events and folds tool runs; Full shows every event
@@ -18,6 +19,24 @@ export interface TranscriptView {
 // A reasoning step whose text is not shared leaves only a marker note.
 const isReasoningMarker = (event: EventRecord) => event.kind === "system_note" && event.metadata.item_type === "reasoning";
 
+// Gives each call whose result was deferred the latest notification about it, whatever
+// the density shows of the notification itself.
+function withReports(items: TranscriptItem[], events: EventRecord[]): TranscriptItem[] {
+  const reports = new Map<string, EventRecord>();
+  for (const event of events) {
+    const callId = parseTaskNotification(event)?.toolUseId;
+    if (callId) reports.set(callId, event);
+  }
+  const attach = (item: LeafItem): LeafItem => {
+    if (item.kind !== "pair" || item.pair.result?.metadata.result_deferred !== true) return item;
+    const report = reports.get(item.pair.itemId);
+    return report ? { ...item, pair: { ...item.pair, report } } : item;
+  };
+  return items.map((item) =>
+    item.kind === "pair" || item.kind === "single" ? attach(item) : { ...item, items: item.items.map(attach) },
+  );
+}
+
 // The plan waiting for approval is shown above the composer, so the transcript
 // leaves out the event at `dockedPlanSequence`.
 export function deriveTranscript(
@@ -30,7 +49,7 @@ export function deriveTranscript(
   );
   const visible = density === "full" ? display : display.filter(isImportantEvent);
   return {
-    turns: groupTurns(collapseRepeats(buildTranscriptItems(visible))),
+    turns: groupTurns(collapseRepeats(withReports(buildTranscriptItems(visible), events))),
     hiddenCount: display.length - visible.length,
   };
 }

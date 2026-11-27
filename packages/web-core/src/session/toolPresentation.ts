@@ -56,6 +56,17 @@ function prettyPluginName(toolName: string): string {
   return stripped.replace(/__/g, "·").replace(/:/g, "·");
 }
 
+export interface ToolNameParts {
+  server: string | null;
+  tool: string;
+}
+
+// An MCP or plugin tool's server and tool, from `mcp__server__tool` or `server:tool`.
+export function toolNameParts(name: string): ToolNameParts {
+  const parts = /^mcp__(.+?)__(.+)$/.exec(name) ?? /^([^:]+):(.+)$/.exec(name);
+  return parts ? { server: parts[1], tool: parts[2] } : { server: null, tool: name };
+}
+
 export function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
   if (!toolName) {
     return { glyph: "→", variant: "default", label: "tool" };
@@ -99,6 +110,35 @@ export function toolInputForEvent(event: EventRecord): Record<string, unknown> |
 function startedItem(event: EventRecord): Record<string, unknown> | null {
   const meta = event.metadata as Record<string, unknown> | undefined;
   return asRecord(asRecord(meta?.item)?.item) ?? asRecord(asRecord(meta?.payload)?.item);
+}
+
+// A call's arguments: its input, or the item's for the MCP and plugin tools Codex runs.
+export function callArgumentsForEvent(event: EventRecord): Record<string, unknown> | null {
+  return toolInputForEvent(event) ?? asRecord(startedItem(event)?.arguments);
+}
+
+// A call by which Codex's agent drives a subagent.
+export const isCollabEvent = (event: EventRecord): boolean => event.metadata?.item_type === "collabAgentToolCall";
+
+const filledText = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
+
+// What such a call told the subagent.
+export function collabPromptForEvent(event: EventRecord): string | null {
+  return isCollabEvent(event) ? filledText(startedItem(event)?.prompt) : null;
+}
+
+// What the subagents it covers reported.
+export function collabReportForEvent(event: EventRecord): string | null {
+  const states = isCollabEvent(event) ? asRecord(startedItem(event)?.agentsStates) : null;
+  const messages = Object.values(states ?? {}).flatMap((state) => filledText(asRecord(state)?.message) ?? []);
+  return messages.join("\n\n") || null;
+}
+
+// The text a Codex plugin tool returned, which its result event's own text leaves out.
+export function contentItemsForEvent(event: EventRecord): string | null {
+  const items = startedItem(event)?.contentItems;
+  if (!Array.isArray(items)) return null;
+  return items.flatMap((item) => filledText(asRecord(item)?.text) ?? []).join("\n") || null;
 }
 
 // `/bin/bash -lc "npm run lint"` reads as `npm run lint`.

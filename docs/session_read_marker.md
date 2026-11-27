@@ -2,8 +2,8 @@
 
 Every session record carries `read_at`: activity at or before that instant has
 been seen. A session is **unread** while `last_event_at > read_at`. Clients use
-the marker to show activity the human has not looked at yet (the Done state on
-the v2 sessions home).
+the marker to show activity the human has not looked at yet (unread type in the
+v2 session lists).
 
 ```
 unread = read_at != null && last_event_at > read_at
@@ -39,12 +39,12 @@ The notes a lifecycle step records are not activity. Starting a session (launch,
 import, fork, side-question fork, tmux attach) marks it read once the step
 completes. Restoring or restarting one (backend startup, reattach, a launch-settings
 switch, a mode, model or effort change) leaves it as it was, so a backend
-restart does not turn restored sessions into Done.
+restart does not turn restored sessions unread.
 
-## Done
+## Unread
 
-The v2 sessions home shows **Done** for a session that is idle, is not waiting
-on a question or approval, and is unread. Any event recorded outside a
-lifecycle step moves `last_event_at`, system notes included, so Done means the
-session has activity the human has not seen. The rule is one comparison with no
-per-agent knowledge of what counts as a turn.
+The v2 session lists show an unread session with a semibold bright title and a
+bright time; a read row is regular, and an exited row stays dimmed. Any event
+recorded outside a lifecycle step moves `last_event_at`, system notes included,
+so unread means the session has activity the human has not seen. The rule is one
+comparison with no per-agent knowledge of what counts as a turn.

@@ -76,8 +76,9 @@ async def _git_meta_for(session: SessionRecord, folder: str) -> GitMeta:
     meta = await resolve_git_meta(folder)
     if (common := await git_common_dir(folder)) is None:
         return meta
-    # A repository keeps the name it had. The folder being left can be gone or in
-    # another repository, so the creation folder is compared too.
+    # A repository keeps the name it had; a new one is named after its main
+    # checkout, not a worktree. The folder being left can be gone or in another
+    # repository, so the creation folder is compared too.
     if common == await git_common_dir(session.cwd):
         meta.repo_name = session.repo_name
     elif common == await git_common_dir(launch := launch_folder(session)):

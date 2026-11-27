@@ -281,8 +281,13 @@ async def test_tailer_follows_the_last_relocation_after_the_records(
         {"type": "relocated", "relocatedCwd": "/repo/first"},
         _assistant("one"),
         {"type": "relocated", "relocatedCwd": "/repo/last"},
-        # The records' cwd follows a shell ``cd``, which moves nothing.
-        {**_assistant("two"), "cwd": "/repo/app/sub"},
+        _assistant("two"),
+    )
+    await tailer._drain()
+    # The records' cwd follows a shell ``cd``, which moves nothing.
+    _append(
+        transcript_path("/repo/app", TID, str(tmp_path)),
+        {**_assistant("three"), "cwd": "/repo/app/sub"},
     )
     await tailer._drain()
 
@@ -599,9 +604,7 @@ def test_fork_copy_refuses_an_ambiguous_transcript(tmp_path: Path) -> None:
     config_dir = tmp_path / "cfg"
     for folder in ("/one", "/two"):
         _append(transcript_path(folder, TID, str(config_dir)), _assistant(folder))
-    session = _session(
-        "/elsewhere",
-    )
+    session = _session("/elsewhere")
 
     assert not ClaudeTtyPlugin()._copy_transcript(
         session, TID, NEW_TID, str(config_dir), None
@@ -612,9 +615,7 @@ async def test_fork_copies_a_moved_transcript_beside_it(tmp_path: Path) -> None:
     config_dir = tmp_path / "cfg"
     moved = transcript_path("/elsewhere", TID, str(config_dir))
     _append(moved, _assistant("one"))
-    session = _session(
-        str(tmp_path),
-    )
+    session = _session(str(tmp_path))
 
     assert ClaudeTtyPlugin()._copy_transcript(
         session, TID, NEW_TID, str(config_dir), None

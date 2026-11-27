@@ -483,6 +483,9 @@ async def test_launch_resumed_pane_pins_controls_from_new_session() -> None:
     state = runtime.storage.update_session.call_args.kwargs["transport_state"]
     assert state["launch_args"] == built_args
     assert state["pre_plan_mode"] == "auto"
+    # The folder exists, so nothing is said about it.
+    notes = [call.args[1] for call in runtime._record_system_event.call_args_list]
+    assert not any("no longer exists" in note for note in notes)
 
 
 # ── apply_effort return contract ──────────────────────────────────────────────

@@ -7,6 +7,8 @@ Thin subclass of ``TmuxTransport`` that overrides:
 - ``interrupt`` sends ``Esc`` instead of ``Ctrl-C``; ``Esc`` is the Claude TUI's
   cancel key and cancels the running generation without terminating the process.
 - ``send_input`` moves the session onto the conversation a ``/clear`` starts.
+- ``send_input`` and ``resume`` send keystrokes only with the composer drawn,
+  since anything that replaces it, recognized or not, would take them.
 - ``has_pending_approval`` / ``respond_to_approval`` — drive tool-permission
   dialogs by sending the appropriate digit + Enter keystroke to the TUI pane.
   Pending state is owned by the plugin singleton (``ClaudeTtyPlugin``).
@@ -18,11 +20,13 @@ from typing import TYPE_CHECKING
 
 from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.approvals import is_approve_decision
+from waypoint.backends.base import PaneSubmitConfirming
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.transport import TmuxTransport
 from waypoint.schemas import SessionRecord, SessionStatus
+from waypoint.transports import InputBlockedError
 
 if TYPE_CHECKING:
     from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
@@ -43,6 +47,9 @@ _INTERRUPTIBLE_DIALOGS = frozenset(
 # dialog left the pane and re-send it a bounded number of times.
 _INTERRUPT_ESC_RETRIES = 4
 _INTERRUPT_ESC_POLL_SECONDS = 0.3
+# Polls for the composer before a send gives up, long enough for a slow remote
+# resume to draw it.
+_COMPOSER_WAIT_ATTEMPTS = 100
 _CLEAR_COMMAND = "/clear"
 _CLEAR_UNFOLLOWED_NOTE = (
     "Couldn't follow the new conversation started by /clear; "
@@ -80,6 +87,33 @@ class ClaudeTtyTransport(TmuxTransport):
             _CLEAR_UNFOLLOWED_NOTE,
             status=None if session.status in _TURN_IN_FLIGHT else SessionStatus.IDLE,
         )
+
+    async def _await_pane_ready(
+        self,
+        target: str,
+        confirmer: PaneSubmitConfirming,
+        *,
+        attempts: int = _COMPOSER_WAIT_ATTEMPTS,
+        poll_seconds: float = 0.3,
+    ) -> None:
+        # Unlike the base, never give up and send anyway: whatever replaced the
+        # composer would take the keystrokes, recognized as a dialog or not.
+        for _ in range(attempts):
+            snapshot = await self.adapter.capture_snapshot(target)
+            if confirmer.pane_shows_blocking_dialog(snapshot):
+                raise InputBlockedError()
+            if pane_dialog.composer_drawn(snapshot):
+                return
+            await asyncio.sleep(poll_seconds)
+        raise InputBlockedError()
+
+    async def _require_composer(self, target: str) -> None:
+        if not pane_dialog.composer_drawn(await self.adapter.capture_snapshot(target)):
+            raise InputBlockedError()
+
+    async def resume(self, session: SessionRecord) -> bool:
+        await self._require_composer(self._target(session))
+        return await super().resume(session)
 
     async def interrupt(self, session: SessionRecord) -> None:
         # Esc cancels whatever the pane is showing — including an open
@@ -129,7 +163,7 @@ class ClaudeTtyTransport(TmuxTransport):
                 log.warning("cannot read the pane of %s: %s", session.id, exc)
             return False
         self._unreadable.discard(session.id)
-        return pane_dialog.composer_ready(snapshot)
+        return pane_dialog.composer_drawn(snapshot)
 
     async def respond_to_approval(
         self,
@@ -172,15 +206,17 @@ class ClaudeTtyTransport(TmuxTransport):
         self, session: SessionRecord, pending: PendingTtyApproval, approve: bool
     ) -> None:
         target = self._target(session)
+        # The digit alone confirms. An Enter after it would approve whatever
+        # dialog the TUI had drawn by then, its "Yes" highlighted.
         if approve:
             await self.adapter.send_input(
-                target, str(pending.approve_number), submit=True
+                target, str(pending.approve_number), submit=False
             )
         elif pending.decline_number is not None:
             # Decline: send the No-labelled option's digit, never position 2
             # ("allow all this session"). Fall back to Esc if no explicit No.
             await self.adapter.send_input(
-                target, str(pending.decline_number), submit=True
+                target, str(pending.decline_number), submit=False
             )
         else:
             await self.adapter.send_bytes(target, b"\x1b")

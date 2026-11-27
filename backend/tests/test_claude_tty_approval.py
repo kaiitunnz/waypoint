@@ -1006,8 +1006,9 @@ async def test_ready_for_input_reads_the_composer(
 ) -> None:
     transport, tmux = _make_transport(ClaudeTtyPlugin())
     session = _make_session()
+    composer = "\n".join(["─" * 40, "❯ ", "─" * 40])
     tmux.capture_snapshot = AsyncMock(
-        side_effect=["booting", "❯ ", TmuxError("no pane"), TmuxError("no pane")]
+        side_effect=["booting", composer, TmuxError("no pane"), TmuxError("no pane")]
     )
 
     results = [await transport.ready_for_input(session) for _ in range(4)]
@@ -1025,7 +1026,7 @@ async def test_respond_approve_sends_digit_1_enter() -> None:
     result = await transport.respond_to_approval(session, "approve", None)
 
     assert result is True
-    tmux.send_input.assert_called_once_with("%0", "1", submit=True)
+    tmux.send_input.assert_called_once_with("%0", "1", submit=False)
     assert "sess-1" not in plugin._pending_approvals
 
 
@@ -1040,7 +1041,7 @@ async def test_respond_accept_sends_approve_digit_not_decline() -> None:
     result = await transport.respond_to_approval(session, "accept", None)
 
     assert result is True
-    tmux.send_input.assert_called_once_with("%0", "1", submit=True)
+    tmux.send_input.assert_called_once_with("%0", "1", submit=False)
     assert "sess-1" not in plugin._pending_approvals
 
 
@@ -1053,7 +1054,7 @@ async def test_respond_decline_sends_no_digit_enter() -> None:
     result = await transport.respond_to_approval(session, "decline", None)
 
     assert result is True
-    tmux.send_input.assert_called_once_with("%0", "3", submit=True)
+    tmux.send_input.assert_called_once_with("%0", "3", submit=False)
     assert "sess-1" not in plugin._pending_approvals
 
 
@@ -1096,7 +1097,7 @@ async def test_respond_approve_plan_presses_manual_digit_and_exits_plan_mode() -
     result = await transport.respond_to_approval(session, "approve", None)
 
     assert result is True
-    runtime.tmux.send_input.assert_called_once_with("%0", "2", submit=True)
+    runtime.tmux.send_input.assert_called_once_with("%0", "2", submit=False)
     runtime.update_session_fields.assert_awaited_once_with(
         "sess-1", permission_mode="default"
     )
@@ -1116,7 +1117,7 @@ async def test_respond_approve_plan_restores_auto_mode() -> None:
     result = await transport.respond_to_approval(session, "approve", None)
 
     assert result is True
-    runtime.tmux.send_input.assert_called_once_with("%0", "1", submit=True)
+    runtime.tmux.send_input.assert_called_once_with("%0", "1", submit=False)
     runtime.update_session_fields.assert_awaited_once_with(
         "sess-1", permission_mode="auto"
     )

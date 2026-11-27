@@ -52,6 +52,10 @@ describe("turnStart", () => {
     expect(startOf(events)).toBe(at(4));
   });
 
+  it("keeps the start of a turn that worked before a message steered it", () => {
+    expect(startOf([note(1, "idle"), note(2, "running"), call(3, "a"), message(4)])).toBe(at(2));
+  });
+
   it.each(["starting", "waiting_input"])("counts %s activity", (status) => {
     expect(startOf([note(1, "idle"), event(2, "approval_request", status), reply(3)])).toBe(at(2));
   });

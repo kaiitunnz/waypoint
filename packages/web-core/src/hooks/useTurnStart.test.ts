@@ -39,6 +39,15 @@ describe("searchTurnStart", () => {
     expect(seen.onAuthFailure).not.toHaveBeenCalled();
   });
 
+  it("reports neither a last page nor an auth failure that lands after the drop", async () => {
+    const seen = outcome();
+    searchTurnStart(held, 5, async () => ({ events: [message], has_more: false }), seen)();
+    searchTurnStart(held, 5, () => Promise.reject(new AuthError()), seen)();
+    await settle();
+    expect(seen.onFound).not.toHaveBeenCalled();
+    expect(seen.onAuthFailure).not.toHaveBeenCalled();
+  });
+
   it("passes on an auth failure and swallows any other", async () => {
     const seen = outcome();
     searchTurnStart(held, 5, () => Promise.reject(new ApiError("boom", 500)), seen);

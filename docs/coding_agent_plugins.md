@@ -589,6 +589,9 @@ reads only the backend-neutral parts:
   `pending_approval_ids`. A `plan_approval` envelope carries the whole plan in
   `body`; one with an empty body is listed as a plain approval.
 - `metadata["tool_name"]` / `metadata["tool_input"]`, both optional.
+- `metadata["summary"]`, optional: the call's [summary](#call-summaries).
+- `metadata["request"]`, optional: what the request carries beside its tool
+  input, as a Codex approval does with its `command` and the access it asks for.
 - `metadata["call_verified"]`, `metadata["tool_use_id"]` and
   `metadata["subagent"]`, set by a transport that reads dialogs off a screen
   ([call verification](pending_asks.md#call-verification)). Its replies must
@@ -956,6 +959,28 @@ for any subagent call: its report preview is the call's result, with the
 report's attachments where the preview is cut, and a `status` other than
 `completed` marks the call failed. An `agent` report reads as prose, any other
 as output. A deferred call with no notification shows as running.
+
+### Call summaries
+
+`metadata["summary"]` is the agent's short description of a tool call, on the
+call's `tool_call` event and on the `approval_request` that asks about it
+(`SUMMARY_METADATA_KEY` and `set_summary` in
+[`backends/events.py`](../backend/src/waypoint/backends/events.py)). It is one
+line of prose, with backticks around its machine strings. A call the agent did
+not describe has no key. A normalizer takes it only from what the agent says
+about the call, never from a tool's title, path or command:
+
+| Agent | Source |
+| --- | --- |
+| Claude (both transports and history import) | The `description` input of `Bash`, `Agent`, `Task`, `Monitor` and `PowerShell`. On any other tool that key is an argument of the call. |
+| OpenCode | The `description` input of the `subagent` tool. `shell` has none. |
+| Codex | The command's parsed `commandActions`, such as ``Read `SKILL.md` ``, when every action reads, searches or lists. An approval's `reason` is not one. |
+
+A transport that reads dialogs off a screen sets it only for a call it matched.
+Clients show it as untrusted agent text. It titles an approval only where
+[`session/wholeRequest`](../packages/web-core/src/session/wholeRequest.ts) finds
+the call verified, the summary free of hidden or direction-changing characters,
+and the request asking for no more than the call.
 
 ### Capture seams
 

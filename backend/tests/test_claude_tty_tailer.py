@@ -286,6 +286,10 @@ async def test_start_at_end_skips_history_then_emits_append() -> None:
             TranscriptRead(
                 observed=True, data=history, size=len(history), identity=(1, 1)
             ),
+            # the tail, scanned for an earlier move
+            TranscriptRead(
+                observed=True, data=history, size=len(history), identity=(1, 1)
+            ),
             TranscriptRead(
                 observed=True,
                 data=append,

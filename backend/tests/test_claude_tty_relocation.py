@@ -191,6 +191,29 @@ async def test_tailer_restarted_after_a_move_reads_only_new_records(
     assert _outputs(runtime) == ["new"]
 
 
+async def test_tailer_started_at_the_end_follows_an_earlier_move(
+    tmp_path: Path,
+) -> None:
+    # A restart or reattach after a move the previous tailer never read.
+    away = transcript_path("/repo/app/.claude/worktrees/w", TID, str(tmp_path))
+    _append(
+        away,
+        {"type": "relocated", "relocatedCwd": "/repo/app"},
+        _assistant("old"),
+        {"type": "relocated", "relocatedCwd": "/repo/app/.claude/worktrees/w"},
+        {**_assistant("later"), "cwd": "/repo/app/sub"},
+    )
+    runtime = _runtime(_session("/repo/app"))
+    tailer = _tailer(runtime, tmp_path, start_at_end=True)
+
+    await tailer._drain()
+
+    tailer._plugin.follow_relocation.assert_awaited_once_with(  # type: ignore[attr-defined]
+        runtime, "s1", "/repo/app/.claude/worktrees/w"
+    )
+    assert _outputs(runtime) == []
+
+
 async def test_tailer_follows_the_last_relocation_after_the_records(
     tmp_path: Path,
 ) -> None:

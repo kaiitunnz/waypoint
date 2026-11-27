@@ -77,6 +77,18 @@ _EXPIRED_NOTE = "Pending approval expired"
 # Protective cap on the unparsed trailing buffer: a JSONL record that never
 # completes past this size is dropped rather than grown without bound.
 _MAX_PARTIAL_BYTES = 8 * 1024 * 1024
+# The CLI re-appends ``relocated`` about every 32 KB it writes, so the tail of an
+# existing transcript holds the latest one.
+_RELOCATION_TAIL_BYTES = 256 * 1024
+
+
+def _relocated_folder(record: dict[str, Any]) -> str | None:
+    """The folder Claude says it moved the transcript to. The other records'
+    ``cwd`` also follows a shell ``cd``, which moves nothing."""
+    folder = record.get("relocatedCwd")
+    if record.get("type") != "relocated" or not isinstance(folder, str):
+        return None
+    return folder or None
 
 
 class TranscriptTailer:
@@ -178,6 +190,7 @@ class TranscriptTailer:
             if self._start_at_end:
                 self._fetch_offset = read.size or 0
                 self._partial = b""
+                await self._follow_earlier_move(self._fetch_offset)
                 return
 
         # Truncation (size shrank below the cursor) or replacement (file identity
@@ -238,12 +251,7 @@ class TranscriptTailer:
                     extra={"session_id": self._session_id, "line": raw_line[:200]},
                 )
                 continue
-            if record.get("type") == "relocated":
-                # Claude's note of the folder it moved this transcript to. The
-                # records' own ``cwd`` also follows a shell ``cd``.
-                folder = record.get("relocatedCwd")
-                if isinstance(folder, str) and folder:
-                    relocated = folder
+            relocated = _relocated_folder(record) or relocated
             if record.get("type") == "assistant":
                 # Before the normalizer, so the divider precedes the new-model turn.
                 await self._maybe_observe_model(record)
@@ -268,6 +276,25 @@ class TranscriptTailer:
             await self._plugin.follow_relocation(
                 self._runtime, self._session_id, relocated
             )
+
+    async def _follow_earlier_move(self, end: int) -> None:
+        """Follow a move made before this tailer started, as after a restart or
+        reattach."""
+        read = await asyncio.to_thread(
+            self._source.read_from, max(0, end - _RELOCATION_TAIL_BYTES), force=True
+        )
+        for line in reversed(read.data.split(b"\n")):
+            if b'"relocated"' not in line:
+                continue
+            try:
+                record: dict[str, Any] = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if folder := _relocated_folder(record):
+                await self._plugin.follow_relocation(
+                    self._runtime, self._session_id, folder
+                )
+                return
 
     async def _maybe_observe_model(self, record: dict[str, Any]) -> None:
         """Record a real assistant reply's model, adopt it into the selection

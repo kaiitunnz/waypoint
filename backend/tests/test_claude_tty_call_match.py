@@ -170,8 +170,7 @@ def test_fetch_matches_the_url_however_the_dialog_prints_it(
     url: str, printed: str
 ) -> None:
     dialog = _dialog(
-        "approval_fetch_subagent.txt",
-        ("url: https://example.com/", f"url: {printed}"),
+        "approval_fetch_subagent.txt", ("url: https://example.com/", f"url: {printed}")
     )
     tool_input = {
         "url": url,
@@ -208,11 +207,7 @@ def test_fetch_rejects_another_url(url: str) -> None:
     ],
 )
 def test_edit_dialog_rejects_another_change(old: str, new: str) -> None:
-    tool_input = {
-        "file_path": f"{CWD}/notes.txt",
-        "old_string": old,
-        "new_string": new,
-    }
+    tool_input = {"file_path": f"{CWD}/notes.txt", "old_string": old, "new_string": new}
     assert match_call(_dialog("approval_edit.txt"), [_call("Edit", tool_input)]) is None
 
 
@@ -347,10 +342,7 @@ def test_a_bulleted_line_of_a_new_cell_is_not_a_removed_line(
 ) -> None:
     dialog = _dialog(
         "approval_notebook_insert.txt",
-        (
-            "  1 - list the buckets\n  2 - done",
-            "  1 a\n  2 - delete the bucket\n  3 c",
-        ),
+        ("  1 - list the buckets\n  2 - done", "  1 a\n  2 - delete the bucket\n  3 c"),
     )
     call = _notebook(**{**BULLETS, "new_source": f"a\n{middle}\nc"})
     assert (match_call(dialog, [call]) is not None) is matches

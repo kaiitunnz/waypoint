@@ -12,11 +12,7 @@ working folder changes (a worktree, ``/cd``). When the file at the last known
 path is missing or replaced, a source finds it again by thread id. A moved file
 keeps its identity, so the tailer's offset stays valid.
 
-A source also reads the files around the transcript, off the tail loop's cursor:
-the transcript's tail, its subagents' transcripts, and any file by path (the
-plan file). A read that fails gives ``None``; an empty list means nothing there.
-
-Every read returns a :class:`TranscriptRead`. ``observed=False`` means "nothing
+Every ``read_from`` returns a :class:`TranscriptRead`. ``observed=False`` means "nothing
 actionable this tick" — a pre-first-turn missing file, an unresolved remote
 glob, a throttled poll, or a transport error backing off; the tailer does
 nothing (no offset advance, no discontinuity, no status change). ``observed=
@@ -24,6 +20,10 @@ True`` (even with empty ``data``) means the tailer has a valid file observation
 and may parse and run its truncation checks. A source **never raises**: a
 background tailer loop treats a raised exception as fatal, so all remote failure
 modes degrade to an unobserved read that retries with backoff.
+
+A source also reads the files around the transcript, off the tail loop's cursor:
+the transcript's tail, its subagents' transcripts, and any file by path (the
+plan file). A read that fails gives ``None``; an empty list means nothing there.
 """
 
 import json
@@ -232,28 +232,30 @@ class TranscriptByteSource(Protocol):
 
 
 class TranscriptTreeReader(Protocol):
+    """Reads of the files around a session's transcript. None of them raise."""
+
     def read_transcript_tail(self, limit: int) -> Tail | None:
-        """The last ``limit`` bytes of the session's transcript. Never raises."""
+        """The last ``limit`` bytes of the session's transcript."""
         ...
 
     def list_subagents(self) -> list[SubagentTranscript] | None:
         """The transcript's subagent transcripts, or None when they can't all
-        be listed. Never raises."""
+        be listed."""
         ...
 
     def read_tail(self, path: str, limit: int) -> Tail | None:
         """The last ``limit`` bytes of a file on the session's host, or None
-        when it can't be read. Never raises."""
+        when it can't be read."""
         ...
 
     def file_size(self, path: str) -> int | None:
         """The size of a file on the session's host, or None when it can't be
-        asked. Never raises."""
+        asked."""
         ...
 
     def home_dir(self) -> str | None:
         """The home directory on the session's host, or None when it can't be
-        asked. Never raises."""
+        asked."""
         ...
 
 

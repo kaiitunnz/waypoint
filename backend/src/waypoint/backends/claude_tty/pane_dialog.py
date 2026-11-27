@@ -6,7 +6,7 @@ approvals (or drive `/model` / `/effort`) must read them off the rendered pane.
 These functions are deliberately side-effect free: they take the text of a
 `tmux capture-pane` snapshot and return structured descriptions, so the brittle,
 layout-coupled parsing is unit-testable against captured fixtures without a live
-TUI. Keystroke delivery and pane polling live in the (not-yet-wired) caller.
+TUI.
 
 A permission dialog is a ruled block: a solid rule, a heading naming the tool
 (with `` · from the <name> agent`` for a subagent's), then the call between dashed
@@ -137,12 +137,21 @@ def _strip_ansi(text: str) -> str:
     return strip_ansi(text)
 
 
+def _plain_lines(screen: str) -> list[str]:
+    return _strip_ansi(screen).replace("\xa0", " ").splitlines()
+
+
 def _compact(text: str) -> str:
     return strip_whitespace(text)
 
 
 def _contains(screen: str, screen_compact: str, marker: str) -> bool:
     return marker in screen or _compact(marker) in screen_compact
+
+
+def joined(lines: list[str]) -> str:
+    """Text a dialog broke across lines without a space."""
+    return "".join(line.strip() for line in lines)
 
 
 def unboxed(line: str) -> str:
@@ -173,14 +182,15 @@ class ApprovalDialog:
     heading: str | None
     # The subagent the heading says is asking.
     agent: str | None
-    # Lines above the first dashed rule, between the dashed rules (None without
-    # them), and between the last one and the question.
+    # Lines above the first dashed rule.
     header: list[str]
+    # Lines between the dashed rules; None without them.
     body: list[str] | None
+    # Lines between the last dashed rule and the question.
     extra: list[str]
     # False when the dialog does not show enough to say which call it asks
     # about: its top is cut off, or its heading cannot be read.
-    matchable: bool = True
+    matchable: bool
 
     @property
     def described_header(self) -> list[str]:
@@ -364,7 +374,7 @@ def composer_ready(screen: str) -> bool:
     or restart) shows the boot screen with no prompt for a beat; the tmux
     transport waits on this before pasting so the keystrokes are not dropped.
     """
-    lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
+    lines = _plain_lines(screen)
     return any(_COMPOSER_PROMPT in line for line in lines)
 
 
@@ -381,7 +391,7 @@ def composer_is_empty(screen: str) -> bool:
     nothing has been submitted — return False so the bounded confirm loop keeps
     retrying rather than declaring a phantom success.
     """
-    lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
+    lines = _plain_lines(screen)
     prompt_lines = [line for line in lines if _COMPOSER_PROMPT in line]
     if not prompt_lines:
         return False
@@ -431,8 +441,7 @@ def _question_index(lines: list[str]) -> int | None:
     # The live dialog is the lowest block, so a question quoted higher in the
     # transcript must not be parsed in place of the real prompt.
     return next(
-        (i for i in range(len(lines) - 1, -1, -1) if _QUESTION_RE.match(lines[i])),
-        None,
+        (i for i in range(len(lines) - 1, -1, -1) if _QUESTION_RE.match(lines[i])), None
     )
 
 
@@ -466,7 +475,7 @@ def composer_drawn(screen: str) -> bool:
     A dialog or panel replaces it, so no composer means keystrokes would land in
     something else. Borders may carry a label, and shell mode prompts with ``!``.
     """
-    lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
+    lines = _plain_lines(screen)
     for top in range(len(lines) - 3, -1, -1):
         if not (
             _is_border(lines[top])
@@ -536,7 +545,7 @@ def composer_holds_input(screen: str) -> bool:
     Read from the framed composer only: a panel or shell-mode prompt replaces
     it, and earlier prompts echo above with the same ``❯`` glyph.
     """
-    lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
+    lines = _plain_lines(screen)
     frame = _live_composer_frame(lines)
     if frame is None or shows_blocking_dialog(screen):
         return False
@@ -636,8 +645,7 @@ def _split_dialog(
 ) -> tuple[str | None, str | None, bool, list[str], list[str] | None, list[str]]:
     """Split the lines above a dialog's question into its parts."""
     top = next(
-        (i for i in range(len(lines) - 1, -1, -1) if _is_column0_rule(lines[i])),
-        None,
+        (i for i in range(len(lines) - 1, -1, -1) if _is_column0_rule(lines[i])), None
     )
     heading: str | None = None
     agent: str | None = None
@@ -702,7 +710,7 @@ def parse_plan_dialog(screen: str) -> PlanDialog | None:
 
     # Below the sub-hint, where a long path wraps onto the following lines.
     below = lines[footer_idx + 1 if footer_idx < len(lines) else question_idx + 1 :]
-    paths = _PLAN_PATH_RE.findall("".join(line.strip() for line in below))
+    paths = _PLAN_PATH_RE.findall(joined(below))
 
     return PlanDialog(options=options, plan_path=paths[-1] if paths else None)
 
@@ -726,32 +734,31 @@ _FILE_QUESTION_RE = re.compile(
 _NOTEBOOK_CHANGE_RE = re.compile(r"^\s*(Replace|Insert|Delete) ")
 
 
-def _extract_bash_command(lines: list[str]) -> str | None:
-    rules = [
-        i for i, line in enumerate(lines) if _DASHED_RULE_RE.fullmatch(line.strip())
-    ]
-    if rules:
-        if len(rules) < 2:
-            return None
+def _extract_bash_command(header: list[str], body: list[str] | None) -> str | None:
+    if body is not None:
         # Hints and descriptions sit outside the ruled command body.
-        command = "\n".join(unboxed(line) for line in lines[rules[0] + 1 : rules[1]])
-        return dedent(command).strip() or None
-    if _compact("\n".join(lines)).startswith(
+        end = next(
+            (
+                i
+                for i, line in enumerate(body)
+                if _DASHED_RULE_RE.fullmatch(line.strip())
+            ),
+            len(body),
+        )
+        return dedent("\n".join(unboxed(line) for line in body[:end])).strip() or None
+    # Without a ruled body the command is the first line, unless a lone rule or
+    # the tip shows the dialog was read short.
+    if any(_DASHED_RULE_RE.fullmatch(line.strip()) for line in header):
+        return None
+    if _compact("\n".join(header)).startswith(
         _compact("Tip: auto mode handles these prompts for you")
     ):
         return None
-    return next((line.strip() for line in lines if line.strip()), None)
-
-
-def _joined(lines: list[str]) -> str:
-    return "".join(line.strip() for line in lines)
+    return next((line.strip() for line in header if line.strip()), None)
 
 
 def _read_tool_target(
-    heading: str | None,
-    header: list[str],
-    body: list[str] | None,
-    question: str,
+    heading: str | None, header: list[str], body: list[str] | None, question: str
 ) -> tuple[str | None, str | None]:
     """The tool and target the dialog reads as. Nothing above the dialog is
     consulted: a call echoed there may be another one."""
@@ -762,11 +769,7 @@ def _read_tool_target(
             return "Skill", skill.group(1)
         match _HEADING_TOOLS.get(heading):
             case "Bash":
-                ruled = ["╌" * _MIN_RULE_WIDTH]
-                lines = header
-                if body is not None:
-                    lines = [*header, *ruled, *body, *ruled]
-                return "Bash", _extract_bash_command(lines)
+                return "Bash", _extract_bash_command(header, body)
             case "Write" | "Edit" as tool:
                 return tool, next((s.strip() for s in header if s.strip()), None)
             case "NotebookEdit":
@@ -778,14 +781,14 @@ def _read_tool_target(
                     ),
                     len(header),
                 )
-                return "NotebookEdit", _joined(header[:path])
+                return "NotebookEdit", joined(header[:path])
             case "Read":
-                call = _joined(body or [])
+                call = joined(body or [])
                 return "Read", call.removeprefix("Read(").removesuffix(")")
             case "WebFetch":
                 return "WebFetch", text
         if heading == TOOL_USE_HEADING:
-            first = _joined(body or [])
+            first = joined(body or [])
             if first.startswith("Web Search("):
                 return "WebSearch", text
             if first.startswith("Agent("):

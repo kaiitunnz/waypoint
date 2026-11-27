@@ -19,10 +19,7 @@ from waypoint.backends.claude_tty.byte_source import (
     RemoteClaudeTranscriptByteSource,
     Tail,
 )
-from waypoint.backends.claude_tty.pending_calls import (
-    TranscriptCalls,
-    pending_calls,
-)
+from waypoint.backends.claude_tty.pending_calls import TranscriptCalls, pending_calls
 from waypoint.backends.transcript_fs_remote import RemoteMissing, RemoteRead
 
 
@@ -68,9 +65,7 @@ def test_history_copies_and_partial_lines_are_ignored() -> None:
     assert ids(cut, truncated=True) == ["a"]
 
 
-def test_candidates_come_from_the_transcript_the_dialog_names(
-    tmp_path: Path,
-) -> None:
+def test_candidates_come_from_the_transcript_the_dialog_names(tmp_path: Path) -> None:
     source, main = session_tree(tmp_path)
     main.write_bytes(jsonl(use("main-1", "Bash", {"command": "sleep 60"})))
     write_subagent(

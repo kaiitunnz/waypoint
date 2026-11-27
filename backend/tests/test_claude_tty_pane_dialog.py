@@ -834,11 +834,7 @@ _COMMAND_WRAPPED = (
     ],
 )
 def test_parse_dialog_heading_and_pane_reading(
-    fixture: str,
-    heading: str,
-    agent: str | None,
-    tool: str | None,
-    target: str | None,
+    fixture: str, heading: str, agent: str | None, tool: str | None, target: str | None
 ) -> None:
     screen = _load(fixture)
     assert classify(screen) is PaneScreen.APPROVAL
@@ -866,10 +862,7 @@ def test_pane_reading_never_names_a_call_above_the_dialog() -> None:
 
 @pytest.mark.parametrize(
     "quoted",
-    [
-        "ready to execute. Would you like to proceed?",
-        "Enter to select · Esc to cancel",
-    ],
+    ["ready to execute. Would you like to proceed?", "Enter to select · Esc to cancel"],
 )
 def test_a_fetch_prompt_quoting_another_dialog_stays_a_fetch(quoted: str) -> None:
     screen = _load("approval_fetch_subagent.txt").replace(" title text.", f" {quoted}")

@@ -36,17 +36,19 @@ class PendingCall:
 
 
 class CallSource(Protocol):
+    """Where a dialog's call is looked up. Neither method raises."""
+
     def candidates(self, agent: str | None) -> list[PendingCall]:
         """Pending calls a dialog may be asking about, oldest first.
 
         ``agent`` is the subagent a dialog names, None for the main thread.
         Empty when they can't all be read, since a partial set could make one
-        call look like the only one. Never raises.
+        call look like the only one.
         """
         ...
 
     def is_resolved(self, call: PendingCall) -> bool:
-        """Whether ``call`` has a result by now. Never raises."""
+        """Whether ``call`` has a result by now."""
         ...
 
 
@@ -72,9 +74,7 @@ def _message(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def pending_calls(
-    tail: Tail,
-    transcript: str | None = None,
-    carried: PendingCall | None = None,
+    tail: Tail, transcript: str | None = None, carried: PendingCall | None = None
 ) -> list[PendingCall]:
     """Unresolved tool calls of the transcript's latest assistant message.
 
@@ -97,12 +97,13 @@ def pending_calls(
                 message_id = current
                 calls = {}
             for block in blocks:
-                if block.get("type") != "tool_use" or not block.get("id"):
+                tool_use_id = str(block.get("id") or "")
+                if block.get("type") != "tool_use" or not tool_use_id:
                     continue
                 tool_input = block.get("input")
                 cwd = record.get("cwd")
-                calls[str(block["id"])] = PendingCall(
-                    tool_use_id=str(block["id"]),
+                calls[tool_use_id] = PendingCall(
+                    tool_use_id=tool_use_id,
                     name=str(block.get("name") or ""),
                     input=tool_input if isinstance(tool_input, dict) else {},
                     cwd=cwd if isinstance(cwd, str) else None,

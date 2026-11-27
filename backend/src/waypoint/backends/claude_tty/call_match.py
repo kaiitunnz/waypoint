@@ -16,6 +16,7 @@ from waypoint.backends.claude_tty.pane_dialog import (
     SKILL_HEADING_RE,
     TOOL_USE_HEADING,
     ApprovalDialog,
+    joined,
     unboxed,
 )
 from waypoint.backends.claude_tty.pending_calls import PendingCall
@@ -53,16 +54,16 @@ def _kept_in_url(encoded: str) -> str:
     return "".join(char for char in map(chr, range(0x21, 0x7F)) if char not in encoded)
 
 
-# What each part of a printed URL leaves unencoded.
+# What a printed URL's path leaves unencoded.
 _PATH_SAFE = _kept_in_url('"#<>?`{}')
+# What its query leaves unencoded.
 _QUERY_SAFE = _kept_in_url("\"#<>'")
+# What its fragment leaves unencoded.
 _FRAGMENT_SAFE = _kept_in_url('"<>`')
 
 
 def match_call(
-    dialog: ApprovalDialog,
-    calls: Sequence[PendingCall],
-    excluded: Container[str] = (),
+    dialog: ApprovalDialog, calls: Sequence[PendingCall], excluded: Container[str] = ()
 ) -> PendingCall | None:
     """The call ``dialog`` asks about, or None when that is not certain.
 
@@ -183,7 +184,7 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
     elif call.name == "NotebookEdit":
         shown = dialog.target or ""
     else:
-        shown = "".join(line.strip() for line in dialog.header)
+        shown = joined(dialog.header)
     if not _path_matches(shown, path, call):
         return False
     body = dialog.body or []
@@ -274,11 +275,12 @@ def _diff_entries(body: list[str]) -> list[tuple[int, str, list[str]]]:
     for line in body:
         if line.strip() in _HUNK_BREAKS or line.strip().startswith(_NO_NEWLINE):
             continue
-        match = _DIFF_LINE_RE.match(line.rstrip())
+        text = line.rstrip()
+        match = _DIFF_LINE_RE.match(text)
         if match and column in (0, match.start(2)):
             column = match.start(2)
             entries.append((int(match.group(1)), match.group(2), [match.group(3)]))
-        elif (numbered := _NUMBERED_RE.match(line.rstrip())) and column in (
+        elif (numbered := _NUMBERED_RE.match(text)) and column in (
             0,
             numbered.end(1) + 1,
         ):

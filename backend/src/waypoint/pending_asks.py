@@ -111,7 +111,7 @@ def _text(value: Any) -> str | None:
 
 
 def _call_identity(event: EventRecord) -> dict[str, Any]:
-    """What a request that may not name its call says about it."""
+    """The call verification fields, empty when the event does not set them."""
     verified = event.metadata.get("call_verified")
     if not isinstance(verified, bool):
         return {}

@@ -41,6 +41,24 @@
   font-weight: 600;
 }
 
+/* A label keeps the width of its semibold form, so the control holds its size
+   when the selection moves. */
+.text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.text::after {
+  content: attr(data-text);
+  height: 0;
+  overflow: hidden;
+  font-weight: 600;
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
 .count {
   color: var(--faint);
   font-weight: 400;

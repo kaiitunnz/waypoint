@@ -69,7 +69,13 @@ export function SegmentedControl<T extends string>({
           className={cx(styles.segment, segment.value === value && styles.on)}
           onClick={() => onChange(segment.value)}
         >
-          {segment.label}
+          {typeof segment.label === "string" ? (
+            <span className={styles.text} data-text={segment.label}>
+              {segment.label}
+            </span>
+          ) : (
+            segment.label
+          )}
           {segment.count !== undefined ? <span className={styles.count}>{segment.count}</span> : null}
         </button>
       ))}

@@ -854,7 +854,7 @@ followed.
 Claude moves a session's transcript into another project folder when the
 session changes its working folder (`EnterWorktree`, `ExitWorktree`, `/cd`) and
 writes a `relocated` record. The transport finds the moved transcript by thread
-id, and the session's `cwd` and `branch` follow the recorded folder, so
+id, and the session's `cwd`, repo name and branch follow the recorded folder, so
 relaunches, forks and side questions start there, or in the folder the session
 was created in if that one has been removed. An SSH session's branch is cleared
 on a move. The assistant session keeps its workspace folder.

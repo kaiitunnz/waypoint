@@ -2,6 +2,7 @@ import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswe
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
 import { toggleSelection } from "./session/askQuestion";
 import { approvalPrompt } from "./session/approvals";
+import { subagentKind } from "./session/toolPresentation";
 import { shownPlan, shownRequest, titlingSummary, type AskSession, type ShownRequest } from "./session/wholeRequest";
 import type {
   EventRecord,
@@ -168,9 +169,7 @@ export function askSubagentLine(ask: PendingAsk, cwd: string): string | null {
   if (ask.kind !== "approval" || askSummaryTitle(ask, cwd) === null) return null;
   const tool = normalizeToolName(ask.approval.tool_name);
   if (tool !== "Task" && tool !== "Agent") return null;
-  const input = ask.approval.tool_input;
-  const type = input?.subagent_type ?? input?.agent;
-  return approvalPrompt({ kind: "task", prompt: "", description: "", subagent: typeof type === "string" ? type : "" });
+  return approvalPrompt({ kind: "task", prompt: "", description: "", subagent: subagentKind(ask.approval.tool_input) ?? "" });
 }
 
 // The first lines of a plan with the markdown marks off, for a card.

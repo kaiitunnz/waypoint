@@ -136,12 +136,16 @@ export function delegationForEvent(event: EventRecord): Delegation | null {
   return { prompt: filledText(item?.prompt), report };
 }
 
+// The kind of subagent a call's input names, under either key agents use for it.
+export const subagentKind = (input: Record<string, unknown> | null | undefined): string | null =>
+  filledText(input?.subagent_type) ?? filledText(input?.agent);
+
 // What a subagent call asks: its prompt, and the kind of subagent where the agent names one.
 export function subagentRequestForEvent(event: EventRecord): { prompt: string | null; agentType: string | null } {
   const input = toolInputForEvent(event);
   return {
     prompt: delegationForEvent(event)?.prompt ?? filledText(input?.prompt),
-    agentType: filledText(input?.subagent_type) ?? filledText(input?.agent),
+    agentType: subagentKind(input),
   };
 }
 

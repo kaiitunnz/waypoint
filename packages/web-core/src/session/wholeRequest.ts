@@ -7,6 +7,7 @@ import type { EventRecord } from "../types";
 import { resolveFromCwd } from "../workspacePaths";
 import { approvalBody, approvalPrompt, WORKFLOW_TOOLS, type ApprovalBody } from "./approvals";
 import { isBareRename } from "./diffPreview";
+import { subagentKind } from "./toolPresentation";
 
 // What reading a session's pending request needs to know of the session.
 export interface AskSession {
@@ -150,7 +151,8 @@ export function approvalCard(event: EventRecord, cwd: string): ApprovalCardView 
   const summary = titlingSummary(event.metadata, cwd);
   if (summary !== null) {
     const body = requestedBody(event, true);
-    return { title: summary, marked: true, subagent: body.kind === "task" ? body.subagent || null : null, body };
+    const subagent = body.kind === "task" ? subagentKind(asRecord(event.metadata?.tool_input)) : null;
+    return { title: summary, marked: true, subagent, body };
   }
   const body = approvalBody(event);
   return { title: approvalPrompt(undescribed(body)) ?? "Approve this request", marked: false, subagent: null, body };

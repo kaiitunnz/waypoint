@@ -343,6 +343,14 @@ describe("the summary that titles an approval", () => {
     expect(approvalCard(approve("Monitor", watch), "/w").body).toMatchObject({ kind: "raw" });
   });
 
+  it("reads the subagent's kind from whichever key names it", () => {
+    const task = { prompt: "List the files", description: "List the text files", agent: "general" };
+    expect(approvalCard(described("task", task, "List the text files"), "/w")).toMatchObject({
+      title: "List the text files",
+      subagent: "general",
+    });
+  });
+
   it("names the subagent's kind beside a summary title", () => {
     const task = { prompt: "List the callers", description: "Find callers", subagent_type: "Explore" };
     expect(approvalCard(described("Agent", task, "Find callers"), "/w")).toMatchObject({ title: "Find callers", subagent: "Explore" });

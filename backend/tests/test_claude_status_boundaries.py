@@ -7,6 +7,7 @@ The fixtures in ``fixtures/claude_status/`` are trimmed records from Claude Code
 import asyncio
 import json
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -234,14 +235,16 @@ def send_past(expected: turn_boundaries.ExpectedInterrupt) -> None:
         pass
 
 
-def test_a_failed_send_keeps_an_interrupt_armed_during_it() -> None:
+@pytest.mark.parametrize("fails", [True, False])
+def test_an_interrupt_armed_during_a_send_stays_expected(fails: bool) -> None:
     expected = turn_boundaries.ExpectedInterrupt()
     expected.arm()
     send_past(expected)
-    with pytest.raises(InputBlockedError), expected.superseding():
+    with suppress(InputBlockedError), expected.superseding():
         # A Stop while the send waits.
         expected.arm()
-        raise InputBlockedError()
+        if fails:
+            raise InputBlockedError()
 
     assert expected.unanswered
 
@@ -562,26 +565,32 @@ async def test_a_send_after_stop_keeps_the_new_turn_running(
     assert note_texts(tty.runtime) == ["Sent interrupt"]
 
 
-async def test_a_failed_send_leaves_the_stopped_turn_interrupted(
-    tty: _Tty, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("sends", [1, 2], ids=["one-send", "overlapping-sends"])
+async def test_failed_sends_leave_the_stopped_turn_interrupted(
+    tty: _Tty, monkeypatch: pytest.MonkeyPatch, sends: int
 ) -> None:
     rows = records("tty_interrupt_tool")
     await tty.read(rows[:3])
     await tty.runtime.interrupt("s1")
-    # A dialog opens while the send waits for the composer.
-    monkeypatch.setattr(
-        tty.transport, "_await_pane_ready", AsyncMock(side_effect=InputBlockedError())
+
+    async def dialog_opens(*_: Any) -> None:
+        # Long enough for a second send to start behind the first.
+        await asyncio.sleep(0.05)
+        raise InputBlockedError()
+
+    monkeypatch.setattr(tty.transport, "_await_pane_ready", dialog_opens)
+    request = SessionInputRequest(text="next")
+    outcomes = await asyncio.gather(
+        *(tty.runtime.handle_input("s1", request) for _ in range(sends)),
+        return_exceptions=True,
     )
-    with pytest.raises(InputBlockedError):
-        await tty.runtime.handle_input("s1", SessionInputRequest(text="next"))
+    assert [type(outcome) for outcome in outcomes] == [InputBlockedError] * sends
     # The tailer reads the cut turn's records only now.
     await tty.read(rows[3:])
 
     assert status_of(tty.runtime) is SessionStatus.INTERRUPTED
-    assert note_texts(tty.runtime) == [
-        "Sent interrupt",
-        "Message not delivered: a dialog opened first",
-    ]
+    undelivered = "Message not delivered: a dialog opened first"
+    assert note_texts(tty.runtime) == ["Sent interrupt"] + [undelivered] * sends
 
 
 async def test_a_late_notification_leaves_an_idle_session_idle(tty: _Tty) -> None:

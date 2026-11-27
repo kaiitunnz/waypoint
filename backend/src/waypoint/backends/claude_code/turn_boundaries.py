@@ -6,7 +6,7 @@ Shared by the structured adapter, the claude_tty normalizer and history import.
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any
 
@@ -124,7 +124,14 @@ class ExpectedInterrupt:
     """Waypoint's own interrupt, until its marker or aborted result answers it."""
 
     _deadline: float = 0.0
-    _superseded: bool = False
+    # Whether a send has gone through since the interrupt was armed, and the
+    # sends under way since then.
+    _sent_past: bool = False
+    _sending: set[object] = field(default_factory=set)
+
+    @property
+    def _superseded(self) -> bool:
+        return self._sent_past or bool(self._sending)
 
     @property
     def pending(self) -> bool:
@@ -137,22 +144,22 @@ class ExpectedInterrupt:
 
     def arm(self) -> None:
         self._deadline = time.monotonic() + _EXPECTED_INTERRUPT_SECONDS
-        self._superseded = False
+        # A send already under way says nothing about this interrupt.
+        self._sent_past = False
+        self._sending.clear()
 
     @contextmanager
     def superseding(self) -> Iterator[None]:
-        """Wraps Waypoint sending input past the interrupt. A send that raises
-        takes the supersede back, as its input started no turn.
+        """Wraps Waypoint sending input past the interrupt. The send supersedes
+        it while under way and, unless it raises, from then on.
         """
-        deadline, superseded = self._deadline, self._superseded
-        self._superseded = True
+        send = object()
+        self._sending.add(send)
         try:
             yield
-        except Exception:
-            # An interrupt armed during the send keeps its own state.
-            if self._deadline == deadline:
-                self._superseded = superseded
-            raise
+            self._sent_past |= send in self._sending
+        finally:
+            self._sending.discard(send)
 
     def forget_superseded(self) -> None:
         """A prompt was typed. A superseded interrupt's marker precedes it, so one

@@ -27,7 +27,6 @@ from waypoint.backends.claude_code.normalize import (
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
     TaskListTracker,
-    deferred_result_metadata,
     extract_created_task_id,
     format_approval_text,
     format_compact_boundary,
@@ -1943,7 +1942,6 @@ class ClaudeCliAdapter:
                 "is_error": is_error,
                 "payload": block,
                 "status": status,
-                **deferred_result_metadata(event.get("tool_use_result")),
             }
             if tool_use_id:
                 preview_metadata = state.file_edit_preview_metadata.pop(

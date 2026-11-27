@@ -284,12 +284,6 @@ async def test_dispatch_user_tool_result_emits_event() -> None:
     assert emitted[0][1] == EventKind.TOOL_RESULT
     assert emitted[0][2] == "ok"
     assert emitted[0][3]["tool_use_id"] == "toolu_xyz"
-    assert "result_deferred" not in emitted[0][3]
-
-    await adapter._dispatch(
-        state, {**event, "tool_use_result": {"status": "async_launched"}}
-    )
-    assert emitted[1][3]["result_deferred"] is True
 
 
 @pytest.mark.asyncio

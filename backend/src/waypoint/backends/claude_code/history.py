@@ -10,9 +10,9 @@ events carry metadata shaped like the live normalizers' output
 tool_call/tool_result cards.
 
 Each event carries the status the live claude_tty path records for it (a user
-message imports as ``running``, as the input boundary records it), and an
-interrupt marker becomes the same note. The other turn-end notes the live path
-records (turn complete, compaction, command output) are not imported.
+message imports as ``running``), and an interrupt marker becomes the same note.
+The live path's other turn-end notes (turn complete, compaction, command output)
+are not imported.
 
 Unlike the live normalizers (``adapter.py``'s ``_handle_user`` and
 ``claude_tty/normalize.py``'s ``_process_user``), which intentionally skip
@@ -38,15 +38,11 @@ from waypoint.backends.claude_code.models import (
     claude_context_window_for_model,
 )
 from waypoint.backends.claude_code.normalize import (
-    TurnAbortTracker,
     build_peer_message_metadata,
     build_task_notification_metadata,
     claim_peer_message,
     classify_injected_user_turn,
     deferred_result_metadata,
-    delivery_status,
-    is_interrupt_marker,
-    is_user_rejection,
     iter_content_blocks,
     parse_peer_message,
     parse_task_notification,
@@ -59,6 +55,13 @@ from waypoint.backends.claude_code.normalize import (
 from waypoint.backends.claude_code.threads import (
     parse_iso_timestamp,
     read_local_claude_transcript,
+)
+from waypoint.backends.claude_code.turn_boundaries import (
+    TurnAbortTracker,
+    delivery_status,
+    is_interrupt_marker,
+    is_user_rejection,
+    turn_end_metadata,
 )
 from waypoint.questions import ASK_USER_QUESTION_TOOL
 from waypoint.schemas import EventKind, EventRecord, SessionStatus, TokenUsageRecord
@@ -304,7 +307,6 @@ def _convert_user(
 ) -> list[EventRecord]:
     message: dict[str, Any] = record.get("message") or {}
     content = message.get("content")
-    state.abort.observe_user_record(record, content)
     injected = classify_injected_user_turn(record, content)
     if injected == "task_notification" and isinstance(content, str):
         return _task_notification_event(
@@ -397,7 +399,7 @@ def _interrupt_events(
             ts,
             EventKind.SYSTEM_NOTE,
             note,
-            {"method": "result", "stop_reason": stop_reason},
+            turn_end_metadata(stop_reason),
             SessionStatus.IDLE,
         )
     ]
@@ -411,7 +413,7 @@ def _event(
     metadata: dict[str, Any],
     status: SessionStatus | None = SessionStatus.RUNNING,
 ) -> EventRecord:
-    # A notification's metadata carries a status of its own.
+    # Notification builders preset ``status``; only the argument counts.
     metadata = {key: value for key, value in metadata.items() if key != "status"}
     if status is not None:
         metadata["status"] = status

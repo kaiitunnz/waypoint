@@ -77,7 +77,7 @@ class ClaudeTtyTransport(TmuxTransport):
     ) -> None:
         # Before the send, which waits long enough for the tailer to read an
         # earlier interrupt's marker.
-        self._plugin.supersede_interrupt(session.id)
+        self._supersede_interrupt(session)
         await super().send_input(session, text, attachments)
         if text.split(maxsplit=1)[:1] != [_CLEAR_COMMAND]:
             return
@@ -147,7 +147,7 @@ class ClaudeTtyTransport(TmuxTransport):
             ) or not pane_dialog.composer_drawn(snapshot):
                 raise InputBlockedError()
             if submits := pane_dialog.composer_holds_input(snapshot):
-                self._plugin.supersede_interrupt(session.id)
+                self._supersede_interrupt(session)
             await self.adapter.resume(target)
         return submits
 
@@ -163,12 +163,17 @@ class ClaudeTtyTransport(TmuxTransport):
         )
         target = self._target(session)
         # Before the Esc, so the tailer cannot read its marker first. The marker
-        # adds no note: the runtime notes a Stop, and a restart records none.
-        self._plugin.expect_interrupt(session.id)
+        # adds no note, for a restart too.
+        if expected := self._plugin.expected_interrupt(session.id):
+            expected.arm()
         await self.adapter.send_bytes(target, b"\x1b")
         # Retried here: the tailer takes several polls to raise a dialog that
         # outlived its card.
         await self._ensure_dialog_dismissed(target)
+
+    def _supersede_interrupt(self, session: SessionRecord) -> None:
+        if expected := self._plugin.expected_interrupt(session.id):
+            expected.supersede()
 
     async def _ensure_dialog_dismissed(self, target: str) -> None:
         for _ in range(_INTERRUPT_ESC_RETRIES):

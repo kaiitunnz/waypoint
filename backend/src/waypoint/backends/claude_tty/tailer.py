@@ -22,6 +22,7 @@ from waypoint.backends.claude_code.models import (
     observe_claude_model,
 )
 from waypoint.backends.claude_code.session_folder import follow_relocation
+from waypoint.backends.claude_code.turn_boundaries import ExpectedInterrupt
 from waypoint.backends.claude_tty.byte_source import READ_LIMIT, TailedTranscript
 from waypoint.backends.claude_tty.dialog_watch import DialogWatcher, pane_target
 from waypoint.backends.claude_tty.normalize import (
@@ -114,11 +115,9 @@ class TranscriptTailer:
         tailer to adopt."""
         self._stop_requested = True
 
-    def expect_interrupt(self) -> None:
-        self._normalizer.expect_interrupt()
-
-    def supersede_interrupt(self) -> None:
-        self._normalizer.supersede_interrupt()
+    @property
+    def expected_interrupt(self) -> ExpectedInterrupt:
+        return self._normalizer.expected_interrupt
 
     async def _drain(self, *, force: bool = False) -> None:
         # The priming tick fetches size + identity only (no body).

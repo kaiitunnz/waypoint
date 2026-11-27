@@ -24,11 +24,8 @@ from waypoint.backends.claude_code.models import (
     normalize_claude_model_id,
 )
 from waypoint.backends.claude_code.normalize import (
-    INTERRUPTED_NOTE,
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
-    ExpectedInterrupt,
-    InterruptOrigin,
     TaskListTracker,
     extract_created_task_id,
     format_approval_text,
@@ -36,11 +33,9 @@ from waypoint.backends.claude_code.normalize import (
     format_rate_limit,
     format_status_event,
     format_task_snapshot,
-    is_interrupted_result,
     iter_content_blocks,
     sent_user_file_paths,
     stringify_tool_result,
-    turn_activity_status,
 )
 
 # Re-exported from the backend plugin so legacy imports keep resolving;
@@ -49,6 +44,14 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_ACCEPT_EDITS_TOOLS,
     CLAUDE_AUTO_APPROVE_MODES,
     CLAUDE_PERMISSION_MODES,
+)
+from waypoint.backends.claude_code.turn_boundaries import (
+    INTERRUPTED_NOTE,
+    ExpectedInterrupt,
+    InterruptOrigin,
+    is_interrupted_result,
+    turn_activity_status,
+    turn_end_metadata,
 )
 from waypoint.backends.diff_preview import (
     ChangeType,
@@ -1721,8 +1724,7 @@ class ClaudeCliAdapter:
     async def _withdraw_approval(
         self, state: ClaudeSessionState, request_id: Any
     ) -> None:
-        """Forget the approval whose request the binary withdrew, and post the
-        note that closes its card."""
+        """Drop the approval the binary withdrew and close its card."""
         tool_use_id = next(
             (
                 key
@@ -1806,14 +1808,8 @@ class ClaudeCliAdapter:
             return
         if subtype == "status":
             # /compact and similar CLI commands surface their lifecycle here.
-            if text := format_status_event(event):
-                # The turn of a queued /compact starts here: ``init`` follows
-                # only once the compaction is done.
-                status = (
-                    SessionStatus.RUNNING
-                    if event.get("status") == "compacting"
-                    else None
-                )
+            text, status = format_status_event(event)
+            if text:
                 await self._emit_event(
                     state.session_id,
                     EventKind.SYSTEM_NOTE,
@@ -2121,16 +2117,11 @@ class ClaudeCliAdapter:
                     state.session_id,
                     EventKind.SYSTEM_NOTE,
                     INTERRUPTED_NOTE,
-                    {
-                        "method": "result",
-                        "stop_reason": "interrupted",
-                        "status": SessionStatus.IDLE,
-                    },
+                    turn_end_metadata("interrupted"),
                     SessionStatus.IDLE,
                 )
             case InterruptOrigin.WAYPOINT if self._on_session_update is not None:
-                # The runtime notes a Stop. Re-assert its status over any of
-                # the turn's records read since.
+                # Re-assert the Stop over any of the turn's records read since.
                 await self._on_session_update(
                     state.session_id, {"status": SessionStatus.INTERRUPTED}, True
                 )

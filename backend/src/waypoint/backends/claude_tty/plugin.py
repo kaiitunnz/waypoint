@@ -86,6 +86,7 @@ from waypoint.backends.claude_code.threads import (
     list_local_claude_threads,
     local_claude_thread_artifacts,
 )
+from waypoint.backends.claude_code.turn_boundaries import ExpectedInterrupt
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty.byte_source import (
     ClaudeTranscriptSource,
@@ -704,15 +705,9 @@ class ClaudeTtyPlugin:
         )
         return True
 
-    def expect_interrupt(self, session_id: str) -> None:
-        """Waypoint is about to interrupt the session's turn."""
-        if run := self._tailers.get(session_id):
-            run.tailer.expect_interrupt()
-
-    def supersede_interrupt(self, session_id: str) -> None:
-        """Waypoint is about to submit input, past any interrupt it made."""
-        if run := self._tailers.get(session_id):
-            run.tailer.supersede_interrupt()
+    def expected_interrupt(self, session_id: str) -> ExpectedInterrupt | None:
+        run = self._tailers.get(session_id)
+        return run.tailer.expected_interrupt if run else None
 
     async def reply_refusal(
         self, session_id: str, pending: PendingTtyApproval

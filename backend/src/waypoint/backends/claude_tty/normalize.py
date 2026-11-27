@@ -18,9 +18,11 @@ Key invariants (all verified against real transcripts in Phase 0):
   ``tool_use``) and contains no ``tool_use`` blocks.
 - An interrupted, cut-off or declined turn writes no terminal assistant record;
   its interrupt marker emits the result instead. A marker answering Waypoint's
-  own interrupt emits none: whoever asked for that one notes it.
+  own interrupt emits none, as the runtime notes a Stop.
 - A queued prompt's ``user`` record sets RUNNING; a ``queueTranscriptOnly``
-  record was never sent to the model and sets no status.
+  record was never sent to the model and sets no status. Neither does a record
+  delivered while Waypoint's interrupt is unanswered, since an interrupt that
+  cuts a turn before any output writes no marker to end it.
 - ``thinking`` blocks stay hidden, except the TUI's progress updates (thinking
   with a narration signature), which surface as ``agent_output``.
 - ``<task-notification>`` injected user turns (subagent/Agent completion,
@@ -469,7 +471,7 @@ class TranscriptNormalizer:
         A delivered (``user``) record starts a turn, so it sets RUNNING even when
         the card was already shown.
         """
-        status = delivery_status(record) if operation == "user" else None
+        status = self._turn_start_status(record) if operation == "user" else None
         parsed = parse_peer_message(content)
         if parsed is None:
             return _status_only(status)
@@ -517,7 +519,7 @@ class TranscriptNormalizer:
         injected = classify_injected_user_turn(record, content)
         if injected == "task_notification" and isinstance(content, str):
             return self._task_notification_events(
-                content, record.get("uuid"), delivery_status(record)
+                content, record.get("uuid"), self._turn_start_status(record)
             )
         if injected == "peer_message" and isinstance(content, str):
             return self._peer_message_events(content, "user", record)
@@ -608,7 +610,13 @@ class TranscriptNormalizer:
         self._interrupt.forget_superseded()
         # Only a queued prompt reports a turn start: an Esc before any output
         # records nothing, which would strand a typed one as running.
-        return _status_only(SessionStatus.RUNNING if is_queued_prompt(record) else None)
+        return _status_only(
+            self._turn_start_status(record) if is_queued_prompt(record) else None
+        )
+
+    def _turn_start_status(self, record: dict[str, Any]) -> SessionStatus | None:
+        """The status a delivered ``user`` record sets as it starts a turn."""
+        return None if self._interrupt.unanswered else delivery_status(record)
 
     def _interrupt_marker_events(self) -> list[NormalizedEvent]:
         resolution = self._abort.resolve()

@@ -275,7 +275,7 @@ class TurnAbortTracker:
 class InterruptOrigin(Enum):
     """Whose interrupt a marker or aborted result answers."""
 
-    # Waypoint's own, noted by whoever asked for it.
+    # Waypoint's own: its trace adds no note, as the runtime notes a Stop.
     WAYPOINT = auto()
     # Waypoint's own, with input sent since: it may not move the new turn.
     SUPERSEDED = auto()
@@ -293,6 +293,11 @@ class ExpectedInterrupt:
     @property
     def pending(self) -> bool:
         return time.monotonic() < self._deadline
+
+    @property
+    def unanswered(self) -> bool:
+        """Pending, with no input sent since."""
+        return self.pending and not self._superseded
 
     def arm(self) -> None:
         self._deadline = time.monotonic() + _EXPECTED_INTERRUPT_SECONDS

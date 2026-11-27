@@ -6,26 +6,13 @@ from fastapi import HTTPException, status
 
 from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.claude_code.adapter import ClaudeCliError
-from waypoint.backends.claude_code.normalize import INTERRUPTED_NOTE
-from waypoint.schemas import SessionRecord, SessionStatus
+from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
     from waypoint.backends.claude_code.adapter import ClaudeCliAdapter
     from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
     from waypoint.runtime import SessionRuntime
-
-
-async def note_restart_interrupt(runtime: SessionRuntime, session_id: str) -> None:
-    """Record that a restart cut a turn short: the interrupt's own marker or
-    result adds no note.
-    """
-    await runtime._record_system_event(
-        session_id,
-        INTERRUPTED_NOTE,
-        status=SessionStatus.INTERRUPTED,
-        metadata={"method": "result", "stop_reason": "interrupted"},
-    )
 
 
 class ClaudeTransport(TransportAdapter):
@@ -66,9 +53,6 @@ class ClaudeTransport(TransportAdapter):
     async def interrupt(self, session: SessionRecord) -> None:
         adapter = self._require_adapter()
         await adapter.interrupt(session.id)
-
-    async def flush_before_restart(self, session: SessionRecord) -> None:
-        await note_restart_interrupt(self._runtime, session.id)
 
     async def terminate(self, session: SessionRecord) -> None:
         adapter = self._require_adapter()

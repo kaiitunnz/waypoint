@@ -2129,8 +2129,8 @@ class ClaudeCliAdapter:
                     SessionStatus.IDLE,
                 )
             case InterruptOrigin.WAYPOINT if self._on_session_update is not None:
-                # Whoever asked notes it. Re-assert the status over any of the
-                # turn's records read since.
+                # The runtime notes a Stop. Re-assert its status over any of
+                # the turn's records read since.
                 await self._on_session_update(
                     state.session_id, {"status": SessionStatus.INTERRUPTED}, True
                 )

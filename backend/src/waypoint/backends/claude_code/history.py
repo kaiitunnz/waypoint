@@ -9,9 +9,10 @@ events carry metadata shaped like the live normalizers' output
 ``TranscriptCard`` on the frontend key off of to render and pair
 tool_call/tool_result cards.
 
-Each event carries the status its record gives a live claude_tty session, and
-an interrupt marker becomes the same note. The other turn-end notes the live
-path records (turn complete, compaction, command output) are not imported.
+Each event carries the status the live claude_tty path records for it (a user
+message imports as ``running``, as the input boundary records it), and an
+interrupt marker becomes the same note. The other turn-end notes the live path
+records (turn complete, compaction, command output) are not imported.
 
 Unlike the live normalizers (``adapter.py``'s ``_handle_user`` and
 ``claude_tty/normalize.py``'s ``_process_user``), which intentionally skip

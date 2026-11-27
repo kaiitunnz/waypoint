@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from claude_tty_transcripts import FedSource, jsonl, result, use
 from waypoint.backends.claude_code import normalize as claude_normalize
@@ -28,10 +29,13 @@ from waypoint.backends.claude_tty.normalize import NormalizedEvent, TranscriptNo
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
+from waypoint.backends.transcripts import TranscriptUnavailableError
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    AccountProbeResult,
     EventKind,
     EventRecord,
+    LaunchSettingsUpdateRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -316,6 +320,34 @@ def test_a_second_interrupt_clears_the_superseded_state() -> None:
     assert statuses(feed(norm, [marker()])) == [SessionStatus.INTERRUPTED]
 
 
+def test_a_message_queued_behind_a_stopped_turn_starts_the_next_one() -> None:
+    norm = TranscriptNormalizer()
+    rows = records("tty_interrupt_queued")
+    feed(norm, rows[:1])
+    norm.expect_interrupt()
+    events = feed(norm, rows[1:])
+
+    assert [e.status for e in events if e.kind is EventKind.STATUS_UPDATE] == [
+        SessionStatus.INTERRUPTED,
+        SessionStatus.RUNNING,
+    ]
+
+
+@pytest.mark.parametrize(
+    "turn_start",
+    [human_prompt("queued", "queued"), notification(), peer()],
+    ids=["queued", "notification", "peer"],
+)
+def test_a_send_after_stop_lets_the_next_record_start_a_turn(
+    turn_start: dict[str, Any],
+) -> None:
+    norm = TranscriptNormalizer()
+    norm.expect_interrupt()
+    norm.supersede_interrupt()
+
+    assert statuses(feed(norm, [turn_start]))[-1] is SessionStatus.RUNNING
+
+
 def test_input_with_no_interrupt_pending_supersedes_nothing() -> None:
     norm = TranscriptNormalizer()
     norm.supersede_interrupt()
@@ -488,7 +520,16 @@ def test_a_dismissed_question_imports_its_turn_end() -> None:
 
 
 def make_runtime(tmp_path: Path, transport: str) -> SessionRuntime:
-    settings = Settings(data_dir=tmp_path / "data")
+    profile = {
+        "label": "Work",
+        "config_dir": str(tmp_path / "work"),
+        "transcript_policy": "require_existing",
+        "expected_account_key": "claude_code:work",
+    }
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        plugin_configs={"claude_code": {"account_profiles": {"work": profile}}},
+    )
     settings.ensure_dirs()
     runtime = SessionRuntime(settings, Storage(settings.database_path))
     session_dir = settings.sessions_dir / "s1"
@@ -606,27 +647,6 @@ async def test_a_send_after_stop_keeps_the_new_turn_running(
     assert note_texts(tty.runtime) == ["Sent interrupt"]
 
 
-async def test_a_restart_mid_turn_records_one_turn_end(
-    tty: _Tty, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settle = AsyncMock()
-    monkeypatch.setattr(
-        "waypoint.backends.tmux.transport.TmuxTransport.flush_before_restart", settle
-    )
-    rows = records("tty_interrupt_tool")
-    await tty.read(rows[:3])
-    session = tty.runtime.get_session("s1")
-
-    # What the runtime's restart paths call.
-    await tty.transport.interrupt(session)
-    await tty.read(rows[3:])
-    await tty.transport.flush_before_restart(session)
-
-    settle.assert_awaited_once()
-    assert status_of(tty.runtime) is SessionStatus.INTERRUPTED
-    assert note_texts(tty.runtime) == [INTERRUPTED]
-
-
 async def test_a_late_notification_leaves_an_idle_session_idle(tty: _Tty) -> None:
     done = {
         "type": "assistant",
@@ -642,6 +662,68 @@ async def test_a_late_notification_leaves_an_idle_session_idle(tty: _Tty) -> Non
     await tty.read([notification(queueTranscriptOnly=True)])
 
     assert status_of(tty.runtime) is SessionStatus.IDLE
+
+
+# ── a restart that aborts before teardown ────────────────────────────────────
+
+
+async def abort_profile_switch(
+    tty: _Tty,
+    monkeypatch: pytest.MonkeyPatch,
+    read_during_flush: list[dict[str, Any]],
+) -> None:
+    """A profile switch that interrupts the turn and then fails its transcript
+    step, with the tailer reading ``read_during_flush`` in between.
+    """
+
+    async def flush(_transport: Any, _session: SessionRecord) -> None:
+        await tty.read(read_during_flush)
+
+    async def probe(*_args: Any, **_kwargs: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="claude_code:work", account_label="w")
+
+    def unavailable(*_args: Any, **_kwargs: Any) -> None:
+        raise TranscriptUnavailableError("not there")
+
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.transport.TmuxTransport.flush_before_restart", flush
+    )
+    monkeypatch.setattr("waypoint.runtime.probe_account", probe)
+    monkeypatch.setattr("waypoint.runtime.ensure_thread_available", unavailable)
+    monkeypatch.setattr(
+        tty.runtime, "_ensure_profile_config_dir_ready", lambda *_args: None
+    )
+
+    with pytest.raises(HTTPException, match="cannot switch account profile"):
+        await tty.runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(account_profile_id="work", restart=True)
+        )
+
+
+async def test_a_cut_turns_marker_cannot_leave_an_aborted_switch_running(
+    tty: _Tty, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = records("tty_interrupt_tool")
+    await tty.read(rows[:2])
+
+    await abort_profile_switch(tty, monkeypatch, rows[2:])
+
+    assert status_of(tty.runtime) is SessionStatus.INTERRUPTED
+
+
+@pytest.mark.parametrize(
+    "turn_start",
+    [human_prompt("queued", "queued"), notification(), peer()],
+    ids=["queued", "notification", "peer"],
+)
+async def test_a_turn_cut_before_any_output_is_not_left_running(
+    tty: _Tty, monkeypatch: pytest.MonkeyPatch, turn_start: dict[str, Any]
+) -> None:
+    # An interrupt that early writes no marker, so a turn start the tailer reads
+    # only now has nothing after it to end it.
+    await abort_profile_switch(tty, monkeypatch, [turn_start])
+
+    assert status_of(tty.runtime) is SessionStatus.INTERRUPTED
 
 
 # ── structured claude_code ───────────────────────────────────────────────────
@@ -1014,20 +1096,6 @@ async def test_a_withdrawn_question_records_nothing(structured: _Structured) -> 
 
     assert not structured.state.pending
     assert note_texts(structured.runtime) == []
-
-
-async def test_a_restart_mid_turn_records_one_turn_end_on_a_structured_session(
-    structured: _Structured,
-) -> None:
-    session = structured.runtime.get_session("s1")
-
-    # What the runtime's restart paths call.
-    await structured.transport.interrupt(session)
-    await structured.transport.flush_before_restart(session)
-    await structured.read([ABORTED])
-
-    assert status_of(structured.runtime) is SessionStatus.INTERRUPTED
-    assert structured.turn_ends() == [INTERRUPTED]
 
 
 # ── claude_tty transport ─────────────────────────────────────────────────────

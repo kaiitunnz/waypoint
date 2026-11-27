@@ -346,6 +346,16 @@ def test_remote_glob_artifacts_degrades_to_empty_on_transport_failure(
         )
 
 
+def test_remote_probe_dir_tells_unreachable_from_missing(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    assert fs.probe_dir(str(tmp_path)) is True
+    assert fs.probe_dir(str(tmp_path / "gone")) is False
+    fake_remote.force_error("is_dir", "transport failure")
+    assert fs.probe_dir(str(tmp_path)) is None
+
+
 def test_remote_expanduser_resolves_against_remote_home(
     tmp_path: Path, fake_remote: _FakeRemote, monkeypatch: pytest.MonkeyPatch
 ) -> None:

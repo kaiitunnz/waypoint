@@ -181,8 +181,8 @@ class LocalTranscriptByteSource:
         self._identity: tuple[int, int] | None = None  # of the file last read
         # Monotonic time before which a miss does not search again.
         self._next_search_at = 0.0
-        # Wait after the next search that finds nothing doubles this; a search
-        # scans every project folder.
+        # The wait after the last empty search, doubled by the next one. A
+        # search scans every project folder.
         self._search_delay = 0.0
         # Whether the several-matches warning has been logged.
         self._warned_ambiguous = False
@@ -203,16 +203,16 @@ class LocalTranscriptByteSource:
         try:
             with self._path.open("rb") as fh:
                 opened = os.fstat(fh.fileno())
-                if _stat_identity(opened) != _stat_identity(st):
+                if (identity := _stat_identity(opened)) != _stat_identity(st):
                     # Renamed and reused since the stat: locate it again.
                     return TranscriptRead(observed=False)
                 fh.seek(offset)
                 data = fh.read()
         except OSError:
             return TranscriptRead(observed=False)
-        self._identity = _stat_identity(opened)
+        self._identity = identity
         return TranscriptRead(
-            observed=True, data=data, size=opened.st_size, identity=self._identity
+            observed=True, data=data, size=opened.st_size, identity=identity
         )
 
     def _locate(self, force: bool) -> os.stat_result | None:

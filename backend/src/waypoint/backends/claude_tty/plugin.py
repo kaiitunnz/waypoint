@@ -1011,7 +1011,9 @@ class ClaudeTtyPlugin:
         new_thread_id = str(uuid.uuid4())
         folder = await relaunch_folder(runtime, session)
         # Before the transcript copy, which a refused launch would orphan.
-        runtime._require_launch_folder(launch_target, folder)
+        runtime._require_pane_folder(launch_target, folder)
+        # Before the pane starts, which a failed git lookup would leave behind.
+        fields = await folder_fields(session, folder)
         # Claude writes a --fork-session transcript only after the first turn.
         # Copying it under the new thread id lets the resumed pane reopen the
         # full history now, and clone_events seeds the event DB so the fork
@@ -1068,7 +1070,7 @@ class ClaudeTtyPlugin:
             source=SessionSource.MANAGED,
             transport=self.transport_id,
             title=title,
-            **await folder_fields(session, folder),
+            **fields,
             launch_target_id=session.launch_target_id,
             status=SessionStatus.STARTING,
             created_at=now,
@@ -1261,10 +1263,12 @@ class ClaudeTtyPlugin:
             )
 
         launch_target = runtime._find_launch_target(session.launch_target_id)
-        # Past the kill, a launch refused for a missing folder strands the session.
-        runtime._require_launch_folder(
-            launch_target, await relaunch_folder(runtime, session)
-        )
+        if launch_target is None:
+            # Past the kill, a launch refused for a missing folder strands the
+            # session.
+            runtime._require_pane_folder(
+                launch_target, await relaunch_folder(runtime, session)
+            )
         old_tmux_session = state.get("tmux_session")
         if old_tmux_session:
             with suppress(TmuxError):

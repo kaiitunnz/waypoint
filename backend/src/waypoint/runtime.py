@@ -6072,7 +6072,7 @@ class SessionRuntime:
         return path
 
     @staticmethod
-    def _require_launch_folder(
+    def _require_pane_folder(
         launch_target: SshLaunchTargetConfig | None, cwd: str | None
     ) -> None:
         """Refuse a local pane launch into a missing folder, where tmux would
@@ -6102,7 +6102,7 @@ class SessionRuntime:
         extra_env = self._agent_process_env(
             backend, dict(launch_env or {}), session_id=session_id
         )
-        self._require_launch_folder(launch_target, cwd)
+        self._require_pane_folder(launch_target, cwd)
         if launch_target is None:
             executable = (
                 self.settings.plugin_config(backend).local_bin

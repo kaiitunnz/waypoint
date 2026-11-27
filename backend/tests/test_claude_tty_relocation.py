@@ -92,7 +92,7 @@ def _runtime(session: SessionRecord) -> MagicMock:
     runtime.tmux.pipe_output = AsyncMock()
     runtime.tmux.resize_window = AsyncMock()
     runtime._command_for_backend.return_value = ["claude"]
-    runtime._require_launch_folder = SessionRuntime._require_launch_folder
+    runtime._require_pane_folder = SessionRuntime._require_pane_folder
     return runtime
 
 
@@ -263,6 +263,22 @@ async def test_remote_tailer_reads_the_tail_for_an_earlier_move(
     # The priming read, then the tail, inside the source's poll interval.
     assert offsets == [0, len(content) - READ_LIMIT]
     followed.assert_awaited_once_with(runtime, "s1", "/srv/w")
+
+
+async def test_tail_cut_inside_a_character_is_skipped(
+    tmp_path: Path, followed: AsyncMock
+) -> None:
+    line = '{"note": "é", "type": "relocated", "relocatedCwd": "/repo/old"}\n'.encode()
+    # The window starts at the second byte of "é".
+    start = line.index("é".encode()) + 1
+    path = transcript_path("/repo/app", TID, str(tmp_path))
+    path.parent.mkdir(parents=True)
+    path.write_bytes(line + b"x" * (start + READ_LIMIT - len(line) - 1) + b"\n")
+    tailer = _tailer(_runtime(_session("/repo/app")), tmp_path, start_at_end=True)
+
+    await tailer._drain()
+
+    followed.assert_not_called()
 
 
 async def test_tailer_follows_the_last_relocation_after_the_records(
@@ -593,22 +609,6 @@ async def test_a_failed_ssh_probe_is_not_a_removed_folder(
     assert await relaunch_folder(runtime, session) == "/srv/w"
     answers["/srv/w"] = False
     assert await relaunch_folder(runtime, session) == "/srv/app"
-
-
-@pytest.mark.parametrize(
-    ("result", "expected"),
-    [
-        ({"is_dir": True}, True),
-        ({"is_dir": False}, False),
-        ({"error": "transport failure"}, None),
-    ],
-)
-def test_probe_dir_tells_unreachable_from_missing(
-    monkeypatch: pytest.MonkeyPatch, result: dict[str, Any], expected: bool | None
-) -> None:
-    fs = RemoteTranscriptFilesystem(MagicMock())
-    monkeypatch.setattr(fs, "_run", lambda *args: result)
-    assert fs.probe_dir("/srv/w") is expected
 
 
 async def test_promoted_side_question_leaves_a_removed_folder(

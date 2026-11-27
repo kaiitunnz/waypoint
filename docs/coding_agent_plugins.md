@@ -943,10 +943,9 @@ notification that brings the outcome.
 The v2 frontend gives a call the latest task notification whose `tool_use_id` is
 the call's `item_id`. A later notification that names only the same `task_id`
 belongs to the last call that named that task. The notification stands in for
-the result of a deferred call, and of any subagent call whether or not its
-result is flagged: its report preview is the call's result, and a `status` other
-than `completed` marks the call failed. A deferred call with no notification
-shows as running.
+the result of a deferred call, and of any subagent call, flagged or not: its
+report preview is the call's result, and a `status` other than `completed` marks
+the call failed. A deferred call with no notification shows as running.
 
 ### Capture seams
 

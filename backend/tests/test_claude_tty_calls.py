@@ -250,6 +250,88 @@ async def test_a_look_alike_dialog_is_not_given_the_answered_calls_input(
     assert pane.asks[-1]["tool_input"] == two
 
 
+@pytest.mark.parametrize("answered", ["by a reply", "in the terminal"])
+async def test_an_unnamed_requests_late_record_names_no_later_dialog(
+    tmp_path: Path, answered: str
+) -> None:
+    pane = Pane(tmp_path, "approval_agent.txt")
+    one = {"description": "Say hello greeting", "prompt": "Say hello and stop."}
+    await pane.poll()
+    assert _named(pane.asks[-1]) == (False, None)
+    dialog = pane.screen
+    if answered == "by a reply":
+        assert await pane.reply() is True
+    else:
+        pane.screen = _screen("ready.txt")
+        await pane.poll(2)
+        pane.screen = dialog
+
+    # The answered call's record appears, with a dialog up that reads the same.
+    append(pane.main, use("one", "Agent", one))
+    await pane.poll(5)
+    assert len(pane.asks) == 2
+    assert {_named(ask) for ask in pane.asks} == {(False, None)}
+
+    # The record of the call now asking is not the answered one's.
+    two = {**one, "prompt": "Delete everything."}
+    append(pane.main, use("two", "Agent", two))
+    await pane.poll(1)
+    assert _named(pane.asks[-1]) == (True, "two")
+
+
+async def test_a_dialog_replaced_at_once_was_answered(tmp_path: Path) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+    first = pane.screen
+
+    # Answered in the terminal: another dialog is up before a poll sees none.
+    pane.screen = _screen("approval_websearch.txt")
+    await pane.poll()
+    pane.screen = first
+    await pane.poll()
+
+    assert _named(pane.asks[-1]) == (False, None)
+
+
+async def test_a_poll_leaves_a_card_alone_once_a_reply_is_in_flight(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+
+    async def capture(*_: Any) -> str:
+        pane.plugin._pending_approvals["s1"].replying = True
+        return _screen("ready.txt")
+
+    pane.runtime.tmux.capture_snapshot = AsyncMock(side_effect=capture)
+    await pane.poll(1)
+
+    assert pane.notes == []
+    assert "s1" in pane.plugin._pending_approvals
+
+
+async def test_a_plan_poll_overtaken_by_a_reply_raises_nothing(
+    tmp_path: Path, plan_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pane = Pane(tmp_path, "plan_approval_file_footer.txt", permission_mode="plan")
+    await pane.poll()
+    plan_file.write_text("- step two\n")
+    reads = pane.tailer.dialogs._calls
+    candidates = reads.candidates
+
+    def reply_meanwhile(agent: str | None) -> list[PendingCall]:
+        pane.plugin._pending_approvals.pop("s1", None)
+        return candidates(agent)
+
+    monkeypatch.setattr(reads, "candidates", reply_meanwhile)
+    await pane.poll(1)
+
+    assert len(pane.asks) == 1
+    assert "s1" not in pane.plugin._pending_approvals
+
+
 async def test_an_answered_call_stays_answered_across_a_blank_frame(
     tmp_path: Path,
 ) -> None:

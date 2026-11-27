@@ -715,7 +715,7 @@ class ClaudeTtyPlugin:
     def mark_replied(self, session_id: str, pending: PendingTtyApproval) -> None:
         """Note that ``pending``'s key was pressed."""
         if run := self._tailers.get(session_id):
-            run.tailer.dialogs.mark_replied(pending)
+            run.tailer.dialogs.mark_answered(pending)
 
     async def refuse_reply(
         self, runtime: "SessionRuntime", session_id: str, note: str

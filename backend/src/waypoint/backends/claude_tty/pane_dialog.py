@@ -19,6 +19,7 @@ Verified against fixtures captured from Claude Code 2.1.177 to 2.1.332 in
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from textwrap import dedent
@@ -162,6 +163,25 @@ def unboxed(line: str) -> str:
     return re.sub(r"^\s*│", "", line)
 
 
+def columns(text: str) -> int:
+    """The terminal columns ``text`` takes."""
+    return sum(
+        (
+            2
+            if unicodedata.east_asian_width(char) in "WF"
+            else 0 if unicodedata.combining(char) else 1
+        )
+        for char in text
+    )
+
+
+def wraps(line: str, below: str, width: int) -> bool:
+    """Whether ``below`` may continue ``line`` in a dialog ``width`` columns wide:
+    its first word did not fit."""
+    words = unboxed(below).split()
+    return bool(words) and columns(line.rstrip()) + 1 + columns(words[0]) >= width
+
+
 @dataclass
 class DialogOption:
     number: int
@@ -199,12 +219,20 @@ class ApprovalDialog:
 
     @property
     def described_header(self) -> list[str]:
-        """The header without the auto-mode tip and blank lines."""
-        return [
-            line
-            for line in self.header
-            if line.strip() and not line.strip().startswith("Tip:")
-        ]
+        """The header without blank lines and the auto-mode tip, which a narrow
+        pane wraps."""
+        lines = [line for line in self.header if line.strip()]
+        for start, line in enumerate(lines):
+            if line.strip().startswith("Tip:"):
+                end = start + 1
+                while (
+                    self.width
+                    and end < len(lines)
+                    and wraps(lines[end - 1], lines[end], self.width)
+                ):
+                    end += 1
+                return lines[:start] + lines[end:]
+        return lines
 
     @property
     def identity(self) -> str:

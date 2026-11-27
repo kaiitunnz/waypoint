@@ -1,5 +1,6 @@
 """Reading a claude_tty session's pending tool calls off its transcripts."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -285,3 +286,18 @@ def test_a_resumed_subagent_is_a_candidate_again(tmp_path: Path) -> None:
     sub.with_suffix(".meta.json").write_text('{"agentType": "general-purpose"}')
     append(sub, use("sub-2", "Bash", {"command": "pwd"}, msg="msg-2"))
     assert ids(calls.candidates("general-purpose")) == ["sub-2"]
+
+
+def test_a_rewritten_subagent_transcript_is_read_afresh(tmp_path: Path) -> None:
+    source, main = session_tree(tmp_path)
+    before = jsonl(use("sub-1", "Bash", {"command": "ls"}))
+    sub = write_subagent(main, "a1", "general-purpose", before)
+    calls = TranscriptCalls(source)
+    assert ids(calls.candidates("general-purpose")) == ["sub-1"]
+
+    # The same size, so only the modification time says it changed.
+    after = before.replace(b"sub-1", b"sub-9")
+    sub.write_bytes(after)
+    stat = sub.stat()
+    os.utime(sub, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    assert ids(calls.candidates("general-purpose")) == ["sub-9"]

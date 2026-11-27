@@ -42,6 +42,12 @@ def _call(
     return PendingCall(tool_use_id, name, tool_input, CWD, transcript)
 
 
+SHOWN_READ: dict[str, Any] = {
+    "file_path": "/tmp/probe/outside/a_folder_name_long_enough_to_force_the_"
+    "read_dialog_to_hard_wrap_the_path_midway_through_it-here/"
+    "readme_outside.txt"
+}
+
 # (fixture, the call it shows)
 SHOWN: list[tuple[str, str, dict[str, Any]]] = [
     (
@@ -88,15 +94,7 @@ SHOWN: list[tuple[str, str, dict[str, Any]]] = [
         "Edit",
         {"file_path": f"{CWD}/notes.txt", "old_string": "beta", "new_string": "BETA"},
     ),
-    (
-        "approval_read_wrapped.txt",
-        "Read",
-        {
-            "file_path": "/tmp/probe/outside/a_folder_name_long_enough_to_force_the_"
-            "read_dialog_to_hard_wrap_the_path_midway_through_it-here/"
-            "readme_outside.txt"
-        },
-    ),
+    ("approval_read_wrapped.txt", "Read", SHOWN_READ),
     (
         "approval_notebook.txt",
         "NotebookEdit",
@@ -524,3 +522,53 @@ def test_the_unsandboxed_heading_is_compared(
     drawn, other = (flagged, plain) if unsandboxed else (plain, flagged)
     assert match_call(dialog, [drawn]) == drawn
     assert match_call(dialog, [other]) is None
+
+
+@pytest.mark.parametrize("description", [None, "Create probe", "probe dir", "Other"])
+def test_a_bash_description_is_the_one_drawn(description: str | None) -> None:
+    dialog = _dialog("approval_bash_boxed.txt")
+    tool_input: dict[str, Any] = {"command": "mkdir -p probe_dir_one"}
+    if description:
+        tool_input["description"] = description
+    assert match_call(dialog, [_call("Bash", tool_input)]) is None
+
+
+@pytest.mark.parametrize(
+    ("drawn", "asked", "matches"),
+    [
+        (" · lines 3-7", {"offset": 3, "limit": 5}, True),
+        (" · from line 30", {"offset": 30}, True),
+        (" · lines 1-5", {"limit": 5}, True),
+        (" · lines 3-7", {"offset": 900, "limit": 5}, False),
+        (" · lines 3-7", {}, False),
+        ("", {"offset": 3, "limit": 5}, False),
+    ],
+)
+def test_a_partial_read_matches_the_range_drawn(
+    drawn: str, asked: dict[str, int], matches: bool
+) -> None:
+    path = SHOWN_READ["file_path"]
+    dialog = _dialog(
+        "approval_read_wrapped.txt", ("outside.txt)", f"outside.txt{drawn})")
+    )
+    call = _call("Read", {"file_path": path, **asked})
+    assert (match_call(dialog, [call]) == call) is matches
+
+
+def _with_command(*drawn: str) -> ApprovalDialog:
+    body = "".join(f" │ {line}\n" for line in drawn)
+    return _dialog("approval_bash_boxed.txt", (" mkdir -p probe_dir_one\n", body))
+
+
+def test_a_word_is_split_only_over_a_full_line() -> None:
+    tail = "x" * 112
+    dialog = _with_command("rm -rf build", tail)
+    call = _bash("rm -rf build" + tail, "Create probe dir")
+    assert match_call(dialog, [call]) is None
+
+
+def test_wide_characters_count_two_columns_towards_a_wrap() -> None:
+    wide = "漢" * 55
+    dialog = _with_command(f"echo {wide}", "done")
+    call = _bash(f"echo {wide} done", "Create probe dir")
+    assert match_call(dialog, [call]) == call

@@ -10,7 +10,6 @@ approved.
 import json
 import posixpath
 import re
-import unicodedata
 from collections.abc import Container, Sequence
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -20,8 +19,10 @@ from waypoint.backends.claude_tty.pane_dialog import (
     TOOL_USE_HEADING,
     UNSANDBOXED_BASH_HEADING,
     ApprovalDialog,
+    columns,
     joined,
     unboxed,
+    wraps,
 )
 from waypoint.backends.claude_tty.pending_calls import PendingCall
 
@@ -75,14 +76,7 @@ def match_call(
     Identical calls of one transcript prompt in order, so the oldest of them is
     meant. Differing calls, or calls from several transcripts, are ambiguous.
     """
-    if not dialog.matchable:
-        return None
-    hits = [
-        call
-        for call in calls
-        if call.tool_use_id not in excluded and _consistent(dialog, call)
-    ]
-    if not hits:
+    if not (hits := calls_shown(dialog, calls, excluded)):
         return None
     first = hits[0]
     if any(
@@ -92,6 +86,19 @@ def match_call(
     ):
         return None
     return first
+
+
+def calls_shown(
+    dialog: ApprovalDialog, calls: Sequence[PendingCall], excluded: Container[str] = ()
+) -> list[PendingCall]:
+    """The calls consistent with everything ``dialog`` draws, except ``excluded``."""
+    if not dialog.matchable:
+        return []
+    return [
+        call
+        for call in calls
+        if call.tool_use_id not in excluded and _consistent(dialog, call)
+    ]
 
 
 def match_plan_call(
@@ -146,39 +153,13 @@ def _spells(text: str, lines: Sequence[str]) -> bool:
     return position == len(target)
 
 
-def _some_lines_spell(text: str, lines: Sequence[str]) -> bool:
-    return any(
-        _spells(text, lines[start:end])
-        for start in range(len(lines))
-        for end in range(start + 1, len(lines) + 1)
-    )
-
-
 # ── Bash ──
-
-
-def _columns(text: str) -> int:
-    """The terminal columns ``text`` takes."""
-    return sum(
-        (
-            2
-            if unicodedata.east_asian_width(char) in "WF"
-            else 0 if unicodedata.combining(char) else 1
-        )
-        for char in text
-    )
-
-
-def _wraps(line: str, below: str, width: int) -> bool:
-    """Whether ``below`` may continue ``line`` in a dialog ``width`` columns wide:
-    its first word did not fit."""
-    words = unboxed(below).split()
-    return bool(words) and _columns(line.rstrip()) + 1 + _columns(words[0]) >= width
 
 
 def _draws(command: str, lines: Sequence[str], width: int) -> bool:
     """Whether ``lines`` are ``command`` as a dialog ``width`` columns wide draws
-    it: each new line is a newline of the command unless the one above was full."""
+    it: each new line is a newline of the command unless the one above was full,
+    and a word is split only over a line filled to its end."""
     if shown := [i for i, line in enumerate(lines) if unboxed(line).strip()]:
         lines = lines[shown[0] : shown[-1] + 1]
     position = 0
@@ -192,14 +173,18 @@ def _draws(command: str, lines: Sequence[str], width: int) -> bool:
             return False
         spelled = len(drawn)
         while spelled < len(target):
-            if position == len(lines) or not _wraps(
+            if position == len(lines) or not wraps(
                 lines[position - 1], lines[position], width
             ):
                 return False
+            above = lines[position - 1].rstrip()
             segment = _words(unboxed(lines[position]))
             position += 1
             if target.startswith(" ", spelled):
                 spelled += 1
+            # One column is the margin, and one a wide character may not fit.
+            elif columns(above) < width - 2:
+                return False
             if not target.startswith(segment, spelled):
                 return False
             spelled += len(segment)
@@ -217,7 +202,9 @@ def _bash_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:
     header = dialog.described_header
     if dialog.body is not None:
         return _draws(command, dialog.body, dialog.width) and (
-            not description or _some_lines_spell(str(description), header)
+            _draws(str(description), header, dialog.width)
+            if description
+            else not header
         )
     # Without dashed rules: the command's lines, then its description.
     for end in range(1, len(header) + 1):
@@ -236,7 +223,9 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
     if not isinstance(path, str) or not path:
         return False
     if call.name == "Read":
-        shown = (dialog.target or "").split(" · ")[0]
+        shown, _, drawn_range = (dialog.target or "").partition(" ·")
+        if _squash(drawn_range) != _squash(_read_range(call.input)):
+            return False
     elif call.name == "NotebookEdit":
         shown = dialog.target or ""
     else:
@@ -261,6 +250,15 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
             return _notebook_matches(dialog, call)
         case _:
             return True
+
+
+def _read_range(tool_input: dict[str, Any]) -> str:
+    """The part of the file a Read dialog says is asked for; empty for all of it."""
+    offset, limit = tool_input.get("offset"), tool_input.get("limit")
+    if isinstance(limit, int):
+        start = offset if isinstance(offset, int) else 1
+        return f"lines {start}-{start + limit - 1}"
+    return f"from line {offset}" if offset is not None else ""
 
 
 def _notebook_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:

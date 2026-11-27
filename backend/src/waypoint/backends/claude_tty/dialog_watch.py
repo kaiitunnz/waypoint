@@ -18,7 +18,11 @@ from waypoint.backends.approvals import open_approval_requests
 from waypoint.backends.claude_code.normalize import format_approval_text
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty.byte_source import TranscriptTreeReader
-from waypoint.backends.claude_tty.call_match import match_call, match_plan_call
+from waypoint.backends.claude_tty.call_match import (
+    calls_shown,
+    match_call,
+    match_plan_call,
+)
 from waypoint.backends.claude_tty.pending_calls import (
     CallSource,
     PendingCall,
@@ -91,6 +95,8 @@ class PendingTtyApproval:
     approval_id: str = ""
     # The call the ask names; None when it is a reading of the pane.
     call: PendingCall | None = None
+    # The permission dialog the ask was raised for; None for a plan.
+    dialog: pane_dialog.ApprovalDialog | None = None
     # An ExitPlanMode "ready to proceed" dialog.
     is_plan: bool = False
     # The permission mode the plan's approve option lands the pane in.
@@ -166,6 +172,22 @@ def _pane_reading(dialog: pane_dialog.ApprovalDialog) -> tuple[str, dict[str, An
             return tool_name, {"description": target}
 
 
+def _text_of(dialog: pane_dialog.ApprovalDialog) -> tuple[str | None, str | None, str]:
+    """What a dialog asks, however its lines wrap."""
+    lines = [*dialog.described_header, *(dialog.body or [])]
+    words = "".join("".join(pane_dialog.unboxed(line).split()) for line in lines)
+    return dialog.heading, dialog.agent, words
+
+
+def _asks_something_else(
+    pending: PendingTtyApproval, dialog: pane_dialog.ApprovalDialog
+) -> bool:
+    """Whether ``dialog`` is not a redraw of what ``pending``'s card asked."""
+    if pending.call is not None:
+        return not calls_shown(dialog, [pending.call])
+    return pending.dialog is not None and _text_of(pending.dialog) != _text_of(dialog)
+
+
 class DialogWatcher:
     """Tracks the dialog on one session's pane; the plugin holds the pending
     request, which outlives a watcher across a relaunch."""
@@ -197,8 +219,11 @@ class DialogWatcher:
         # Ids of calls that cannot be asking: replied to, or whose dialog was
         # answered in the terminal. A call stays here once added.
         self._answered: set[str] = set()
-        # The call whose dialog was missing from the last poll.
-        self._departing: PendingCall | None = None
+        # Dialogs answered while no call was named, by identity. The record of
+        # the call may be written late.
+        self._unnamed: dict[str, pane_dialog.ApprovalDialog] = {}
+        # The request whose dialog was missing from the last poll.
+        self._departing: PendingTtyApproval | None = None
         # The popup kind already sent Esc this appearance, so one popup replacing
         # another still gets its own.
         self._dismissed_screen: pane_dialog.PaneScreen | None = None
@@ -267,11 +292,13 @@ class DialogWatcher:
         self._surfaced = None
         self._reset_debounce()
 
-    def mark_replied(self, pending: PendingTtyApproval) -> None:
-        """Note that ``pending``'s key was pressed: its call is not named again,
-        even for a dialog that reads the same."""
+    def mark_answered(self, pending: PendingTtyApproval) -> None:
+        """Note that ``pending``'s request was answered: its call is not named
+        again, even for a dialog that reads the same."""
         if pending.call is not None:
             self._answered.add(pending.call.tool_use_id)
+        elif pending.dialog is not None:
+            self._unnamed[pending.dialog.identity] = pending.dialog
 
     async def reply_refusal(self, pending: PendingTtyApproval) -> str | None:
         """Why a reply to ``pending`` must not be sent, as the note for its card;
@@ -365,9 +392,9 @@ class DialogWatcher:
         # One poll can catch the TUI mid-redraw, so a call counts as answered in
         # the terminal once its dialog is gone for two.
         if self._surfaced is not None:
-            self._departing = self._surfaced.pending.call
+            self._departing = self._surfaced.pending
         elif self._departing is not None:
-            self._answered.add(self._departing.tool_use_id)
+            self.mark_answered(self._departing)
             self._departing = None
         await self._expire_adoptable()
         await self._plugin.drop_pending_approval(
@@ -425,7 +452,18 @@ class DialogWatcher:
         if not dialog.matchable:
             return None
         calls = await asyncio.to_thread(self._calls.candidates, dialog.agent)
+        self._claim_late_records(dialog.agent, calls)
         return match_call(dialog, calls, self._answered)
+
+    def _claim_late_records(self, agent: str | None, calls: list[PendingCall]) -> None:
+        """Mark as answered the calls that read like a request answered unnamed:
+        any of them may be that request's record, written late."""
+        for identity, dialog in list(self._unnamed.items()):
+            if dialog.agent != agent:
+                continue
+            if late := calls_shown(dialog, calls, self._answered):
+                self._answered.update(call.tool_use_id for call in late)
+                del self._unnamed[identity]
 
     async def _card_outdated(
         self, dialog: pane_dialog.ApprovalDialog, shown: _Surfaced
@@ -467,6 +505,13 @@ class DialogWatcher:
                     return
             elif not await self._replied_dialog_remains(dialog, shown):
                 return
+        elif (
+            shown is not None
+            and card_open
+            and _asks_something_else(shown.pending, dialog)
+        ):
+            # Answered in the terminal, with the next dialog drawn at once.
+            self.mark_answered(shown.pending)
 
         call = await self._match(dialog)
         if self._overtaken(entry):
@@ -476,6 +521,7 @@ class DialogWatcher:
         if shown is not None and card_open and shown.pending.signature == signature:
             # The same request drawn differently, as after a resize.
             shown.pending.identity = dialog.identity
+            shown.pending.dialog = dialog
             shown.pending.approve_number = approve_number
             shown.pending.decline_number = decline_number
             return
@@ -497,6 +543,7 @@ class DialogWatcher:
             signature=signature,
             identity=dialog.identity,
             call=call,
+            dialog=dialog,
         )
         closing_note = _UPDATED_NOTE if updated else _DIALOG_CLOSED_NOTE
         if await self._register(pending, closing_note):

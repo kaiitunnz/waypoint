@@ -9,18 +9,15 @@ import { useFold } from "./useFold";
 
 interface FoldedTextProps {
   text: string;
-  // Which end of the text stays in view while it is folded.
-  keep: "start" | "end";
   className: string;
 }
 
-export function FoldedText({ text, keep, className }: FoldedTextProps) {
-  const { open, toggle, shown, total, content, chip } = useFold<HTMLSpanElement>(text, keep);
-  const folded = keep === "end" ? clamp.keepEnd : clamp.clamp;
+export function FoldedText({ text, className }: FoldedTextProps) {
+  const { open, toggle, shown, total, content, chip } = useFold<HTMLSpanElement>(text);
   return (
     <>
       <pre className={cx(className, open && styles.open)}>
-        <span className={open ? clamp.content : folded}>
+        <span className={open ? clamp.content : clamp.clamp}>
           <span ref={content} className={clamp.content}>
             {shown}
           </span>

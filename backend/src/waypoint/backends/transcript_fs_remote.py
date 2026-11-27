@@ -120,9 +120,14 @@ class RemoteTranscriptFilesystem:
         entries = self._run("listdir", path).get("entries", [])
         return entries if isinstance(entries, list) else []
 
+    def probe_glob(self, root: str, pattern: str) -> list[str] | None:
+        """``glob``, or ``None`` when the host could not be asked."""
+        result = self._run("glob", root, pattern)
+        paths = result.get("paths")
+        return paths if "error" not in result and isinstance(paths, list) else None
+
     def glob(self, root: str, pattern: str) -> list[str]:
-        paths = self._run("glob", root, pattern).get("paths", [])
-        return paths if isinstance(paths, list) else []
+        return self.probe_glob(root, pattern) or []
 
     def glob_artifacts(
         self, session: SessionRecord, plugin: Any, config_dir: str

@@ -100,9 +100,9 @@ _OPTION_PROMPT_RE = re.compile(r"^\s*❯\s*\d+\.")
 # Footer tokens marking the bottom edge of a live inline dialog. A trailing run of
 # blank / leading-❯ lines resting on one is queued-message or free-text-field
 # output, not the composer. "Esc to cancel" ends every inline dialog `classify`
-# recognizes; the plan dialog is a full-pane overlay with nothing below its footer,
-# so it needs no token.
-# The fetch dialog has no footer; its last option ends "(esc)".
+# recognizes but the fetch one, which has no footer: its last option ends "(esc)".
+# The plan dialog is a full-pane overlay with nothing below its footer, so it
+# needs no token.
 _DIALOG_FOOTER_TOKENS = ("Esc to cancel", "(esc)")
 # Key hints an interactive popup shows, for popups no marker above names.
 _INTERACTIVE_HINTS = (
@@ -117,9 +117,20 @@ _RULE_CHAR = "─"
 _MIN_RULE_WIDTH = 20
 _DASHED_RULE_RE = re.compile(r"[╌─]{20,}")
 _AGENT_SUFFIX_RE = re.compile(r"^(.*?)\s+· from the (.+?) agent$")
-_SKILL_HEADING_RE = re.compile(r'^Use skill "(.+)"\?$')
+SKILL_HEADING_RE = re.compile(r'^Use skill "(.+)"\?$')
+# The heading whose tool is named by the lines below it.
+TOOL_USE_HEADING = "Tool use"
 # A line the options block ends with when the dialog is scrolled.
 _MORE_LINES_PREFIX = "↑"
+# The indent of an option's wrapped label or description.
+_OPTION_DETAIL_INDENT = " " * 5
+# The most lines a wrapped heading takes.
+_HEADING_MAX_LINES = 3
+
+
+def digest(text: str) -> str:
+    """A short fingerprint of what was on screen or on disk."""
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def _strip_ansi(text: str) -> str:
@@ -172,13 +183,22 @@ class ApprovalDialog:
     matchable: bool = True
 
     @property
+    def described_header(self) -> list[str]:
+        """The header without the auto-mode tip and blank lines."""
+        return [
+            line
+            for line in self.header
+            if line.strip() and not line.strip().startswith("Tip:")
+        ]
+
+    @property
     def identity(self) -> str:
         """A digest of the lines on screen, apart from the highlight and the
         auto-mode tip. Spacing counts: ``rm -rf a /`` is not ``rm -rf a/``."""
         parts = [
             self.heading or "",
             self.agent or "",
-            *(line for line in self.header if not line.strip().startswith("Tip:")),
+            *self.described_header,
             "|",
             *(self.body or []),
             "|",
@@ -186,8 +206,7 @@ class ApprovalDialog:
             self.question,
             *(f"{option.number}.{option.label}" for option in self.options),
         ]
-        shown = "\n".join(part.rstrip() for part in parts)
-        return hashlib.sha256(shown.encode()).hexdigest()[:16]
+        return digest("\n".join(part.rstrip() for part in parts))
 
     @property
     def approve_option(self) -> DialogOption | None:
@@ -380,6 +399,10 @@ def classify(screen: str) -> PaneScreen:
         region, compact, _APPROVAL_QUESTION_MARKER
     ):
         return PaneScreen.APPROVAL
+    # Read by structure before any other marker: the fetch dialog has no footer,
+    # and the prompt it shows may quote another dialog's text.
+    if _is_footerless_approval(region.split("\n")):
+        return PaneScreen.APPROVAL
     if all(_contains(region, compact, marker) for marker in _PLAN_MARKERS):
         return PaneScreen.PLAN
     if all(_contains(region, compact, marker) for marker in _QUESTION_MARKERS):
@@ -401,8 +424,6 @@ def classify(screen: str) -> PaneScreen:
         region, compact, _AUTO_MODE_TEACHING_FOOTER
     ):
         return PaneScreen.AUTO_MODE_TEACHING
-    if _is_footerless_approval(region.split("\n")):
-        return PaneScreen.APPROVAL
     return PaneScreen.OTHER
 
 
@@ -432,7 +453,7 @@ def _is_footerless_approval(lines: list[str]) -> bool:
         and all(
             _OPTION_RE.match(line)
             or _is_composer_line(line)
-            or line.startswith("     ")
+            or line.startswith(_OPTION_DETAIL_INDENT)
             or line.strip().startswith(_MORE_LINES_PREFIX)
             for line in below
         )
@@ -461,14 +482,16 @@ def composer_drawn(screen: str) -> bool:
         if bottom < len(lines) and _is_border(lines[bottom]):
             # A popup below the box has taken its place: the box is left over
             # from earlier in the scrollback.
-            return not any(_is_popup_line(line) for line in lines[bottom + 1 :])
+            return not any(
+                _is_border(line) or _is_interactive_line(line)
+                for line in lines[bottom + 1 :]
+            )
     return False
 
 
-def _is_popup_line(line: str) -> bool:
+def _is_interactive_line(line: str) -> bool:
     return bool(
-        _is_border(line)
-        or _OPTION_PROMPT_RE.match(line)
+        _OPTION_PROMPT_RE.match(line)
         or _QUESTION_RE.match(line)
         or any(hint in line for hint in _INTERACTIVE_HINTS)
     )
@@ -485,9 +508,7 @@ def _is_border(line: str) -> bool:
 
 def _looks_interactive(screen: str) -> bool:
     return any(
-        _OPTION_PROMPT_RE.match(line)
-        or _QUESTION_RE.match(line)
-        or any(hint in line for hint in _INTERACTIVE_HINTS)
+        _is_interactive_line(line)
         for line in _active_region(_strip_ansi(screen).splitlines())
     )
 
@@ -600,13 +621,13 @@ def _read_heading(lines: list[str], start: int) -> tuple[str, str | None, int, b
     """The heading at ``start``, the agent it names, the line after it, and
     whether it was fully read."""
     joined = lines[start].strip()
-    for end in range(start + 1, min(start + 3, len(lines)) + 1):
+    for end in range(start + 1, min(start + _HEADING_MAX_LINES, len(lines)) + 1):
         if suffixed := _AGENT_SUFFIX_RE.match(joined):
             return suffixed.group(1), suffixed.group(2), end, True
         if end < len(lines):
             # A narrow pane wraps the agent suffix onto the following lines.
             joined = f"{joined} {lines[end].strip()}"
-    near = " ".join(line.strip() for line in lines[start : start + 3])
+    near = " ".join(line.strip() for line in lines[start : start + _HEADING_MAX_LINES])
     return lines[start].strip(), None, start + 1, "· from" not in near
 
 
@@ -698,8 +719,6 @@ _HEADING_TOOLS: dict[str, str] = {
     "Read file": "Read",
     "Fetch": "WebFetch",
 }
-# The shared "Tool use" heading names its tool in the lines below it.
-_TOOL_USE_HEADING = "Tool use"
 _FILE_QUESTION_RE = re.compile(
     r"Do you want to (create|overwrite|write to|make this edit to|edit|update)"
     r" (.+?)\?$"
@@ -739,7 +758,7 @@ def _read_tool_target(
     shown = [*header, *(body or [])]
     text = "\n".join(unboxed(line).strip() for line in shown if line.strip())
     if heading is not None:
-        if skill := _SKILL_HEADING_RE.match(heading):
+        if skill := SKILL_HEADING_RE.match(heading):
             return "Skill", skill.group(1)
         match _HEADING_TOOLS.get(heading):
             case "Bash":
@@ -765,7 +784,7 @@ def _read_tool_target(
                 return "Read", call.removeprefix("Read(").removesuffix(")")
             case "WebFetch":
                 return "WebFetch", text
-        if heading == _TOOL_USE_HEADING:
+        if heading == TOOL_USE_HEADING:
             first = _joined(body or [])
             if first.startswith("Web Search("):
                 return "WebSearch", text

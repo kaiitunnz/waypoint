@@ -7,7 +7,7 @@ subagent transcripts.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from waypoint.backends.claude_code.normalize import iter_content_blocks
@@ -29,6 +29,10 @@ class PendingCall:
     cwd: str | None = None
     # The transcript it was read from; None for the main one.
     transcript: str | None = None
+    # The id of the assistant message that made it.
+    message_id: str = ""
+    # The session host's home directory, which a dialog prints as ``~``.
+    home: str | None = None
 
 
 class CallSource(Protocol):
@@ -67,14 +71,20 @@ def _message(record: dict[str, Any]) -> dict[str, Any]:
     return message if isinstance(message, dict) else {}
 
 
-def pending_calls(tail: Tail, transcript: str | None = None) -> list[PendingCall]:
+def pending_calls(
+    tail: Tail,
+    transcript: str | None = None,
+    carried: PendingCall | None = None,
+) -> list[PendingCall]:
     """Unresolved tool calls of the transcript's latest assistant message.
 
     Every call gets a result before the next message, so an earlier message's
     unresolved call will never run. A new prompt or an interrupt ends them all.
+    ``carried`` is a call known to be pending, which stays listed unless the
+    window ends it: its own record may lie before the window.
     """
-    message_id: str | None = None
-    calls: dict[str, PendingCall] = {}
+    message_id = carried.message_id if carried else None
+    calls = {carried.tool_use_id: carried} if carried else {}
     for record in _records(tail):
         kind = record.get("type")
         if kind not in ("assistant", "user"):
@@ -82,7 +92,8 @@ def pending_calls(tail: Tail, transcript: str | None = None) -> list[PendingCall
         message = _message(record)
         blocks = iter_content_blocks(message.get("content"))
         if kind == "assistant":
-            if (current := str(message.get("id") or "")) != message_id:
+            current = str(message.get("id") or "")
+            if current != message_id:
                 message_id = current
                 calls = {}
             for block in blocks:
@@ -96,6 +107,7 @@ def pending_calls(tail: Tail, transcript: str | None = None) -> list[PendingCall
                     input=tool_input if isinstance(tool_input, dict) else {},
                     cwd=cwd if isinstance(cwd, str) else None,
                     transcript=transcript,
+                    message_id=current,
                 )
             continue
         results = [b for b in blocks if b.get("type") == "tool_result"]
@@ -111,8 +123,17 @@ class TranscriptCalls:
 
     def __init__(self, reader: TranscriptTreeReader) -> None:
         self._reader = reader
+        # Each subagent transcript's pending calls, with the size they were read
+        # at. Transcripts only grow, and a session can hold hundreds of them.
+        self._parsed: dict[str, tuple[int, list[PendingCall]]] = {}
 
     def candidates(self, agent: str | None) -> list[PendingCall]:
+        if not (calls := self._unresolved(agent)):
+            return []
+        home = self._reader.home_dir()
+        return [replace(call, home=home) for call in calls]
+
+    def _unresolved(self, agent: str | None) -> list[PendingCall]:
         if agent is None:
             tail = self._reader.read_transcript_tail(_CANDIDATE_WINDOW)
             return [] if tail is None else pending_calls(tail)
@@ -122,20 +143,32 @@ class TranscriptCalls:
         for subagent in subagents:
             if subagent.finished or agent not in (subagent.agent_type, subagent.name):
                 continue
-            tail = self._reader.read_tail(subagent.path, _CANDIDATE_WINDOW)
-            if tail is None:
+            if (found := self._subagent_calls(subagent.path)) is None:
                 return []
-            calls += pending_calls(tail, subagent.path)
+            calls += found
+        return calls
+
+    def _subagent_calls(self, path: str) -> list[PendingCall] | None:
+        # Sized before the read, so growth in between is read next time.
+        if (size := self._reader.file_size(path)) is None:
+            return None
+        cached = self._parsed.get(path)
+        if cached is not None and cached[0] == size:
+            return cached[1]
+        if (tail := self._reader.read_tail(path, _CANDIDATE_WINDOW)) is None:
+            return None
+        calls = pending_calls(tail, path)
+        self._parsed[path] = (size, calls)
         return calls
 
     def is_resolved(self, call: PendingCall) -> bool:
-        """The call has a result, or the transcript has moved to a later
-        message."""
+        """The call has a result, or the transcript has moved past it. A call
+        the window no longer holds is not taken as over for that alone."""
         tail = (
             self._reader.read_transcript_tail(_RESOLVED_WINDOW)
             if call.transcript is None
             else self._reader.read_tail(call.transcript, _RESOLVED_WINDOW)
         )
         return tail is not None and call.tool_use_id not in {
-            pending.tool_use_id for pending in pending_calls(tail)
+            pending.tool_use_id for pending in pending_calls(tail, carried=call)
         }

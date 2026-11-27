@@ -35,12 +35,12 @@ def use(
     }
 
 
-def result(tool_use_id: str) -> dict[str, Any]:
+def result(tool_use_id: str, content: str = "ok") -> dict[str, Any]:
     return {
         "type": "user",
         "message": {
             "content": [
-                {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
             ]
         },
     }
@@ -95,4 +95,10 @@ class NoTranscriptTree:
         return None
 
     def read_tail(self, path: str, limit: int) -> Tail | None:
+        return None
+
+    def file_size(self, path: str) -> int | None:
+        return None
+
+    def home_dir(self) -> str | None:
         return None

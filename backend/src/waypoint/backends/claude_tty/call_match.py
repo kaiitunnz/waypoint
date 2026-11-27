@@ -12,7 +12,12 @@ from collections.abc import Container, Sequence
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from waypoint.backends.claude_tty.pane_dialog import ApprovalDialog, unboxed
+from waypoint.backends.claude_tty.pane_dialog import (
+    SKILL_HEADING_RE,
+    TOOL_USE_HEADING,
+    ApprovalDialog,
+    unboxed,
+)
 from waypoint.backends.claude_tty.pending_calls import PendingCall
 
 _FILE_HEADINGS: dict[str, frozenset[str]] = {
@@ -25,10 +30,11 @@ _FILE_HEADINGS: dict[str, frozenset[str]] = {
     "Read file": frozenset({"Read"}),
 }
 _NEW_FILE_HEADINGS = frozenset({"Create file", "Write file"})
-_SKILL_HEADING_RE = re.compile(r'^Use skill "(.+)"\?$')
 _NUMBERED_RE = re.compile(r"^ *(\d+)(?: (.*))?$")
 _DIFF_LINE_RE = re.compile(r"^ *(\d+) ([-+ ])(.*)$")
 _HUNK_BREAKS = frozenset({"...", "…", "⋮"})
+# Unchanged lines a diff shows around a change, unless the file ends sooner.
+_DIFF_CONTEXT = 3
 _ARGUMENT_RE = re.compile(r"^\s*([\w-]+):(?:\s(.*))?$")
 # Ports a printed URL leaves out.
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -84,7 +90,7 @@ def match_plan_call(
         for call in calls
         if call.name == "ExitPlanMode"
         and call.tool_use_id not in excluded
-        and _path_matches(shown_path, str(call.input.get("planFilePath")), call.cwd)
+        and _path_matches(shown_path, str(call.input.get("planFilePath")), call)
     ]
     return hits[0] if len(hits) == 1 else None
 
@@ -97,9 +103,9 @@ def _consistent(dialog: ApprovalDialog, call: PendingCall) -> bool:
         return call.name in names and _file_matches(dialog, heading, call)
     if heading == "Fetch":
         return call.name == "WebFetch" and _fetch_matches(dialog, call)
-    if heading == "Tool use":
+    if heading == TOOL_USE_HEADING:
         return _tool_use_matches(dialog, call)
-    if skill := _SKILL_HEADING_RE.match(heading):
+    if skill := SKILL_HEADING_RE.match(heading):
         return call.name == "Skill" and call.input.get("skill") == skill.group(1)
     return False
 
@@ -143,11 +149,7 @@ def _bash_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:
     description = call.input.get("description")
     if not isinstance(command, str) or not command.strip():
         return False
-    header = [
-        line
-        for line in dialog.header
-        if line.strip() and not line.strip().startswith("Tip:")
-    ]
+    header = dialog.described_header
     if dialog.body is not None:
         return _spells(command, [unboxed(line) for line in dialog.body]) and (
             not description or _some_lines_spell(str(description), header)
@@ -174,7 +176,7 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
         shown = dialog.target or ""
     else:
         shown = "".join(line.strip() for line in dialog.header)
-    if not _path_matches(shown, path, call.cwd):
+    if not _path_matches(shown, path, call):
         return False
     body = dialog.body or []
     match call.name:
@@ -191,20 +193,21 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
             edits = call.input.get("edits")
             return isinstance(edits, list) and _edits_match(body, edits)
         case "NotebookEdit":
+            # The diff is of the cell, numbered from its first line.
             source = call.input.get("new_source")
-            return _edits_match(body, [{"new_string": source}])
+            return isinstance(source, str) and _overwrite_matches(body, source)
         case _:
             return True
 
 
-def _path_matches(shown: str, path: str, cwd: str | None) -> bool:
+def _path_matches(shown: str, path: str, call: PendingCall) -> bool:
     if not shown:
         return False
     forms = [path]
-    if cwd:
-        forms.append(posixpath.relpath(path, cwd))
+    if call.cwd:
+        forms.append(posixpath.relpath(path, call.cwd))
     if shown.startswith("~/"):
-        return path.endswith(shown[1:])
+        return call.home is not None and path == call.home.rstrip("/") + shown[1:]
     if "…" in shown:
         # A tall dialog cuts the path's start or middle out.
         head, _, tail = shown.rpartition("…")
@@ -248,48 +251,61 @@ def _diff_entries(body: list[str]) -> list[tuple[int, str, list[str]]]:
 
 
 def _overwrite_matches(body: list[str], content: str) -> bool:
+    """Whether the diff's new side is ``content``: its lines under their numbers,
+    and nothing left out where a diff would have shown it."""
     lines = content.splitlines()
-    new = [entry for entry in _diff_entries(body) if entry[1] != "-"]
+    entries = _diff_entries(body)
+    new = [entry for entry in entries if entry[1] != "-"]
     if not new:
         return not content.strip()
-    return all(
+    if not all(
         0 < number <= len(lines) and _spells(lines[number - 1], segments)
         for number, _, segments in new
-    )
-
-
-def _shown_in(text: str, side: list[list[str]]) -> bool:
-    """Whether every line of ``text`` appears within a shown diff line."""
-    shown = [
-        joined
-        for segments in side
-        for joined in (
-            _words(" ".join(segments)),
-            "".join(_words(segment) for segment in segments),
-        )
-    ]
-    return all(
-        any(_words(line) in candidate for candidate in shown)
-        for line in text.splitlines()
-        if line.strip()
-    )
-
-
-def _edits_match(body: list[str], edits: list[object]) -> bool:
-    entries = _diff_entries(body)
-    removed = [segments for _, marker, segments in entries if marker != "+"]
-    added = [segments for _, marker, segments in entries if marker != "-"]
-    if not entries:
+    ):
         return False
+    markers = [marker for _, marker, _ in entries]
+    context = [" "] * _DIFF_CONTEXT
+    return (new[0][0] == 1 or markers[:_DIFF_CONTEXT] == context) and (
+        new[-1][0] == len(lines) or markers[-_DIFF_CONTEXT:] == context
+    )
+
+
+def _squash(text: str) -> str:
+    """``text`` without whitespace, which wrapping adds and drops unmarked."""
+    return "".join(text.split())
+
+
+def _side(entries: list[tuple[int, str, list[str]]], without: str) -> str:
+    """One side of a diff, squashed: all its lines but those marked ``without``."""
+    return "".join(
+        _squash(segment)
+        for _, marker, segments in entries
+        if marker != without
+        for segment in segments
+    )
+
+
+def _edits_match(body: list[str], edits: list[Any]) -> bool:
+    """Whether making ``edits`` to what the diff removes from gives what it adds,
+    so the diff shows these edits and nothing else."""
+    entries = _diff_entries(body)
+    if all(marker == " " for _, marker, _ in entries):
+        return False
+    text = _side(entries, "+")
     for edit in edits:
         if not isinstance(edit, dict):
             return False
-        old, new = edit.get("old_string") or "", edit.get("new_string") or ""
-        if not isinstance(old, str) or not isinstance(new, str):
+        old, new = edit.get("old_string"), edit.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str) or old == new:
             return False
-        if not (_shown_in(old, removed) and _shown_in(new, added)):
+        if not (target := _squash(old)):
             return False
-    return True
+        found = text.count(target)
+        # Without ``replace_all`` Claude requires the text to occur once.
+        if not found or (found > 1 and not edit.get("replace_all")):
+            return False
+        text = text.replace(target, _squash(new))
+    return text == _side(entries, "-")
 
 
 # ── other tools ──

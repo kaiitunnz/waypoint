@@ -14,7 +14,7 @@ keeps its identity, so the tailer's offset stays valid.
 
 A source also reads the files around the transcript, off the tail loop's cursor:
 the transcript's tail, its subagents' transcripts, and any file by path (the
-plan file). Those reads degrade to ``None`` or an empty list.
+plan file). A read that fails gives ``None``; an empty list means nothing there.
 
 Every read returns a :class:`TranscriptRead`. ``observed=False`` means "nothing
 actionable this tick" — a pre-first-turn missing file, an unresolved remote
@@ -66,6 +66,7 @@ _MAX_SEARCH_BACKOFF = 10.0
 # Subagent transcripts under ``<transcript stem>/subagents/``; a workflow's
 # agents sit one folder further down.
 _SUBAGENT_PATTERNS = ("agent-*.jsonl", "workflows/*/agent-*.jsonl")
+# The most of a subagent's meta file read; it is one small JSON object.
 _META_LIMIT = 64 * 1024
 
 
@@ -245,6 +246,16 @@ class TranscriptTreeReader(Protocol):
         when it can't be read. Never raises."""
         ...
 
+    def file_size(self, path: str) -> int | None:
+        """The size of a file on the session's host, or None when it can't be
+        asked. Never raises."""
+        ...
+
+    def home_dir(self) -> str | None:
+        """The home directory on the session's host, or None when it can't be
+        asked. Never raises."""
+        ...
+
 
 class TailedTranscript(TranscriptByteSource, TranscriptTreeReader, Protocol):
     """What a tailer reads: the transcript by offset, and the files around it."""
@@ -330,6 +341,18 @@ class LocalTranscriptByteSource:
         except OSError:
             return None
         return found
+
+    def home_dir(self) -> str | None:
+        try:
+            return str(Path.home())
+        except RuntimeError:
+            return None
+
+    def file_size(self, path: str) -> int | None:
+        try:
+            return Path(path).expanduser().stat().st_size
+        except (OSError, RuntimeError):
+            return None
 
     def read_tail(self, path: str, limit: int) -> Tail | None:
         try:
@@ -419,6 +442,7 @@ class RemoteClaudeTranscriptByteSource:
         self._path: str | None = None
         self._identity: tuple[int, int] | None = None
         self._config_root: str | None = None
+        self._home: str | None = None
         self._next_read_at = 0.0  # monotonic deadline; 0 = read immediately
         self._backoff = _STEADY_INTERVAL
         self._warned: set[str] = set()
@@ -468,7 +492,9 @@ class RemoteClaudeTranscriptByteSource:
         found = []
         try:
             for pattern in _SUBAGENT_PATTERNS:
-                for transcript in self._fs.glob(root, pattern):
+                if (transcripts := self._fs.probe_glob(root, pattern)) is None:
+                    return None
+                for transcript in transcripts:
                     meta = self._fs.read_range(_meta_path(transcript), 0, _META_LIMIT)
                     if meta is None:
                         return None
@@ -483,17 +509,35 @@ class RemoteClaudeTranscriptByteSource:
             return None
         return found
 
-    def read_tail(self, path: str, limit: int) -> Tail | None:
+    def home_dir(self) -> str | None:
+        if self._home is None:
+            try:
+                self._home = self._fs.expanduser("~")
+            except Exception:
+                self._warn_once("home", "remote home lookup failed")
+        return self._home
+
+    def file_size(self, path: str) -> int | None:
         try:
-            read = self._fs.read_range(path, 0, limit)
-            if isinstance(read, RemoteRead) and read.size > limit:
-                read = self._fs.read_range(path, read.size - limit, limit)
-                if isinstance(read, RemoteRead):
-                    return Tail(read.data, truncated=True)
+            read = self._fs.read_range(path, 0, 0)
         except Exception:
             self._warn_once("tail", "remote file read failed")
             return None
-        return Tail(read.data) if isinstance(read, RemoteRead) else None
+        return read.size if isinstance(read, RemoteRead) else None
+
+    def read_tail(self, path: str, limit: int) -> Tail | None:
+        # Sized first, so a long file's head is not downloaded to be dropped.
+        if (size := self.file_size(path)) is None:
+            return None
+        start = max(0, size - limit)
+        try:
+            read = self._fs.read_range(path, start, limit)
+        except Exception:
+            self._warn_once("tail", "remote file read failed")
+            return None
+        if not isinstance(read, RemoteRead):
+            return None
+        return Tail(read.data, truncated=start > 0)
 
     def _transcript_path(self) -> str | None:
         if self._path is not None:

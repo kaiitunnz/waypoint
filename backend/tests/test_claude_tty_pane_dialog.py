@@ -864,6 +864,19 @@ def test_pane_reading_never_names_a_call_above_the_dialog() -> None:
     assert "sleep 60" not in (dialog.target or "")
 
 
+@pytest.mark.parametrize(
+    "quoted",
+    [
+        "ready to execute. Would you like to proceed?",
+        "Enter to select · Esc to cancel",
+    ],
+)
+def test_a_fetch_prompt_quoting_another_dialog_stays_a_fetch(quoted: str) -> None:
+    screen = _load("approval_fetch_subagent.txt").replace(" title text.", f" {quoted}")
+    assert quoted in screen
+    assert classify(screen) is PaneScreen.APPROVAL
+
+
 def test_footerless_fetch_dialog_is_an_approval() -> None:
     screen = _load("approval_fetch_subagent.txt")
     assert "Esc to cancel" not in screen

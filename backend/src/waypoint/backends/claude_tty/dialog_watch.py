@@ -46,6 +46,9 @@ log = logging.getLogger("waypoint.backends.claude_tty")
 
 # Consecutive identical captures before a dialog is acted on.
 _STABLE_TICKS = 2
+# Polls without a dialog before the requests seen count as answered: one can
+# catch the TUI mid-redraw.
+_CLEARED_POLLS = 2
 # Polls an unverified card is matched again for a late-written call.
 _REMATCH_POLLS = 5
 # Polls between checks that a verified card's call is still pending.
@@ -226,8 +229,10 @@ class DialogWatcher:
         # Dialogs answered while no call was named, by identity, and when. The
         # record of the call may be written late.
         self._unnamed: dict[str, tuple[pane_dialog.ApprovalDialog, float]] = {}
-        # The request whose dialog was missing from the last poll.
-        self._departing: PendingTtyApproval | None = None
+        # Requests raised whose dialogs are not yet known to be answered.
+        self._asking: list[PendingTtyApproval] = []
+        # Consecutive polls without a dialog.
+        self._cleared_polls = 0
         # The popup kind already sent Esc this appearance, so one popup replacing
         # another still gets its own.
         self._dismissed_screen: pane_dialog.PaneScreen | None = None
@@ -283,11 +288,13 @@ class DialogWatcher:
             case _ if screen in _ESC_DISMISS_LOG:
                 await self._dismiss(pane, screen)
             case pane_dialog.PaneScreen.PLAN:
-                if self._departing is not None and not self._departing.is_plan:
-                    self.mark_answered(self._departing)
-                self._departing = None
+                self._cleared_polls = 0
+                # The plan dialog comes up only once other requests are answered.
+                for request in [r for r in self._asking if not r.is_plan]:
+                    self.mark_answered(request)
                 await self._poll_plan(session, snapshot, entry)
             case pane_dialog.PaneScreen.APPROVAL:
+                self._cleared_polls = 0
                 await self._poll_approval(pane, snapshot, entry)
             case _:
                 await self._on_no_dialog()
@@ -300,10 +307,14 @@ class DialogWatcher:
     def mark_answered(self, pending: PendingTtyApproval) -> None:
         """Note that ``pending``'s request was answered: its call is not named
         again, even for a dialog that reads the same."""
+        self._drop_request(pending)
         if pending.call is not None:
             self._answered.add(pending.call.tool_use_id)
         elif pending.dialog is not None:
             self._unnamed[pending.dialog.identity] = (pending.dialog, time.time())
+
+    def _drop_request(self, pending: PendingTtyApproval) -> None:
+        self._asking = [r for r in self._asking if r is not pending]
 
     async def reply_refusal(self, pending: PendingTtyApproval) -> str | None:
         """Why a reply to ``pending`` must not be sent, as the note for its card;
@@ -394,13 +405,10 @@ class DialogWatcher:
             self._dismissed_screen = screen
 
     async def _on_no_dialog(self) -> None:
-        # One poll can catch the TUI mid-redraw, so a call counts as answered in
-        # the terminal once its dialog is gone for two.
-        if self._surfaced is not None:
-            self._departing = self._surfaced.pending
-        elif self._departing is not None:
-            self.mark_answered(self._departing)
-            self._departing = None
+        self._cleared_polls += 1
+        if self._cleared_polls == _CLEARED_POLLS:
+            for request in list(self._asking):
+                self.mark_answered(request)
         await self._expire_adoptable()
         await self._plugin.drop_pending_approval(
             self._runtime, self._session_id, _DIALOG_CLOSED_NOTE
@@ -434,13 +442,7 @@ class DialogWatcher:
     ) -> None:
         if (dialog := await self._read_approval(pane, snapshot)) is None:
             self._reset_debounce()
-            return
-        if departing := self._departing:
-            self._departing = None
-            # Gone for one capture only, unless another request took its place.
-            if _asks_something_else(departing, dialog):
-                self.mark_answered(departing)
-        if self._is_stable(dialog.identity):
+        elif self._is_stable(dialog.identity):
             await self._surface_approval(dialog, entry)
 
     async def _read_approval(
@@ -513,6 +515,10 @@ class DialogWatcher:
     async def _surface_approval(
         self, dialog: pane_dialog.ApprovalDialog, entry: PendingTtyApproval | None
     ) -> None:
+        # A request this dialog is no redraw of was answered in the terminal.
+        for request in list(self._asking):
+            if _asks_something_else(request, dialog):
+                self.mark_answered(request)
         shown = self._surfaced
         card_open = shown is not None and self._card_open(shown)
         same_dialog = shown is not None and shown.pending.identity == dialog.identity
@@ -522,13 +528,6 @@ class DialogWatcher:
                     return
             elif not await self._replied_dialog_remains(dialog, shown):
                 return
-        elif (
-            shown is not None
-            and card_open
-            and _asks_something_else(shown.pending, dialog)
-        ):
-            # Answered in the terminal, with the next dialog drawn at once.
-            self.mark_answered(shown.pending)
 
         call = await self._match(dialog)
         if self._overtaken(entry):
@@ -562,6 +561,8 @@ class DialogWatcher:
             call=call,
             dialog=dialog,
         )
+        if shown is not None and updated:
+            self._drop_request(shown.pending)  # the same request, now named
         closing_note = _UPDATED_NOTE if updated else _DIALOG_CLOSED_NOTE
         if await self._register(pending, closing_note):
             await self._emit_card(
@@ -701,6 +702,7 @@ class DialogWatcher:
         pending.approval_id = adopted or str(uuid.uuid4())
         self._plugin._pending_approvals[self._session_id] = pending
         self._surfaced = _Surfaced(pending)
+        self._asking.append(pending)
         if adopted:
             # No event reports the adoption, but the card is answerable again.
             self._runtime.asks.mark_dirty(self._session_id)

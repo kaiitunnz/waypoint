@@ -334,6 +334,27 @@ async def test_a_dialog_that_follows_one_blank_capture_answered_the_first(
     assert _named(pane.asks[-1]) == (False, None)
 
 
+async def test_a_call_is_not_kept_past_a_request_that_cannot_be_read(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+    first = pane.screen
+
+    # Answered in the terminal, and the next request's heading is cut short.
+    pane.screen = _screen("approval_subagent_bash_decoy.txt").replace(
+        "from the general-purpose agent", "from the"
+    )
+    await pane.poll()
+    pane.screen = _screen("ready.txt")
+    await pane.poll(2)
+    pane.screen = first
+    await pane.poll()
+
+    assert _named(pane.asks[-1]) == (False, None)
+
+
 async def test_a_redraw_that_cannot_be_read_answers_nothing(tmp_path: Path) -> None:
     pane = Pane(tmp_path, "approval_subagent_bash_decoy.txt")
     write_subagent(

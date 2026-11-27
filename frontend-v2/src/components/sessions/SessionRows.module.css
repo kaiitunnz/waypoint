@@ -4,10 +4,12 @@
   gap: 16px;
 }
 
+/* Top-aligned: the glyph has no baseline, which would lift the time off its line. */
 .pinned {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  vertical-align: top;
 }
 
 .agent {

@@ -1,5 +1,6 @@
 import { defaultTransportFor, humaniseBackend, type BackendCatalog } from "../backends";
 import { matchesQuery, parseQuery } from "../search";
+import { serverNow } from "../serverClock";
 import type { Backend, SessionTransport } from "../types";
 
 // A resumable native thread as the threads endpoint lists it; every agent's
@@ -160,7 +161,7 @@ export function deleteThreadMessage(thread: ThreadSummary): string {
 }
 
 // "just now" under a minute, else a relative day, hour or minute count.
-export function formatThreadTime(value: string, now: number = Date.now()): string {
+export function formatThreadTime(value: string, now: number = serverNow()): string {
   const deltaSeconds = Math.round((new Date(value).getTime() - now) / 1000);
   if (Math.abs(deltaSeconds) < 60) return "just now";
   const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [

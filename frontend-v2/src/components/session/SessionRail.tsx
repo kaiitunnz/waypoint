@@ -4,38 +4,24 @@ import Link from "next/link";
 import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 
 import type { BackendCatalog } from "@waypoint/web-core/backends";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
-import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { useLongPress } from "@waypoint/web-core/hooks/useLongPress";
-import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
-import {
-  agentModelLabel,
-  brightPreview,
-  formatSessionTime,
-  lampWord,
-  sessionLamp,
-  showsUnread,
-  spokenStatus,
-  type SessionLamp,
-} from "@waypoint/web-core/sessionPresentation";
+import { agentModelLabel, type SessionLamp } from "@waypoint/web-core/sessionPresentation";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import { rankSessionsForSwitcher, SWITCHER_SECTION_LABELS, type SwitcherSection } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
-import { ActivityLine } from "@/components/sessions/ActivityLine";
 import { ExitedGroup } from "@/components/sessions/ExitedGroup";
-import { PinMark } from "@/components/sessions/PinMark";
+import { RailHeading, RailItem, useRailRows } from "@/components/sessions/RailItem";
 import { SessionMenu, type SessionAction } from "@/components/sessions/SessionMenu";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
 import { useExitedSessions } from "@/components/sessions/useExitedSessions";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
-import { StatusLamp } from "@/components/ui/StatusLamp";
-import { handleAuthFailure } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { useShowExited } from "@/lib/show-exited";
 import { cx } from "@/lib/cx";
-import { useSessionsData, useShellData } from "@/lib/shell-data";
+import { useSessionsData } from "@/lib/shell-data";
 
 import { PanelButton } from "./PanelButton";
 import styles from "./SessionRail.module.css";
@@ -50,10 +36,9 @@ interface RailRowProps {
   current: boolean;
   now: number;
   lamp: SessionLamp;
+  section: SwitcherSection;
   // The second line, or null for a one-line row.
   sub: ReactNode;
-  // Under a heading that does not say it is pinned.
-  pinMark: boolean;
   menuOpen: boolean;
   onMenuOpen: (open: boolean) => void;
   menuSubtitle: string;
@@ -66,8 +51,8 @@ function RailRow({
   current,
   now,
   lamp,
+  section,
   sub,
-  pinMark,
   menuOpen,
   onMenuOpen,
   menuSubtitle,
@@ -76,8 +61,6 @@ function RailRow({
 }: RailRowProps) {
   const pointer = usePointerUI();
   const press = useLongPress(() => onMenuOpen(true));
-  const unread = showsUnread(session);
-  const single = sub === null;
   const onContextMenu = (event: MouseEvent) => {
     press.onContextMenu(event);
     // Android also fires this for a long press, which opens the menu itself.
@@ -86,29 +69,27 @@ function RailRow({
     onMenuOpen(true);
   };
   return (
-    <li className={cx(styles.row, single && styles.single)}>
-      <Link
-        {...press}
-        onContextMenu={onContextMenu}
-        draggable={pointer ? undefined : false}
-        href={sessionHref(session.id)}
-        onNavigate={onNavigate}
-        aria-current={current ? "page" : undefined}
-        className={cx(
-          styles.item,
-          unread && styles.unread,
-          current && styles.on,
-          lamp === "exited" && styles.exited,
+    <li className={cx(styles.row, sub === null && styles.single)}>
+      <RailItem
+        session={session}
+        lamp={lamp}
+        section={section}
+        now={now}
+        sub={sub}
+        className={cx(styles.item, current && styles.on)}
+        timeClassName={styles.time}
+        render={(row) => (
+          <Link
+            {...press}
+            {...row}
+            onContextMenu={onContextMenu}
+            draggable={pointer ? undefined : false}
+            href={sessionHref(session.id)}
+            onNavigate={onNavigate}
+            aria-current={current ? "page" : undefined}
+          />
         )}
-      >
-        <StatusLamp state={lamp} size="sm" label={spokenStatus(lampWord(lamp, session.status), unread)} />
-        <span className={styles.name}>{session.title}</span>
-        <span className={styles.time}>
-          {pinMark ? <PinMark /> : null}
-          {formatSessionTime(session.last_event_at, now)}
-        </span>
-        {single ? null : <span className={styles.sub}>{sub}</span>}
-      </Link>
+      />
       <span className={styles.actions}>
         <SessionMenu
           session={session}
@@ -133,10 +114,9 @@ interface SessionRailProps {
 }
 
 export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: SessionRailProps) {
-  const { host, token } = useShellData();
   const feed = useSessionsData();
   const switcher = useSwitcher();
-  const now = useNow();
+  const now = useServerNow();
   const [showExited, setShowExited] = useShowExited();
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -159,8 +139,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
 
   // The previews follow the rows that show them: pinned and live, not the exited.
   const previewed = useMemo(() => [...pinned, ...live], [pinned, live]);
-  const [previews] = useConversationPreviews();
-  const activities = useSessionActivity(host, token, previewed, handleAuthFailure, previews);
+  const railRow = useRailRows(previewed);
   const { count: exitedCount, listed, paging } = useExitedSessions({
     query: "",
     live: unpinnedExited,
@@ -168,7 +147,6 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
     enabled: showExited,
     remember: true,
   });
-  const asks = feed.pendingAsks?.items ?? [];
 
   // The session whose menu is open, held here so a row that changes section keeps it.
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -176,19 +154,7 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
   if (menuFor !== null && !drawn.some((session) => session.id === menuFor)) setMenuFor(null);
 
   const row = (session: SessionRecord, section: SwitcherSection) => {
-    const lamp = sessionLamp(session, feed.askSessionIds.has(session.id));
-    const ask = asks.find((item) => item.session_id === session.id);
-    // Needs-you rows keep their ask line.
-    const single = section === "exited" || (!previews && section !== "needs");
-    const sub = single ? null : section === "needs" && ask ? (
-      ask.title
-    ) : (
-      <ActivityLine
-        fallback={lampWord(lamp, session.status)}
-        activity={activities.get(session.id)}
-        bright={brightPreview(session, lamp)}
-      />
-    );
+    const { lamp, sub } = railRow(session, section);
     return (
       <RailRow
         key={session.id}
@@ -196,8 +162,8 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
         current={session.id === currentId}
         now={now}
         lamp={lamp}
+        section={section}
         sub={sub}
-        pinMark={section !== "pinned" && Boolean(session.pinned_at)}
         menuOpen={menuFor === session.id}
         onMenuOpen={(open) => setMenuFor(open ? session.id : null)}
         menuSubtitle={agentModelLabel(session, catalog)}
@@ -222,9 +188,12 @@ export function SessionRail({ currentId, catalog, onAction, onClose, onPick }: S
           if (sessions.length === 0) return null;
           return (
             <section key={section}>
-              <h3 className={styles.sectionHead}>
-                {SWITCHER_SECTION_LABELS[section]} <span className={styles.count}>{sessions.length}</span>
-              </h3>
+              <RailHeading
+                as="h3"
+                label={SWITCHER_SECTION_LABELS[section]}
+                count={sessions.length}
+                className={styles.sectionHead}
+              />
               <ul className={styles.list}>{sessions.map((session) => row(session, section))}</ul>
             </section>
           );

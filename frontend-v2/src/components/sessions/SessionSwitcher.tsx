@@ -1,18 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
-import { useBackendCatalog } from "@waypoint/web-core/backends";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
-import {
-  agentModelLabel,
-  formatSessionTime,
-  lampWord,
-  sessionLamp,
-  showsUnread,
-  spokenStatus,
-} from "@waypoint/web-core/sessionPresentation";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { HOME_HIDDEN_SOURCES } from "@waypoint/web-core/sessionSections";
 import { sessionHref } from "@waypoint/web-core/shellNav";
 import { useSessionHistory } from "@waypoint/web-core/sessionHistory";
@@ -28,40 +19,23 @@ import type { SessionRecord } from "@waypoint/web-core/types";
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Dialog } from "@/components/ui/Dialog";
 import { SearchInput } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
-import { StatusLamp } from "@/components/ui/StatusLamp";
 import { handleAuthFailure } from "@/lib/auth";
-import { cx } from "@/lib/cx";
 import { useShowExited } from "@/lib/show-exited";
 import { usePointerUI } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
 
-import { PinMark } from "./PinMark";
+import { ExitedToggle } from "./ExitedGroup";
+import { RailHeading, RailItem, useRailRows } from "./RailItem";
 import styles from "./SessionSwitcher.module.css";
 import { EXITED_PAGE_SIZE } from "./useExitedSessions";
 
-function highlighted(title: string, positions: number[]): ReactNode {
-  if (positions.length === 0) return title;
-  const marked = new Set(positions);
-  return [...title].map((char, index) =>
-    marked.has(index) ? (
-      <b key={index} className={styles.hit}>
-        {char}
-      </b>
-    ) : (
-      char
-    ),
-  );
-}
-
-// Exited sessions page in from the server.
+// The session rail's rows, searched. Exited sessions page in from the server.
 export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const pointer = usePointerUI();
   const { host, token } = useShellData();
   const feed = useSessionsData();
-  const catalog = useBackendCatalog(host, token, null);
-  const now = useNow();
+  const now = useServerNow();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const list = useRef<HTMLUListElement>(null);
@@ -88,6 +62,13 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const listed = useMemo(() => all.filter((entry) => entry.section !== "exited"), [all]);
   const exited = useMemo(() => (showExited ? all.slice(listed.length) : []), [all, listed, showExited]);
   const entries = showExited ? all : listed;
+
+  // The previews follow the rows that show them: pinned and live.
+  const previewed = useMemo(
+    () => listed.filter((entry) => entry.section !== "needs").map((entry) => entry.session),
+    [listed],
+  );
+  const railRow = useRailRows(previewed);
 
   const exitedCount = ranked.filter((entry) => entry.section === "exited").length + (counted.total ?? 0);
   // The heading stays until the count is known to be zero, so the toggle is never unmounted under the focus.
@@ -127,38 +108,40 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   }
 
   const renderEntry = (entry: SwitcherEntry, index: number) => {
-    const { session } = entry;
-    const lamp = sessionLamp(session, askSessionIds.has(session.id));
-    const unread = showsUnread(session);
-    const heading =
-      entry.section !== "exited" && entry.section !== entries[index - 1]?.section
-        ? SWITCHER_SECTION_LABELS[entry.section]
-        : null;
+    const { session, section } = entry;
+    const { lamp, sub } = railRow(session, section);
+    const heading = section !== "exited" && section !== entries[index - 1]?.section;
     return (
       <li key={session.id} role="presentation">
-        {heading ? <div className={styles.heading}>{heading}</div> : null}
-        <button
-          type="button"
-          role="option"
-          id={`${listId}-${session.id}`}
-          aria-selected={index === selected}
-          tabIndex={-1}
-          className={cx(styles.option, unread && styles.unread, lamp === "exited" && styles.exited)}
-          onMouseMove={() => setActive(index)}
-          onClick={() => open(session)}
-        >
-          <span className={styles.lamp}>
-            <StatusLamp state={lamp} label={spokenStatus(lampWord(lamp, session.status), unread)} />
-          </span>
-          <span className={styles.text}>
-            <span className={styles.title}>{highlighted(session.title, entry.positions)}</span>
-            <span className={styles.meta}>{agentModelLabel(session, catalog)}</span>
-          </span>
-          <span className={styles.time}>
-            {session.pinned_at && entry.section !== "pinned" ? <PinMark /> : null}
-            {formatSessionTime(session.last_event_at, now)}
-          </span>
-        </button>
+        {heading ? (
+          <RailHeading
+            as="div"
+            label={SWITCHER_SECTION_LABELS[section]}
+            count={listed.filter((other) => other.section === section).length}
+            className={styles.heading}
+          />
+        ) : null}
+        <RailItem
+          session={session}
+          lamp={lamp}
+          section={section}
+          now={now}
+          positions={entry.positions}
+          sub={sub}
+          className={styles.option}
+          render={(row) => (
+            <button
+              {...row}
+              type="button"
+              role="option"
+              id={`${listId}-${session.id}`}
+              aria-selected={index === selected}
+              tabIndex={-1}
+              onMouseMove={() => setActive(index)}
+              onClick={() => open(session)}
+            />
+          )}
+        />
       </li>
     );
   };
@@ -166,18 +149,12 @@ export function SessionSwitcher({ onClose }: { onClose: () => void }) {
   const exitedHeading =
     exitedCount > 0 || exitedUnknown ? (
       <li role="presentation">
-        <button
-          type="button"
-          className={styles.groupToggle}
-          aria-expanded={showExited}
-          onClick={() => setShowExited(!showExited)}
-        >
-          <span>{SWITCHER_SECTION_LABELS.exited}</span>
-          {counted.total === null ? null : <span className={styles.groupCount}>{exitedCount}</span>}
-          <span className={showExited ? styles.open : styles.chevron}>
-            <Icon name="chevron-right" size={14} strokeWidth={2} />
-          </span>
-        </button>
+        <ExitedToggle
+          label={counted.total === null ? SWITCHER_SECTION_LABELS.exited : `${exitedCount} exited`}
+          open={showExited}
+          onToggle={() => setShowExited(!showExited)}
+          className={styles.exitedToggle}
+        />
       </li>
     ) : null;
 

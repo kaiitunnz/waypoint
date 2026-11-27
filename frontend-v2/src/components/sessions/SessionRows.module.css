@@ -4,14 +4,6 @@
   gap: 16px;
 }
 
-/* Top-aligned: the glyph has no baseline, which would lift the time off its line. */
-.pinned {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  vertical-align: top;
-}
-
 .agent {
   color: var(--faint);
 }
@@ -38,9 +30,9 @@
 .tile {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
-  padding: 13px 16px;
+  padding: 11px 16px;
   border-radius: var(--r-card);
   background: var(--plane-raised);
 }
@@ -81,22 +73,36 @@
   color: var(--text-strong);
 }
 
-.step {
+.state {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   min-width: 0;
   font-size: var(--f-body);
   color: var(--muted);
+  white-space: nowrap;
 }
 
-.agentLine {
-  margin-top: 5px;
+.state > :first-child {
+  align-self: center;
+}
+
+.sep {
+  color: var(--faint);
+}
+
+.stateAgent {
+  min-width: 0;
   overflow: hidden;
   font-size: var(--f-meta);
   color: var(--faint);
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.preview {
+  min-width: 0;
+  font-size: var(--f-body);
+  color: var(--muted);
 }
 
 .menu {

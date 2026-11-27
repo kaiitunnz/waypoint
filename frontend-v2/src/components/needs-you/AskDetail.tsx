@@ -5,7 +5,7 @@ import { useMemo } from "react";
 import { humaniseBackend } from "@waypoint/web-core/backends";
 import { useApprovalRequest } from "@waypoint/web-core/hooks/useApprovalRequest";
 import { useAskQuestionState, type AskQuestionController } from "@waypoint/web-core/hooks/useAskQuestionState";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { askUserQuestions } from "@waypoint/web-core/needsYou";
 import { answersScreenDialog, decideAsk, decisionView } from "@waypoint/web-core/pendingAskActions";
 import { approvalCopyText } from "@waypoint/web-core/session/approvals";
@@ -161,7 +161,7 @@ function RequestDetail({ ask, session, agent }: RequestDetailProps) {
 
 function AskView({ ask }: { ask: PendingAsk }) {
   const { catalog } = useShellData();
-  const now = useNow(30_000);
+  const now = useServerNow(30_000);
   const pointer = usePointerUI();
   const agent = humaniseBackend(ask.session_backend, catalog);
   const askSession = useAskSessions();

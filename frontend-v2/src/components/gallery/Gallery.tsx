@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 
+import { SessionTime } from "@/components/sessions/SessionTime";
 import { ActionChip } from "@/components/ui/ActionChip";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -176,11 +177,29 @@ export function Gallery() {
 
       <SectionHeading title="List rows" count={7} action="See all" />
       <List>
-        <ListRow lamp="needs" unread title="Fix held-message race" status="Which fix should I ship?" trailing="09:16" />
-        <ListRow lamp="idle" unread title="Queue backoff, unread" single trailing="12m" />
-        <ListRow lamp="idle" unread={false} title="Paper figures" single trailing="Yesterday" />
-        <ListRow lamp="error" unread={false} title="Nightly sweep" single trailing="Mon" />
-        <ListRow lamp="exited" unread={false} dimmed title="Old release notes" single trailing="Nov 20" />
+        <ListRow
+          lamp="needs"
+          unread
+          title="Fix held-message race"
+          status="Which fix should I ship?"
+          trailing={<SessionTime time="09:16" unread />}
+        />
+        <ListRow
+          lamp="idle"
+          unread
+          title="Queue backoff, unread"
+          status="Claude Code, Opus 4.8"
+          trailing={<SessionTime time="12m" unread />}
+        />
+        <ListRow
+          lamp="idle"
+          unread={false}
+          title="Paper figures"
+          status="Codex, waypoint"
+          trailing={<SessionTime time="Yesterday" pinned />}
+        />
+        <ListRow lamp="error" unread={false} title="Nightly sweep" status="Claude Code, main" trailing="Mon" />
+        <ListRow lamp="exited" unread={false} dimmed title="Old release notes" status="Claude Code, main" trailing="Nov 20" />
         <ListRow
           lamp="working"
           unread={false}

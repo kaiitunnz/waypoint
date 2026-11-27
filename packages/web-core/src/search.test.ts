@@ -11,10 +11,15 @@ describe("parseQuery", () => {
   it("lowercases plain terms and ANDs them in one group", () => {
     expect(parseQuery("Foo BAR")).toEqual([
       [
-        { field: undefined, isRegex: false, value: "foo" },
-        { field: undefined, isRegex: false, value: "bar" },
+        { field: undefined, isRegex: false, value: "foo", start: 0, end: 3 },
+        { field: undefined, isRegex: false, value: "bar", start: 4, end: 7 },
       ],
     ]);
+  });
+
+  it("places each term in the query, its field included", () => {
+    const query = "agent:codex  AND /home/me";
+    expect(parseQuery(query)[0].map((t) => query.slice(t.start, t.end))).toEqual(["agent:codex", "/home/me"]);
   });
 
   it("splits OR into groups and ignores AND and repeated or leading ORs", () => {
@@ -50,6 +55,14 @@ describe("parseQuery", () => {
       ["title", "fix the bug"],
       [undefined, "two words"],
     ]);
+  });
+
+  it("matches every item on its own, whatever flags a /regex/ carries", () => {
+    const sessions = [{ cwd: "/home/a" }, { cwd: "/home/b" }];
+    for (const query of ["/home/g", "/home/y"]) {
+      const parsed = parseQuery(query);
+      expect(sessions.filter((s) => matchesQuery(s, parsed, ["cwd"]))).toHaveLength(2);
+    }
   });
 
   it("compiles /regex/ terms case-insensitively", () => {

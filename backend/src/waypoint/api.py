@@ -297,6 +297,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Clients measure clock skew from it.
+        expose_headers=["Date"],
     )
     app.state.context = context
 

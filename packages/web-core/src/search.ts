@@ -2,6 +2,9 @@ export interface SearchTerm {
   field?: string;
   isRegex: boolean;
   value: string | RegExp;
+  // Where the term, its field included, sits in the query.
+  start: number;
+  end: number;
 }
 
 export type SearchGroup = SearchTerm[]; // AND terms
@@ -57,7 +60,10 @@ export function parseQuery(query: string): ParsedQuery {
       const flags = rawValue.slice(lastSlash + 1);
       try {
         const finalFlags = flags.includes('i') ? flags : flags + 'i';
-        value = new RegExp(pattern, finalFlags);
+        const compiled = new RegExp(pattern, finalFlags);
+        // A path such as `/home/my` reads as flags; `y` would anchor the match, which
+        // the server's search does not.
+        value = compiled.sticky ? new RegExp(pattern, compiled.flags.replace('y', '')) : compiled;
         isRegex = true;
       } catch {
         // Fallback safely to a plain string if regex compilation fails
@@ -71,7 +77,7 @@ export function parseQuery(query: string): ParsedQuery {
       value = rawValue.toLowerCase();
     }
 
-    currentGroup.push({ field, isRegex, value });
+    currentGroup.push({ field, isRegex, value, start: match.index, end: regex.lastIndex });
   }
   
   if (currentGroup.length > 0) {
@@ -101,7 +107,10 @@ export function matchesQuery(item: any, groups: ParsedQuery, defaultFields: stri
         
         const strValue = String(itemValue);
         if (term.isRegex) {
-          if ((term.value as RegExp).test(strValue)) {
+          const pattern = term.value as RegExp;
+          // A `g` regex would otherwise resume where its match on the previous item ended.
+          pattern.lastIndex = 0;
+          if (pattern.test(strValue)) {
             termMatched = true;
             break;
           }

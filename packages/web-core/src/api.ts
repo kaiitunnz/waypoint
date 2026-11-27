@@ -56,6 +56,7 @@ import {
   UsageProviderOption,
 } from "./types";
 import { parseDiffPreviewPayload, type EventDiffPreview } from "./events";
+import { syncServerClock } from "./serverClock";
 import { parseTerminalFrame } from "./session/terminal";
 import type { TelemetryFiltersState, TelemetryRangeState } from "./telemetry";
 import { telemetryParams } from "./telemetry";
@@ -2119,11 +2120,13 @@ interface SocketHandlers {
   onClose?: (event: CloseEvent) => void;
 }
 
-function attachHandlers(socket: WebSocket, handlers: SocketHandlers): WebSocket {
+function openSocket(host: string, path: string, handlers: SocketHandlers): WebSocket {
+  const socket = new WebSocket(`${host.replace(/^http/, "ws")}${path}`);
   socket.onmessage = (event) => {
     handlers.onMessage(JSON.parse(event.data) as SessionEnvelope);
   };
   socket.onopen = () => {
+    void syncServerClock(host);
     handlers.onOpen?.();
   };
   socket.onclose = (event) => {
@@ -2143,8 +2146,8 @@ export function connectSessionsSocket(
   onAuthFailure?: () => void,
   extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
 ): WebSocket {
-  const url = `${host.replace(/^http/, "ws")}/ws/sessions?token=${encodeURIComponent(token)}`;
-  return attachHandlers(new WebSocket(url), { onMessage, onAuthFailure, ...extra });
+  const path = `/ws/sessions?token=${encodeURIComponent(token)}`;
+  return openSocket(host, path, { onMessage, onAuthFailure, ...extra });
 }
 
 export function connectSessionSocket(
@@ -2155,8 +2158,8 @@ export function connectSessionSocket(
   onAuthFailure?: () => void,
   extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
 ): WebSocket {
-  const url = `${host.replace(/^http/, "ws")}/ws/sessions/${sessionId}?token=${encodeURIComponent(token)}`;
-  return attachHandlers(new WebSocket(url), { onMessage, onAuthFailure, ...extra });
+  const path = `/ws/sessions/${sessionId}?token=${encodeURIComponent(token)}`;
+  return openSocket(host, path, { onMessage, onAuthFailure, ...extra });
 }
 
 export interface InboxListPage {
@@ -2325,8 +2328,8 @@ export function connectInboxSocket(
   onAuthFailure?: () => void,
   extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
 ): WebSocket {
-  const url = `${host.replace(/^http/, "ws")}/ws/inbox/${id}?token=${encodeURIComponent(token)}`;
-  return attachHandlers(new WebSocket(url), { onMessage, onAuthFailure, ...extra });
+  const path = `/ws/inbox/${id}?token=${encodeURIComponent(token)}`;
+  return openSocket(host, path, { onMessage, onAuthFailure, ...extra });
 }
 
 interface TerminalSocketHandlers {

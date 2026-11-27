@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { batchDeleteInboxItems, deleteInboxItem, deleteResolvedInboxItems } from "@waypoint/web-core/api";
 import { humaniseBackend } from "@waypoint/web-core/backends";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { useSelection } from "@waypoint/web-core/hooks/useSelection";
 import type { InboxStatusFilter } from "@waypoint/web-core/inbox";
 import type { QueueEntry, SourceFilter } from "@waypoint/web-core/needsYou";
@@ -70,7 +70,7 @@ const CONFIRM: Record<Deletion["kind"], (count: number) => { title: string; deta
 export function QueuePane() {
   const { host, token, waiting: counts, retryGates, catalog } = useShellData();
   const { columns, selected, leave } = useNeedsYou();
-  const now = useNow(30_000);
+  const now = useServerNow(30_000);
   const toastFailure = useFailureToast();
 
   const [status, setStatus] = useState<InboxStatusFilter>("open");

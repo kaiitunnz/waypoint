@@ -36,18 +36,7 @@
 }
 
 .sectionHead {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
   padding: 14px 16px 4px;
-  font-size: var(--f-meta);
-  font-weight: 600;
-  color: var(--text);
-}
-
-.count {
-  font-weight: 400;
-  color: var(--faint);
 }
 
 .list {
@@ -61,11 +50,6 @@
 }
 
 .item {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
-  align-items: center;
-  column-gap: 10px;
-  min-height: 46px;
   margin-left: 8px;
   padding: 6px 14px;
   border-radius: var(--r) 0 0 var(--r);
@@ -115,59 +99,9 @@
   }
 }
 
-.name {
-  overflow: hidden;
-  font-size: var(--f-body);
-  color: var(--text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.unread .name {
-  font-weight: 600;
-  color: var(--text-strong);
-}
-
-.on .name {
-  color: var(--text-strong);
-}
-
-.time {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: var(--f-meta);
-  color: var(--faint);
-}
-
-.unread .time {
-  color: var(--text-strong);
-}
-
-.sub {
-  grid-column: 2 / 4;
-  overflow: hidden;
-  font-size: var(--f-meta);
-  color: var(--faint);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.single .item {
-  min-height: 36px;
-}
-
-.exited .name {
-  color: var(--muted);
-}
-
 /* Touch opens the menu by a long press. The button shows for keyboard focus and
    otherwise stays for a screen reader. */
 @media not all and (hover: hover) and (pointer: fine) {
-  .single .item {
-    min-height: 44px;
-  }
-
   .item {
     -webkit-touch-callout: none;
     user-select: none;

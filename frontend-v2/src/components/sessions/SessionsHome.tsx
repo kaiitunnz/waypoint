@@ -7,7 +7,7 @@ import { useBoardSummary } from "@waypoint/web-core/hooks/useBoardSummary";
 import { useLaunchContext } from "@waypoint/web-core/hooks/useLaunchContext";
 import { seedRecentCwdsFromHistory } from "@waypoint/web-core/launch/folders";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { useScheduleTargetSessions } from "@waypoint/web-core/hooks/useScheduleTargetSessions";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
 import { useUsageSummary } from "@waypoint/web-core/hooks/useUsageSummary";
@@ -33,7 +33,7 @@ import { HomeHeader } from "./HomeHeader";
 import { NeedsYouSection } from "./NeedsYouSection";
 import { SearchResults } from "./SearchResults";
 import { SessionMenu } from "./SessionMenu";
-import { CompactRow, LiveRow, LiveTile, ResultRow } from "./SessionRows";
+import { CompactRow, LiveTile, ResultRow } from "./SessionRows";
 import { useExitedSessions } from "./useExitedSessions";
 import { useSessionMenuActions } from "./useSessionMenuActions";
 import { useSwitcher } from "./SwitcherProvider";
@@ -50,7 +50,7 @@ export function SessionsHome() {
   const { onAction, openDialog, dialogs } = useSessionMenuActions();
   const switcher = useSwitcher();
   const catalog = useBackendCatalog(host, token, null);
-  const now = useNow(30_000);
+  const now = useServerNow(30_000);
   const usage = useUsageSummary(host, token, handleAuthFailure);
   const board = useBoardSummary(host, token, feed.boardRevision, handleAuthFailure);
 
@@ -118,24 +118,15 @@ export function SessionsHome() {
       menu: menuFor(session),
     };
   };
-  // Pinned and Live read alike: a serif title, the lamp, the time and, unless turned off, the preview line.
-  const previewGroup = (title: string, group: SessionRecord[]) =>
+  const cardGroup = (title: string, group: SessionRecord[]) =>
     group.length > 0 ? (
       <section>
         <SectionHeading title={title} count={group.length} dense={phone} />
-        {phone ? (
-          <List>
-            {group.map((session) => (
-              <LiveRow key={session.id} {...rowProps(session)} previews={previews} activity={activities.get(session.id)} />
-            ))}
-          </List>
-        ) : (
-          <ul className={styles.tiles}>
-            {group.map((session) => (
-              <LiveTile key={session.id} {...rowProps(session)} previews={previews} activity={activities.get(session.id)} />
-            ))}
-          </ul>
-        )}
+        <ul className={styles.tiles}>
+          {group.map((session) => (
+            <LiveTile key={session.id} {...rowProps(session)} previews={previews} activity={activities.get(session.id)} />
+          ))}
+        </ul>
       </section>
     ) : null;
 
@@ -163,8 +154,8 @@ export function SessionsHome() {
         agentLabel={agentLabel}
         now={now}
       />
-      {previewGroup("Pinned", sections.pinned)}
-      {previewGroup("Live", sections.live)}
+      {cardGroup("Pinned", sections.pinned)}
+      {cardGroup("Live", sections.live)}
       {exitedCount > 0 ? (
         <ExitedGroup
           count={exitedCount}

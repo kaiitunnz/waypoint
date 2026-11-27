@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 
 import { gateView, isGateAnswered, type BoardGate } from "@waypoint/web-core/board";
 import { useInboxItem } from "@waypoint/web-core/hooks/useInboxItem";
-import { useNow } from "@waypoint/web-core/hooks/useNow";
+import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { formatInboxTime, requiredAnswersLeft } from "@waypoint/web-core/inbox";
 import type { InboxBlock, InboxItem } from "@waypoint/web-core/types";
 
@@ -71,7 +71,7 @@ export function InboxDetail({ id }: { id: string }) {
   const { host, token, gates } = useShellData();
   const { leave } = useNeedsYou();
   const pointer = usePointerUI();
-  const now = useNow(30_000);
+  const now = useServerNow(30_000);
   const toastFailure = useFailureToast();
   const onRemoveError = useCallback((reason: unknown) => toastFailure(reason, "Could not delete"), [toastFailure]);
   const { item, gone, error, remove } = useInboxItem({

@@ -83,6 +83,82 @@ describe("rankSessionsForSwitcher", () => {
   });
 });
 
+describe("rankSessionsForSwitcher with the search syntax", () => {
+  const sessions = [
+    session("codex", "FMv2 Researcher", {
+      backend: "codex",
+      repo_name: "flowmesh",
+      cwd: "/home/me/FlowMesh",
+      last_event_at: "2026-11-25T12:00:00Z",
+    }),
+    session("claude", "Waypoint Manager", { backend: "claude_code", last_event_at: "2026-11-25T11:00:00Z" }),
+    session("sub", "subagent:machine-health", { backend: "claude_code", cwd: "/srv/ms/x", repo_name: "infra" }),
+    // Matches both halves the parser makes of `/srv/ms/x`, but not the path.
+    session("decoy", "Decoy", { backend: "claude_code", cwd: "/opt/srv/y/x", repo_name: "infra", transport: "tmux" }),
+    session("both", "Research and development", { backend: "codex", repo_name: "waypoint" }),
+    session("gone", "Old codex sweep", { backend: "codex", status: "exited" }),
+  ];
+  const search = (query: string) => ids(rankSessionsForSwitcher(sessions, new Set(), query));
+
+  it("filters live and exited sessions by a field term", () => {
+    expect(search("agent:codex")).toEqual(["codex", "both", "gone"]);
+    expect(search("agent:claude_code repo:waypoint")).toEqual(["claude"]);
+    expect(search("status:exited")).toEqual(["gone"]);
+  });
+
+  it("fuzzy-ranks the free text among the filtered sessions", () => {
+    const entries = rankSessionsForSwitcher(sessions, new Set(), "agent:codex rese");
+    expect(ids(entries)).toEqual(["both", "codex"]);
+    expect(entries[0].positions).toEqual([0, 1, 2, 3]);
+    expect(search("Rese agent:codex")).toEqual(["both", "codex"]);
+    expect(search("research agent:codex dev")).toEqual(["both"]);
+    expect(search("zzz agent:codex dev")).toEqual([]);
+  });
+
+  it("keeps smart case for the free text", () => {
+    expect(search("agent:codex FMv")).toEqual(["codex"]);
+    expect(search("agent:codex fmV")).toEqual([]);
+  });
+
+  it("filters by any field a session has", () => {
+    expect(search("transport:tmux")).toEqual(["decoy"]);
+  });
+
+  it("searches a title for name:value where sessions have no such field", () => {
+    expect(search("subagent:mach")).toEqual(["sub"]);
+  });
+
+  it("keeps a path whole, even where the parser splits it", () => {
+    expect(search("/home/me/FlowMesh")).toEqual(["codex"]);
+    expect(search("agent:codex /home/me/FlowMesh")).toEqual(["codex"]);
+    // Reads as a /regex/ and a rest to the parser.
+    expect(search("/srv/ms/x")).toEqual(["sub"]);
+    expect(search("dir:/home/me/FlowMesh")).toEqual(["codex"]);
+  });
+
+  it("keeps a literal and in the free text", () => {
+    const entries = rankSessionsForSwitcher(sessions, new Set(), "research and dev");
+    expect(ids(entries)).toEqual(["both"]);
+    expect(entries[0].positions).toEqual([..."research and dev"].map((_, index) => index));
+  });
+
+  it("matches a /regex/ and a quoted phrase as written", () => {
+    expect(search("/manag.r/")).toEqual(["claude"]);
+    expect(search('"and development"')).toEqual(["both"]);
+    expect(search('"development and"')).toEqual([]);
+  });
+
+  it("lists each match of an OR query once, in the section's own order", () => {
+    expect(search("agent:claude_code OR agent:codex")).toEqual(["codex", "claude", "sub", "decoy", "both", "gone"]);
+    expect(search("agent:codex or research")).toEqual(["codex", "both", "gone"]);
+  });
+
+  it("searches a query with no term, such as a lone or, as typed", () => {
+    const entries = rankSessionsForSwitcher([session("a", "Orchestrator"), session("b", "Beta")], new Set(), "or");
+    expect(ids(entries)).toEqual(["a"]);
+  });
+});
+
 describe("mergeSwitcherEntries", () => {
   it("appends server history as Exited, without repeating a session the list holds", () => {
     const ranked = rankSessionsForSwitcher([session("a", "Alpha")], new Set(), "");

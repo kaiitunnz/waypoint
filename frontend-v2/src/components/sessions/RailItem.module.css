@@ -1,0 +1,87 @@
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: var(--f-meta);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.count {
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 46px;
+}
+
+.single {
+  min-height: 36px;
+}
+
+.name {
+  overflow: hidden;
+  font-size: var(--f-body);
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unread .name {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+/* The open session in the rail, the selected one in the switcher. */
+.item[aria-current="page"] .name,
+.item[aria-selected="true"] .name {
+  color: var(--text-strong);
+}
+
+.time {
+  font-size: var(--f-meta);
+  color: var(--faint);
+}
+
+.unread .time {
+  color: var(--text-strong);
+}
+
+.sub {
+  grid-column: 2 / 4;
+  overflow: hidden;
+  font-size: var(--f-meta);
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hit {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+/* Heavier than the unread title around it. */
+.unread .hit {
+  font-weight: 700;
+}
+
+/* An exited row stays muted, current or selected. */
+.item.exited .name {
+  color: var(--muted);
+}
+
+.item.exited .hit {
+  color: var(--text);
+}
+
+@media not all and (hover: hover) and (pointer: fine) {
+  .single {
+    min-height: 44px;
+  }
+}

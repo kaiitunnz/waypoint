@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 
 import { trapTabFocus } from "@waypoint/web-core/keyboard";
 import { matchesQuery, parseQuery } from "@waypoint/web-core/search";
+import { serverNow } from "@waypoint/web-core/serverClock";
 import {
   byRecency,
   isHistorySession,
@@ -46,7 +47,7 @@ const MOUSE_AFTER_KEY_SUPPRESS_MS = 300;
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
-  const now = new Date();
+  const now = new Date(serverNow());
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);

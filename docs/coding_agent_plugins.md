@@ -933,6 +933,14 @@ the envelope back out into typed fields, so renderers don't each re-derive
 them from `metadata`. When an agent bumps its protocol, the change lands
 inside that agent's `normalize.py`; the frontend reader stays put.
 
+### Deferred results
+
+A `tool_result` with `metadata.result_deferred: true` only acknowledges that the
+call was launched. The call's outcome arrives later as a task notification whose
+`tool_use_id` is the call's, and frontends show that report as the call's result.
+A plugin sets the flag from the agent's own structured record of the result, never
+from its text.
+
 ### Capture seams
 
 A normalizer can hand the runtime a file or a blob of text by tagging an

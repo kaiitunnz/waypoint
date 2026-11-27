@@ -32,6 +32,14 @@
   min-width: 0;
 }
 
+/* The agent's description of the call, over what it ran. */
+.heading {
+  width: 100%;
+  min-width: 0;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
 .text {
   width: 100%;
   min-width: 0;

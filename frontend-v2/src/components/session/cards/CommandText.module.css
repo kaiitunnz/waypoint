@@ -15,6 +15,10 @@
   color: var(--text);
 }
 
+.quiet {
+  color: var(--muted);
+}
+
 /* A narrow conversation gives the indent back to the text. */
 @container (max-width: 440px) {
   .ln {

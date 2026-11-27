@@ -95,7 +95,7 @@ export function QueueItemShell({
       </div>
       {pointer && deletable && !selecting ? (
         <IconButton
-          label={`Delete ${view.headline}`}
+          label={`Delete ${view.label}`}
           size="sm"
           className={cx(styles.trash, classes.trash)}
           onClick={() => onDelete(entry.key)}

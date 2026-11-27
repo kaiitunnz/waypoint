@@ -18,22 +18,24 @@ export function Lines({ text }: { text: string }) {
   ));
 }
 
-// A command or script in mono, folded at eight lines unless `whole`.
-export function CommandText({ text, whole }: { text: string; whole?: boolean }) {
+// A command or script in mono, folded at eight lines unless `whole`. `quiet` sets it
+// under a heading that names the call.
+export function CommandText({ text, whole, quiet }: { text: string; whole?: boolean; quiet?: boolean }) {
+  const classes = cx(styles.mono, quiet && styles.quiet);
   return whole ? (
-    <div className={styles.mono}>
+    <div className={classes}>
       <Lines text={foldLines(text, Infinity).text} />
     </div>
   ) : (
-    <FoldedCommand text={text} />
+    <FoldedCommand text={text} className={classes} />
   );
 }
 
-function FoldedCommand({ text }: { text: string }) {
+function FoldedCommand({ text, className }: { text: string; className: string }) {
   const { open, toggle, shown, total, content, chip } = useFold<HTMLDivElement>(text);
   return (
     <>
-      <div className={cx(styles.mono, !open && clamp.clamp)}>
+      <div className={cx(className, !open && clamp.clamp)}>
         <div ref={content}>
           <Lines text={shown} />
         </div>

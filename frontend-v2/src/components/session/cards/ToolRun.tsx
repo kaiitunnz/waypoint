@@ -1,10 +1,10 @@
 "use client";
 
-import { describeStep } from "@waypoint/web-core/activity";
-import { describeCall, pendingCallOf, summarizeToolRun } from "@waypoint/web-core/session/toolRun";
-import { itemKey, primaryEvent, type LeafItem } from "@waypoint/web-core/session/transcript";
+import { describeCall, liveCall, summarizeToolRun } from "@waypoint/web-core/session/toolRun";
+import { itemKey, type LeafItem } from "@waypoint/web-core/session/transcript";
 
 import { StepText } from "@/components/sessions/StepText";
+import { SummaryText } from "@/components/ui/SummaryText";
 
 import { useSessionContext } from "../SessionContext";
 import { CallRow } from "./CallRow";
@@ -21,13 +21,12 @@ export function ToolRun({ items, working }: ToolRunProps) {
   const { cwd, full } = useSessionContext();
   const summary = summarizeToolRun(items);
   const calls = items.map((child) => ({ child, row: describeCall(child, cwd) }));
-  const pending = working ? pendingCallOf(items) : undefined;
-  const live = pending !== undefined;
-  const step = pending ? describeStep(primaryEvent(pending)) : null;
+  const live = liveCall(items, working);
 
   return (
     <RunLine
-      phrase={step ? <StepText step={step} /> : summary.phrase}
+      phrase={live?.step ? <StepText step={live.step} /> : summary.phrase}
+      caption={live?.summary ? <SummaryText text={live.summary} /> : undefined}
       stats={
         summary.additions > 0 || summary.deletions > 0 ? (
           <DiffStat additions={summary.additions} deletions={summary.deletions} />
@@ -35,7 +34,7 @@ export function ToolRun({ items, working }: ToolRunProps) {
       }
       glyphs={summary.glyphs}
       defaultOpen={full}
-      live={live}
+      live={live !== null}
     >
       {calls.map(({ child, row }) => (row ? <CallRow key={row.key} row={row} /> : <RunNote key={itemKey(child)} child={child} />))}
     </RunLine>

@@ -3,18 +3,16 @@
 import { useState } from "react";
 
 import { approveSession } from "@waypoint/web-core/api";
-import {
-  approvalActions,
-  approvalBody,
-  approvalCopyText,
-  approvalId,
-  approvalPrompt,
-} from "@waypoint/web-core/session/approvals";
+import { approvalActions, approvalCopyText, approvalId } from "@waypoint/web-core/session/approvals";
 import { pageOfKey, stepPage } from "@waypoint/web-core/session/paging";
+import { approvalCard } from "@waypoint/web-core/session/wholeRequest";
 import type { EventRecord } from "@waypoint/web-core/types";
+
+import { TitleText } from "@/components/ui/SummaryText";
 
 import { useSessionContext } from "../SessionContext";
 import { ApprovalBody } from "./ApprovalBody";
+import styles from "./ApprovalDock.module.css";
 import { DecisionCard } from "./DecisionCard";
 import { Pager } from "./Pager";
 
@@ -28,18 +26,23 @@ interface ApprovalDockProps {
 const keyOf = (approval: EventRecord) => approvalId(approval) ?? String(approval.sequence);
 
 export function ApprovalDock({ approvals, decisions, supportsNote }: ApprovalDockProps) {
-  const { host, token, sessionId } = useSessionContext();
+  const { host, token, sessionId, cwd } = useSessionContext();
   const [openKey, setOpenKey] = useState<string | null>(null);
   const { count, page, current } = pageOfKey(approvals, openKey, keyOf);
   if (!current) return null;
-  const body = approvalBody(current);
+  const { title, marked, subagent, body } = approvalCard(current, cwd);
   const id = approvalId(current);
 
   return (
     <DecisionCard
       // Each approval starts unlocked and without a note.
       key={keyOf(current)}
-      title={approvalPrompt(body) ?? "Approve this request"}
+      title={
+        <>
+          <TitleText title={{ text: title, marked }} />
+          {subagent ? <span className={styles.aside}> {subagent}</span> : null}
+        </>
+      }
       pager={
         count > 1
           ? (locked) => (

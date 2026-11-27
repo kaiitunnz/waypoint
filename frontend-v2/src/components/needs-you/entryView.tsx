@@ -3,11 +3,15 @@ import type { ReactNode } from "react";
 import { gateHeadline, gateView } from "@waypoint/web-core/board";
 import { inboxBlockChips } from "@waypoint/web-core/inbox";
 import { askRow, type QueueEntry } from "@waypoint/web-core/needsYou";
+import { askTitle } from "@waypoint/web-core/pendingAskActions";
+import { plainSummary } from "@waypoint/web-core/session/summary";
+import type { AskSession } from "@waypoint/web-core/session/wholeRequest";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
 import { Lines } from "@/components/session/cards/CommandText";
 import { PathLabel } from "@/components/session/cards/PathLabel";
 import { StatusLamp } from "@/components/ui/StatusLamp";
+import { TitleText } from "@/components/ui/SummaryText";
 import { cx } from "@/lib/cx";
 
 import { SourceGlyph } from "./SourceGlyph";
@@ -17,7 +21,9 @@ export interface EntryView {
   lead: ReactNode;
   name: string;
   kind: string;
-  headline: string;
+  headline: ReactNode;
+  // The headline for a control's accessible label.
+  label: string;
   detail: ReactNode;
   // Waiting on the human, or an inbox item not yet read.
   strong: boolean;
@@ -30,20 +36,25 @@ export interface EntryView {
 export function entryView(
   entry: QueueEntry,
   agentName: (backend: string) => string,
-  fromScreen: (sessionId: string) => boolean,
+  askSession: (sessionId: string) => AskSession,
 ): EntryView {
   if (entry.source === "sessions") {
     const { ask } = entry;
-    const request = askRow(ask, fromScreen(ask.session_id));
-    const headline = ask.kind === "question" && ask.question.questions.length === 1 ? ask.question.questions[0].question : ask.title;
+    const session = askSession(ask.session_id);
+    const request = askRow(ask, session);
+    const title =
+      ask.kind === "question" && ask.question.questions.length === 1
+        ? { text: ask.question.questions[0].question, marked: false }
+        : askTitle(ask, session.cwd);
     return {
       lead: <StatusLamp state="needs" size="sm" flat />,
       name: ask.session_title,
       kind: agentName(ask.session_backend),
-      headline,
+      headline: <TitleText title={title} />,
+      label: title.marked ? plainSummary(title.text) : title.text,
       detail: request.path ? (
         <PathLabel {...splitPath(request.path)} full={request.path} />
-      ) : request.text && request.text !== headline ? (
+      ) : request.text && request.text !== title.text ? (
         // Each line of a wrapped command hangs under its own start.
         <span className={cx(request.mono && "mono")}>
           {request.mono && request.answers ? <Lines text={request.text} /> : request.text}
@@ -63,6 +74,7 @@ export function entryView(
       name: item.from_label ?? "unknown",
       kind: "Inbox",
       headline: item.subject,
+      label: item.subject,
       detail:
         chips.length > 0 ? (
           <span className={styles.chips}>
@@ -83,6 +95,7 @@ export function entryView(
     name: "Board",
     kind: gateView(gate.ticket).gate,
     headline: gateHeadline(gate.ticket),
+    label: gateHeadline(gate.ticket),
     detail: (
       <span className={styles.gate}>
         {answered ? <span className={styles.answered}>Answered</span> : null}

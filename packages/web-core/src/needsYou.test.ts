@@ -13,6 +13,7 @@ import {
   needsHref,
   parseNeedsId,
 } from "./needsYou";
+import { askPreview, askTitle } from "./pendingAskActions";
 import type { InboxItem, ManagerTicket, PendingApprovalAsk, PendingPlanAsk, PendingQuestionAsk } from "./types";
 
 const at = (minute: number) => `2026-11-27T08:${String(minute).padStart(2, "0")}:00Z`;
@@ -183,6 +184,9 @@ describe("routes", () => {
   });
 });
 
+const NATIVE = { cwd: "/srv/app", fromScreen: false };
+const SCREEN = { cwd: "/srv/app", fromScreen: true };
+
 describe("asks", () => {
   it("sends a question a card cannot answer to the detail", () => {
     expect(askNeedsDetail(question(1))).toBe(false);
@@ -191,42 +195,99 @@ describe("asks", () => {
     const two = question(1);
     two.question.questions.push({ ...two.question.questions[0], question: "Which test?" });
     expect(askNeedsDetail(two)).toBe(true);
-    expect(askSummary(two)).toEqual({ text: "2 questions", mono: false });
+    expect(askSummary(two, "/srv/app")).toEqual({ text: "2 questions", mono: false });
   });
 
   it("summarises an ask", () => {
-    expect(askSummary(question(1))).toEqual({ text: "2 options, B recommended", mono: false });
-    expect(askSummary(question(1, []))).toEqual({ text: "Free-form answer", mono: false });
-    expect(askSummary(approval(1))).toEqual({ text: "git push …", mono: true });
-    expect(askSummary(approval(1, { command: "ls" }))).toEqual({ text: "ls", mono: true });
-    expect(askSummary(approval(1, {}))).toEqual({ text: "Bash", mono: false });
-    expect(askSummary(plan)).toEqual({ text: "Regenerate figures", mono: false });
+    expect(askSummary(question(1), "/srv/app")).toEqual({ text: "2 options, B recommended", mono: false });
+    expect(askSummary(question(1, []), "/srv/app")).toEqual({ text: "Free-form answer", mono: false });
+    expect(askSummary(approval(1), "/srv/app")).toEqual({ text: "git push …", mono: true });
+    expect(askSummary(approval(1, { command: "ls" }), "/srv/app")).toEqual({ text: "ls", mono: true });
+    expect(askSummary(approval(1, {}), "/srv/app")).toEqual({ text: "Bash", mono: false });
+    expect(askSummary(plan, "/srv/app")).toEqual({ text: "Regenerate figures", mono: false });
   });
 
   it("lets a row answer only what it can show whole", () => {
-    expect(askRow(question(1), false)).toMatchObject({ answers: true, path: null });
+    expect(askRow(question(1), NATIVE)).toMatchObject({ answers: true, path: null });
     // A question read off the screen is still answered.
-    expect(askRow(question(1), true).answers).toBe(true);
-    expect(askRow(question(1, ["A"], true), false).answers).toBe(false);
-    expect(askRow(plan, false).answers).toBe(false);
+    expect(askRow(question(1), SCREEN).answers).toBe(true);
+    expect(askRow(question(1, ["A"], true), NATIVE).answers).toBe(false);
+    expect(askRow(plan, NATIVE).answers).toBe(false);
     const long = question(1);
     long.question.questions[0].question = `Which ${"very ".repeat(40)}fix?`;
-    expect(askRow(long, false).answers).toBe(false);
+    expect(askRow(long, NATIVE).answers).toBe(false);
 
-    expect(askRow(approval(1), false)).toMatchObject({ text: "git push\nls", mono: true, answers: true });
-    expect(askRow(approval(1), true)).toMatchObject({ text: "git push …", answers: false });
-    expect(askRow(approval(1, { command: "ls", workdir: "/etc" }), false).answers).toBe(false);
-    expect(askRow(approval(1, { command: "ls" }, true), false).answers).toBe(false);
+    expect(askRow(approval(1), NATIVE)).toMatchObject({ text: "git push\nls", mono: true, answers: true });
+    expect(askRow(approval(1), SCREEN)).toMatchObject({ text: "git push …", answers: false });
+    expect(askRow(approval(1, { command: "ls", workdir: "/etc" }), NATIVE).answers).toBe(false);
+    expect(askRow(approval(1, { command: "ls" }, true), NATIVE).answers).toBe(false);
 
     const edit = approval(1);
     edit.approval.tool_name = "Edit";
     edit.approval.tool_input = { file_path: "/srv/app/secrets.env" };
-    expect(askRow(edit, false)).toMatchObject({ answers: false, path: "/srv/app/secrets.env" });
+    expect(askRow(edit, NATIVE)).toMatchObject({ answers: false, path: "/srv/app/secrets.env" });
   });
 
   it("shapes a question for the editor", () => {
     expect(askUserQuestions(question(1, ["A"]))).toEqual([
       { question: "Which fix?", header: undefined, multiSelect: false, options: [{ label: "A", description: undefined }] },
     ]);
+  });
+});
+
+describe("an approval titled by the call's summary", () => {
+  const codex = (summary: string | null, request: Record<string, unknown> = {}): PendingApprovalAsk => {
+    const ask = approval(1, {});
+    return {
+      ...ask,
+      title: "Approve command: rg -n modes src",
+      approval: {
+        ...ask.approval,
+        tool_name: null,
+        tool_input: null,
+        summary,
+        request: { command: "rg -n modes src", cwd: "/srv/app", ...request },
+      },
+    };
+  };
+
+  it("takes the summary and keeps the command in the row", () => {
+    const ask = codex("Search `modes`");
+    expect(askTitle(ask, "/srv/app")).toEqual({ text: "Search `modes`", marked: true });
+    expect(askRow(ask, NATIVE)).toEqual({ text: "rg -n modes src", mono: true, path: null, answers: false });
+  });
+
+  it("keeps its own title, with no extra line, when the summary can't stand", () => {
+    for (const ask of [codex(null), codex("Search ‮modes"), codex("Search `modes`", { permissions: { network: true } })]) {
+      expect(askTitle(ask, "/srv/app")).toEqual({ text: ask.title, marked: false });
+      expect(askPreview(ask, "/srv/app")).toBeNull();
+    }
+    // A session not loaded yet has no directory to check the request's against.
+    expect(askTitle(codex("Search `modes`"), "").marked).toBe(false);
+  });
+
+  it("titles a described shell call that the row still decides", () => {
+    const ask = approval(1, { command: "ls", description: "List the files" });
+    ask.approval.summary = "List the files";
+    expect(askTitle(ask, "/srv/app").text).toBe("List the files");
+    expect(askRow(ask, NATIVE)).toMatchObject({ text: "ls", answers: true });
+    // Screen-read calls the transport couldn't match keep the plain title.
+    ask.approval.call_verified = false;
+    expect(askTitle(ask, "/srv/app").marked).toBe(false);
+  });
+
+  it("shows a subagent's kind where its body would repeat the title", () => {
+    const ask = approval(1, { description: "Find callers", prompt: "List them", subagent_type: "Explore" });
+    ask.body = "Approve subagent task: Find callers (via Explore)";
+    ask.approval.tool_name = "Agent";
+    ask.approval.summary = "Find callers";
+    expect(askRow(ask, NATIVE)).toMatchObject({ text: "Approve subagent task (via Explore)", mono: false, answers: false });
+    ask.approval.summary = null;
+    expect(askRow(ask, NATIVE).text).toBe(ask.body);
+  });
+
+  it("answers to its summary in a search", () => {
+    const queue = buildQueue({ asks: [codex("Search `modes`")], items: [], gates: [], status: "all", source: "all", q: "search `modes`" });
+    expect(queue).toHaveLength(1);
   });
 });

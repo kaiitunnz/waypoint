@@ -4,6 +4,7 @@ import {
   FILE_EDIT_TOOLS,
   parseEvent,
   planForEvent,
+  readSummary,
   readToolName,
   toolFilePath,
   type EventDiffPreview,
@@ -61,12 +62,13 @@ export function approvalBody(event: EventRecord): ApprovalBody {
   if (preview) return { kind: "diff", prompt: event.text, preview };
   const tool = readToolName(event);
   const input = asRecord(event.metadata?.tool_input);
+  const described = readSummary(event) ?? "";
   if (tool === "ExitPlanMode" && typeof input?.plan === "string") return { kind: "plan", plan: input.plan };
   if ((tool === "Task" || tool === "Agent") && typeof input?.prompt === "string") {
-    return { kind: "task", prompt: input.prompt, description: text(input.description), subagent: text(input.subagent_type) };
+    return { kind: "task", prompt: input.prompt, description: described, subagent: text(input.subagent_type) };
   }
   if (tool === "Bash" && typeof input?.command === "string") {
-    return { kind: "command", description: text(input.description), command: input.command };
+    return { kind: "command", description: described, command: input.command };
   }
   if (tool && WORKFLOW_TOOLS.has(tool) && typeof input?.script === "string") {
     return { kind: "workflow", script: input.script };

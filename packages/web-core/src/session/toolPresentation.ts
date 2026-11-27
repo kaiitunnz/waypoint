@@ -1,6 +1,7 @@
 import {
   asRecord,
   FILE_EDIT_TOOLS,
+  readSummary,
   readToolName,
   toolFilePath,
   type EventDiffPreview,
@@ -287,8 +288,10 @@ export function previewForToolEvent(event: EventRecord, toolLabel: string): stri
     if (toolName === "WebSearch" && typeof input.query === "string") {
       return input.query;
     }
-    if ((toolName === "Task" || toolName === "Agent") && typeof input.description === "string") {
-      return input.description;
+    if (toolName === "Task" || toolName === "Agent") {
+      // Events stored before summaries hold the description only in the input.
+      const described = readSummary(event) ?? input.description;
+      if (typeof described === "string") return described;
     }
     if (toolName === "TodoWrite" && Array.isArray(input.todos)) {
       return `${input.todos.length} todo${input.todos.length === 1 ? "" : "s"}`;

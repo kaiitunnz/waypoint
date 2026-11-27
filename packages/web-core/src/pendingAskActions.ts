@@ -1,7 +1,8 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
 import { toggleSelection } from "./session/askQuestion";
-import { shownPlan, shownRequest, type AskSession, type ShownRequest } from "./session/wholeRequest";
+import { approvalPrompt } from "./session/approvals";
+import { shownPlan, shownRequest, titlingSummary, type AskSession, type ShownRequest } from "./session/wholeRequest";
 import type {
   EventRecord,
   PendingApprovalAsk,
@@ -119,17 +120,57 @@ const DECISION_ACTIONS: readonly DecisionAction[] = [
   { decision: "decline", label: "Decline" },
 ];
 
+// What an ask carries of its request, as the request's event holds it.
+const askMetadata = ({ tool_name, tool_input, request, summary, subagent, call_verified }: PendingApprovalAsk["approval"]) => ({
+  tool_name,
+  tool_input,
+  request,
+  summary,
+  subagent,
+  call_verified,
+});
+
+const askSummaryTitle = (ask: PendingAsk, cwd: string): string | null =>
+  ask.kind === "approval" ? titlingSummary(askMetadata(ask.approval), cwd) : null;
+
+export interface AskTitle {
+  text: string;
+  // `text` is the agent's summary, so its backticks mark machine strings.
+  marked: boolean;
+}
+
+// The title every list and detail gives an ask. `cwd` is its session's.
+export function askTitle(ask: PendingAsk, cwd: string): AskTitle {
+  const summary = askSummaryTitle(ask, cwd);
+  return summary === null ? { text: ask.title, marked: false } : { text: summary, marked: true };
+}
+
 export type ApprovalPreview = { kind: "command"; text: string } | { kind: "path"; path: string } | null;
 
 // What a tool approval is about: the shell command, or the file being edited.
-function approvalPreview(approval: PendingApprovalAsk["approval"]): ApprovalPreview {
+export function askPreview(ask: PendingApprovalAsk | PendingPlanAsk, cwd: string): ApprovalPreview {
+  if (ask.kind !== "approval") return null;
+  const { approval } = ask;
   const tool = normalizeToolName(approval.tool_name);
   const input = approval.tool_input;
   if (tool === "Bash" && typeof input?.command === "string" && input.command) {
     return { kind: "command", text: input.command };
   }
   const path = tool && FILE_EDIT_TOOLS.has(tool) ? toolFilePath(input) : null;
-  return path ? { kind: "path", path } : null;
+  if (path) return { kind: "path", path };
+  // A summary takes the title, so the command it replaces stays in view here.
+  const command = askSummaryTitle(ask, cwd) === null ? null : (input?.command ?? approval.request?.command);
+  return typeof command === "string" && command ? { kind: "command", text: command } : null;
+}
+
+// The line a summary-titled subagent approval shows, where its body would repeat the title.
+export function askSubagentLine(ask: PendingAsk, cwd: string): string | null {
+  if (ask.kind !== "approval" || askSummaryTitle(ask, cwd) === null) return null;
+  const tool = normalizeToolName(ask.approval.tool_name);
+  if (tool !== "Task" && tool !== "Agent") return null;
+  const input = ask.approval.tool_input;
+  const type = input?.subagent_type ?? input?.agent;
+  return approvalPrompt({ kind: "task", prompt: "", description: "", subagent: typeof type === "string" ? type : "" });
 }
 
 // The first lines of a plan with the markdown marks off, for a card.
@@ -145,27 +186,15 @@ export function planPreview(text: string, maxLines = 3): string {
 export interface DecisionView {
   actions: readonly DecisionAction[];
   supportsNote: boolean;
-  preview: ApprovalPreview;
   // The full plan, for a plan approval.
   planBody: string | null;
 }
 
 export function decisionView(ask: PendingApprovalAsk | PendingPlanAsk): DecisionView {
   if (ask.kind === "approval") {
-    const { approval } = ask;
-    return {
-      actions: DECISION_ACTIONS,
-      supportsNote: approval.supports_note,
-      preview: approvalPreview(approval),
-      planBody: null,
-    };
+    return { actions: DECISION_ACTIONS, supportsNote: ask.approval.supports_note, planBody: null };
   }
-  return {
-    actions: DECISION_ACTIONS,
-    supportsNote: ask.plan.supports_note,
-    preview: null,
-    planBody: ask.plan.text,
-  };
+  return { actions: DECISION_ACTIONS, supportsNote: ask.plan.supports_note, planBody: ask.plan.text };
 }
 
 // What a row or card lists whole beside its actions: a command or question of a few

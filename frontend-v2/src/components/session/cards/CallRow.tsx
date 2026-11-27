@@ -2,6 +2,7 @@
 
 import { formatCallDuration, type CallView } from "@waypoint/web-core/session/toolRun";
 
+import { SummaryText } from "@/components/ui/SummaryText";
 import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
@@ -54,6 +55,12 @@ export function CallRow({ row }: { row: CallView }) {
           {row.glyph}
         </span>
         <div className={styles.subject} title={command || row.path || row.name ? undefined : row.title}>
+          {row.summary ? (
+            <div className={styles.heading}>
+              <SummaryText text={row.summary} />
+              {row.agentType && !row.label ? <span className={styles.aside}> {row.agentType}</span> : null}
+            </div>
+          ) : null}
           {row.name ? (
             <div className={styles.text} title={row.title}>
               {row.name.server ? <span className={styles.aside}>{row.name.server} · </span> : null}
@@ -61,7 +68,7 @@ export function CallRow({ row }: { row: CallView }) {
             </div>
           ) : null}
           {!row.label ? null : command ? (
-            <CommandText text={row.label} />
+            <CommandText text={row.label} quiet={row.summary !== null} />
           ) : (
             <div className={cx(styles.text, row.mono && styles.mono)}>
               {row.path ? (

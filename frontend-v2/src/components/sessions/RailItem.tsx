@@ -5,6 +5,7 @@ import type { ReactElement, ReactNode } from "react";
 import { highlightRuns } from "@waypoint/web-core/fuzzy";
 import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversationPreviews";
 import { useSessionActivity } from "@waypoint/web-core/hooks/useSessionActivity";
+import { askTitle } from "@waypoint/web-core/pendingAskActions";
 import {
   brightPreview,
   formatSessionTime,
@@ -18,6 +19,7 @@ import type { SwitcherSection } from "@waypoint/web-core/switcher";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { StatusLamp } from "@/components/ui/StatusLamp";
+import { TitleText } from "@/components/ui/SummaryText";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
@@ -39,7 +41,7 @@ export function useRailRows(previewed: SessionRecord[]) {
     // A Needs-you row keeps its ask line.
     const ask = section === "needs" ? pendingAsks?.items.find((item) => item.session_id === session.id) : undefined;
     const sub = ask ? (
-      ask.title
+      <TitleText title={askTitle(ask, session.cwd)} />
     ) : (
       <ActivityLine
         fallback={lampWord(lamp, session.status)}

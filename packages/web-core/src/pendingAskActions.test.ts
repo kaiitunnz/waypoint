@@ -7,6 +7,7 @@ import {
   approvalRequest,
   buildAnswer,
   decideAsk,
+  askPreview,
   decisionView,
   inlineCommand,
   emptyPicks,
@@ -131,13 +132,13 @@ describe("decisions", () => {
   });
 
   it("previews the command or the edited file, and carries the plan text", () => {
-    expect(decisionView(approval()).preview).toEqual({ kind: "command", text: "git push -u origin feat/x" });
-    expect(decisionView(approval({ tool_name: "Edit", tool_input: { file_path: "/a/b.py" } })).preview).toEqual({
+    expect(askPreview(approval(), "/a")).toEqual({ kind: "command", text: "git push -u origin feat/x" });
+    expect(askPreview(approval({ tool_name: "Edit", tool_input: { file_path: "/a/b.py" } }), "/a")).toEqual({
       kind: "path",
       path: "/a/b.py",
     });
-    expect(decisionView(approval({ tool_name: "WebFetch", tool_input: { url: "x" } })).preview).toBeNull();
-    expect(decisionView(approval({ tool_input: null })).preview).toBeNull();
+    expect(askPreview(approval({ tool_name: "WebFetch", tool_input: { url: "x" } }), "/a")).toBeNull();
+    expect(askPreview(approval({ tool_input: null }), "/a")).toBeNull();
     expect(decisionView(plan([])).planBody).toBe("# Plan");
     expect(decisionView(approval()).planBody).toBeNull();
   });

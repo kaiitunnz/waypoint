@@ -65,7 +65,7 @@ function ApprovalActions({ ask }: { ask: PendingApprovalAsk }) {
 // A row takes the reply to a request it shows whole. Another approval offers Review.
 export function AskRowActions({ ask }: { ask: PendingAsk }) {
   const askSession = useAskSessions();
-  const { answers } = askRow(ask, askSession(ask.session_id).fromScreen);
+  const { answers } = askRow(ask, askSession(ask.session_id));
   if (ask.kind === "question") {
     return answers ? (
       <div className={styles.actions}>

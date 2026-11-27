@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
+import { TASK_NOTIFICATION_FAMILIES } from "./taskNotificationView";
 import { buildTranscriptItems, type TranscriptItem } from "./transcript";
 import {
   describeCall,
+  liveCall,
   pendingCallOf,
   formatCallDuration,
   summarizeToolRun,
+  toolFamilyOf,
   toolNamesOfRun,
   toolRunCounts,
 } from "./toolRun";
@@ -69,8 +72,8 @@ describe("summarizeToolRun", () => {
     const summary = summarizeToolRun(items);
     expect(summary.phrase).toBe("Read 3 files, searched 2 patterns, ran 1 command");
     expect(summary.glyphs).toEqual([
-      { glyph: "▤", label: "Reads and searches", count: 5 },
-      { glyph: "›_", label: "Commands", count: 1 },
+      { glyph: "▤", label: "Reads and searches", count: 5, family: "read" },
+      { glyph: "›_", label: "Commands", count: 1, family: "bash" },
     ]);
   });
 
@@ -111,13 +114,13 @@ describe("summarizeToolRun", () => {
     ]);
     const summary = summarizeToolRun(items);
     expect(summary.phrase).toBe("Ran 1 subagent");
-    expect(summary.glyphs).toEqual([{ glyph: "◇", label: "Subagents", count: 1 }]);
+    expect(summary.glyphs).toEqual([{ glyph: "◇", label: "Subagents", count: 1, family: "agent" }]);
   });
 
   it("names a run of follow-ups alone", () => {
     const summary = summarizeToolRun(run([call(1, "a", "Wait"), call(2, "b", "Wait")]));
     expect(summary.phrase).toBe("Followed up on 2 subagents");
-    expect(summary.glyphs).toEqual([{ glyph: "◇", label: "Subagents", count: 2 }]);
+    expect(summary.glyphs).toEqual([{ glyph: "◇", label: "Subagents", count: 2, family: "agent" }]);
   });
 
   it("counts a todo list with no tool name", () => {
@@ -642,5 +645,97 @@ describe("pendingCallOf", () => {
     const loose = run(ev(1, "tool_call", "", { tool_name: "Bash" }));
     expect(pendingCallOf(loose)).toBe(loose[0]);
     expect(pendingCallOf(run(ev(1, "tool_result", "")))).toBeUndefined();
+  });
+});
+
+const summarized = (seq: number, id: string, tool: string, input: Record<string, unknown>, summary?: string) =>
+  ev(seq, "tool_call", "", { item_id: id, tool_name: tool, payload: { input }, ...(summary ? { summary } : {}) });
+
+describe("a call's summary", () => {
+  const bash = { command: "git status --short", description: "Check for changes" };
+
+  it("heads a command that stays whole below it", () => {
+    const [item] = run([summarized(1, "a", "Bash", bash, "Check for changes"), result(2, "a", " M a.py")]);
+    expect(describeCall(item)).toMatchObject({ summary: "Check for changes", label: "git status --short", mono: true });
+  });
+
+  it("is absent when the call carries none", () => {
+    const [item] = run([summarized(1, "a", "Bash", bash), result(2, "a", "")]);
+    expect(describeCall(item)).toMatchObject({ summary: null, label: "git status --short" });
+  });
+
+  it("says a subagent call's label once", () => {
+    const input = { description: "Find callers", prompt: "List them", subagent_type: "Explore" };
+    const [item] = run([summarized(1, "a", "Agent", input, "Find callers")]);
+    expect(describeCall(item)).toMatchObject({ summary: "Find callers", label: "", name: null, agentType: "Explore", prompt: "List them" });
+    // A call stored before summaries keeps its label from the input.
+    const [stored] = run([summarized(1, "a", "Agent", input)]);
+    expect(describeCall(stored)).toMatchObject({ summary: null, label: "Find callers", name: null });
+  });
+
+  it("drops the argument that only repeats it, never a command", () => {
+    const watch = { command: "Watch the build", description: "Watch the build", persistent: true };
+    const [item] = run([summarized(1, "a", "Monitor", watch, "Watch the build")]);
+    expect(describeCall(item)?.label).toBe("command: Watch the build\npersistent: true");
+    const [bare] = run([summarized(1, "a", "Monitor", watch)]);
+    expect(describeCall(bare)?.label).toContain("description: Watch the build");
+  });
+
+  it("captions the live run line with the call in progress", () => {
+    const items = run([
+      summarized(1, "a", "Bash", { command: "ls" }, "List the files"),
+      result(2, "a", ""),
+      summarized(3, "b", "Bash", bash, "Check for changes"),
+    ]);
+    expect(liveCall(items, true)).toEqual({ step: { verb: "Running", subject: "git status --short" }, summary: "Check for changes" });
+    expect(liveCall(items, false)).toBeNull();
+    expect(liveCall(run([summarized(1, "a", "Bash", { command: "ls" })]), true)).toMatchObject({ summary: null });
+  });
+});
+
+describe("toolFamilyOf", () => {
+  it.each([
+    ["Bash", "bash"],
+    ["Monitor", "bash"],
+    ["Read", "read"],
+    ["Grep", "read"],
+    ["Glob", "read"],
+    ["WebFetch", "read"],
+    ["WebSearch", "read"],
+    ["Edit", "edit"],
+    ["MultiEdit", "edit"],
+    ["NotebookEdit", "edit"],
+    ["Write", "edit"],
+    ["Agent", "agent"],
+    ["Task", "agent"],
+    ["spawnAgent", "agent"],
+    ["Subagent", "agent"],
+    ["Wait", "agent"],
+    ["closeAgent", "agent"],
+    ["TodoWrite", "agent"],
+    ["Skill", "skill"],
+    ["mcp__notes__ping", null],
+    ["notes:ping", null],
+    ["ToolSearch", null],
+    [null, null],
+  ])("puts %s in its family", (tool, family) => {
+    expect(toolFamilyOf(tool)).toBe(family);
+  });
+
+  it("matches the families of the run line's chips and of notification cards", () => {
+    expect(TASK_NOTIFICATION_FAMILIES).toEqual({
+      agent: toolFamilyOf("Agent"),
+      monitor: toolFamilyOf("Monitor"),
+      background_command: toolFamilyOf("Bash"),
+      message: null,
+      unknown: null,
+    });
+    const items = run([call(1, "a", "WebSearch", { query: "x" }), call(2, "b", "Bash", { command: "ls" })]);
+    expect(summarizeToolRun(items).glyphs.map((entry) => [entry.glyph, entry.family])).toEqual([
+      ["›_", "bash"],
+      ["ƒ", null],
+    ]);
+    const [web] = run([call(1, "a", "WebSearch", { query: "x" })]);
+    expect(describeCall(web)?.family).toBe("read");
   });
 });

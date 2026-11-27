@@ -7,7 +7,7 @@ import { useApprovalRequest } from "@waypoint/web-core/hooks/useApprovalRequest"
 import { useAskQuestionState, type AskQuestionController } from "@waypoint/web-core/hooks/useAskQuestionState";
 import { useServerNow } from "@waypoint/web-core/hooks/useServerNow";
 import { askUserQuestions } from "@waypoint/web-core/needsYou";
-import { answersScreenDialog, decideAsk, decisionView } from "@waypoint/web-core/pendingAskActions";
+import { answersScreenDialog, askTitle, decideAsk, decisionView } from "@waypoint/web-core/pendingAskActions";
 import { approvalCopyText } from "@waypoint/web-core/session/approvals";
 import { askFormView } from "@waypoint/web-core/session/askQuestion";
 import { formatSessionTime } from "@waypoint/web-core/sessionPresentation";
@@ -24,6 +24,7 @@ import { SourceLine } from "@/components/sessions/SourceLine";
 import { useAskResponder } from "@/components/sessions/useAskResponder";
 import { useAskSessions } from "@/components/sessions/useAskSessions";
 import { StatusLamp } from "@/components/ui/StatusLamp";
+import { TitleText } from "@/components/ui/SummaryText";
 import { handleAuthFailure } from "@/lib/auth";
 import { usePointerUI } from "@/lib/layout";
 import { useSessionsData, useShellData } from "@/lib/shell-data";
@@ -122,7 +123,7 @@ function RequestDetail({ ask, session, agent }: RequestDetailProps) {
     <SessionContextProvider value={context}>
       <DecisionCard
         roomy
-        title={ask.title}
+        title={<TitleText title={askTitle(ask, session.cwd)} />}
         copyText={copyText}
         copyLabel={ask.kind === "plan_approval" && !shown?.unverified ? "Copy plan" : "Copy request"}
         // Nothing is decided on part of a request.

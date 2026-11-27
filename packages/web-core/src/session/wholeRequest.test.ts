@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
 import type { EventRecord } from "../types";
-import { requestText, shownRequest } from "./wholeRequest";
+import { approvalCard, requestText, shownRequest, titlingSummary } from "./wholeRequest";
 
 const ownInput = { cwd: "/w", fromScreen: false };
 const screen = { cwd: "/w", fromScreen: true };
@@ -258,5 +258,101 @@ describe("what holds the content", () => {
       expect([other, diff({ ...moved, ...other })]).toEqual([other, false]);
     }
     expect(diff({ old_path: "a.ts", diff: "" })).toBe(false);
+  });
+});
+
+const described = (tool: string, input: Record<string, unknown>, summary: string, extra: Record<string, unknown> = {}) =>
+  approve(tool, input, { summary, ...extra });
+
+// A Codex command approval: no tool or input, its command and parsed action in `request`.
+const codex = (extra: Record<string, unknown> = {}, summary = "Read `SKILL.md`") =>
+  ev(9, "approval_request", "Approve command: sed -n 1,5p SKILL.md", {
+    method: "item/commandExecution/requestApproval",
+    approval_id: "a1",
+    summary,
+    request: { command: "sed -n 1,5p SKILL.md", cwd: "/w", reason: "needed", ...extra },
+  });
+
+describe("the summary that titles an approval", () => {
+  const bash = { command: "pytest -q", description: "Run the tests" };
+
+  it("stands for a verified call that asks for nothing beyond itself", () => {
+    expect(approvalCard(described("Bash", bash, "Run the tests"), "/w")).toEqual({
+      title: "Run the tests",
+      marked: true,
+      subagent: null,
+      body: { kind: "command", description: "Run the tests", command: "pytest -q" },
+    });
+    expect(titlingSummary(described("Bash", bash, "Run the tests", { call_verified: true }).metadata, "/w")).toBe("Run the tests");
+  });
+
+  it("gives way to the plain title without one", () => {
+    expect(approvalCard(approve("Bash", bash), "/w")).toMatchObject({ title: "Approve Bash command", marked: false, subagent: null });
+  });
+
+  it("gives way for an unverified call, with the agent's words nowhere in the title", () => {
+    const card = approvalCard(described("Bash", bash, "Run the tests", { call_verified: false }), "/w");
+    expect(card).toMatchObject({ title: "Approve Bash command", marked: false });
+  });
+
+  it.each([
+    ["a hidden character", "Run the ​tests"],
+    ["a direction character", "Run the ‮tests"],
+    ["a look-alike blank", "Run the tests"],
+  ])("gives way when the summary holds %s", (_name, summary) => {
+    expect(approvalCard(described("Bash", bash, summary), "/w")).toMatchObject({ title: "Approve Bash command", marked: false });
+  });
+
+  it.each([
+    ["runs outside the sandbox", { dangerouslyDisableSandbox: true }],
+    ["runs in another directory", { workdir: "/etc" }],
+  ])("gives way for a call that %s", (_name, extra) => {
+    expect(titlingSummary(described("Bash", { ...bash, ...extra }, "Run the tests").metadata, "/w")).toBeNull();
+  });
+
+  it.each([
+    ["extra permissions", { additionalPermissions: { network: true } }],
+    ["network access", { networkApprovalContext: { host: "example.com" } }],
+    ["a session write grant", { grantRoot: "/w" }],
+  ])("gives way for a Codex request that asks for %s", (_name, extra) => {
+    const request = codex(extra);
+    expect(approvalCard(request, "/w")).toMatchObject({ title: "Approve this request", marked: false });
+    // The detail warns for the same reason the title gives way.
+    expect(shownRequest(request, ownInput).warnings.length).toBeGreaterThan(0);
+  });
+
+  it("shows a summary-titled Codex command as the block under the title", () => {
+    expect(approvalCard(codex(), "/w")).toEqual({
+      title: "Read `SKILL.md`",
+      marked: true,
+      subagent: null,
+      body: { kind: "command", description: "", command: "sed -n 1,5p SKILL.md" },
+    });
+    expect(shownRequest(codex(), ownInput)).toMatchObject({ body: { kind: "command" }, whole: true, warnings: [] });
+    // Without a summary the dock keeps its text.
+    expect(approvalCard(codex({}, ""), "/w").body).toMatchObject({ kind: "raw" });
+  });
+
+  it("shows the command of a summary-titled call without a view of its own", () => {
+    const watch = { command: "tail -f build.log", description: "Watch the build", persistent: true };
+    expect(approvalCard(described("Monitor", watch, "Watch the build"), "/w").body).toEqual({
+      kind: "command",
+      description: "",
+      command: "tail -f build.log",
+    });
+    expect(approvalCard(approve("Monitor", watch), "/w").body).toMatchObject({ kind: "raw" });
+  });
+
+  it("names the subagent's kind beside a summary title", () => {
+    const task = { prompt: "List the callers", description: "Find callers", subagent_type: "Explore" };
+    expect(approvalCard(described("Agent", task, "Find callers"), "/w")).toMatchObject({ title: "Find callers", subagent: "Explore" });
+    expect(approvalCard(approve("Agent", task), "/w")).toMatchObject({
+      title: "Approve subagent task (via Explore)",
+      subagent: null,
+    });
+  });
+
+  it("keeps the summary out of the request's listed fields", () => {
+    expect(shownRequest(described("Bash", bash, "Run the tests"), ownInput).fields).not.toHaveProperty("summary");
   });
 });

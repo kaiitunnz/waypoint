@@ -11,10 +11,15 @@ describe("parseQuery", () => {
   it("lowercases plain terms and ANDs them in one group", () => {
     expect(parseQuery("Foo BAR")).toEqual([
       [
-        { field: undefined, isRegex: false, value: "foo" },
-        { field: undefined, isRegex: false, value: "bar" },
+        { field: undefined, isRegex: false, value: "foo", start: 0, end: 3 },
+        { field: undefined, isRegex: false, value: "bar", start: 4, end: 7 },
       ],
     ]);
+  });
+
+  it("places each term in the query, its field included", () => {
+    const query = "agent:codex  AND /home/me";
+    expect(parseQuery(query)[0].map((t) => query.slice(t.start, t.end))).toEqual(["agent:codex", "/home/me"]);
   });
 
   it("splits OR into groups and ignores AND and repeated or leading ORs", () => {

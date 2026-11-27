@@ -2,6 +2,9 @@ export interface SearchTerm {
   field?: string;
   isRegex: boolean;
   value: string | RegExp;
+  // Where the term, its field included, sits in the query.
+  start: number;
+  end: number;
 }
 
 export type SearchGroup = SearchTerm[]; // AND terms
@@ -71,7 +74,7 @@ export function parseQuery(query: string): ParsedQuery {
       value = rawValue.toLowerCase();
     }
 
-    currentGroup.push({ field, isRegex, value });
+    currentGroup.push({ field, isRegex, value, start: match.index, end: regex.lastIndex });
   }
   
   if (currentGroup.length > 0) {

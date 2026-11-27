@@ -21,6 +21,7 @@ from waypoint.backends.events import (
     InteractionChoice,
     InteractionEnvelope,
     question_interaction,
+    set_summary,
 )
 from waypoint.backends.opencode.forms import Form
 from waypoint.backends.opencode.sessions import Permission
@@ -37,6 +38,9 @@ QUESTION_TOOL = "question"
 # OpenCode's tool names where Waypoint's clients and telemetry know another.
 _TOOL_NAMES = {"shell": "bash", "subagent": "task"}
 _FILE_TOOLS = frozenset({"read", "write", "edit"})
+# Tools whose ``description`` input is the agent's description of the call.
+# ``shell`` declares none, and no other tool's text stands in for one.
+_DESCRIBED_TOOLS = frozenset({"subagent"})
 
 
 def tool_name(name: str) -> str:
@@ -48,6 +52,13 @@ def _tool_input(name: str, raw: Any) -> dict[str, Any]:
     if name in _FILE_TOOLS and isinstance(path := values.get("path"), str):
         values["file_path"] = path
     return values
+
+
+def _call_summary(name: str, raw: Any) -> str | None:
+    if name not in _DESCRIBED_TOOLS or not isinstance(raw, dict):
+        return None
+    description = raw.get("description")
+    return description if isinstance(description, str) else None
 
 
 def note(text: str, method: str, **metadata: Any) -> Emission:
@@ -86,19 +97,17 @@ def text_delta(
 
 def tool_call(call_id: str, name: str, raw_input: Any) -> Emission:
     shown, values = tool_name(name), _tool_input(name, raw_input)
-    return (
-        EventKind.TOOL_CALL,
-        f"{shown}({json.dumps(values, indent=2)})",
-        {
-            "method": "session.tool.called",
-            "item_id": call_id,
-            "item_type": "tool_use",
-            "call_id": call_id,
-            "tool_use_id": call_id,
-            "tool_name": shown,
-            "tool_input": values,
-        },
-    )
+    metadata: dict[str, Any] = {
+        "method": "session.tool.called",
+        "item_id": call_id,
+        "item_type": "tool_use",
+        "call_id": call_id,
+        "tool_use_id": call_id,
+        "tool_name": shown,
+        "tool_input": values,
+    }
+    set_summary(metadata, _call_summary(name, raw_input))
+    return (EventKind.TOOL_CALL, f"{shown}({json.dumps(values, indent=2)})", metadata)
 
 
 def tool_result(
@@ -180,6 +189,7 @@ def approval_request(
     }
     if permission.call_id:
         metadata["item_id"] = permission.call_id
+    set_summary(metadata, _call_summary(name or "", raw_input))
     return (EventKind.APPROVAL_REQUEST, title, metadata)
 
 

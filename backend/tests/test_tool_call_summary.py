@@ -11,6 +11,8 @@ from waypoint.backends.claude_code.history import convert_transcript_records
 from waypoint.backends.claude_code.normalize import call_summary
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
 from waypoint.backends.events import set_summary
+from waypoint.backends.opencode import normalize as opencode
+from waypoint.backends.opencode.sessions import Permission
 from waypoint.schemas import EventKind
 
 BASH_INPUT = {"command": "git status --short", "description": "Check for changes"}
@@ -180,3 +182,73 @@ def test_claude_agent_call_is_summarized() -> None:
     ]
 
     assert event.metadata["summary"] == "Find callers"
+
+
+SUBAGENT_INPUT = {"description": "Map the callers", "prompt": "List them"}
+
+
+def test_opencode_subagent_calls_carry_their_description() -> None:
+    _, _, call = opencode.tool_call("call-1", "subagent", SUBAGENT_INPUT)
+    [history_call, _] = [
+        metadata
+        for _, _, _, metadata in opencode.historical_events_from_messages(
+            [
+                {
+                    "type": "assistant",
+                    "id": "message-1",
+                    "time": {"created": 1_700_000_000_000},
+                    "content": [
+                        {
+                            "type": "tool",
+                            "id": "call-1",
+                            "name": "subagent",
+                            "state": {"status": "completed", "input": SUBAGENT_INPUT},
+                        }
+                    ],
+                }
+            ]
+        )
+    ]
+
+    assert call["summary"] == history_call["summary"] == "Map the callers"
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("shell", {"command": "ls", "description": "List files"}),
+        ("shell", {"command": "ls"}),
+        ("read", {"path": "a.txt"}),
+        ("subagent", {"prompt": "List them"}),
+        ("calendar_create", {"description": "Daily sync with the team"}),
+    ],
+)
+def test_opencode_other_calls_have_no_summary(
+    tool: str, tool_input: dict[str, str]
+) -> None:
+    _, _, call = opencode.tool_call("call-1", tool, tool_input)
+
+    assert "summary" not in call
+
+
+def _permission() -> Permission:
+    return Permission(
+        id="permission-1",
+        session_id="session-1",
+        action="subagent",
+        resources=("general",),
+        save=(),
+        call_id="call-1",
+    )
+
+
+def test_opencode_approval_carries_the_call_summary() -> None:
+    _, _, described = opencode.approval_request(
+        _permission(), name="subagent", raw_input=SUBAGENT_INPUT, from_subagent=False
+    )
+    _, _, bare = opencode.approval_request(
+        _permission(), name="shell", raw_input={"command": "ls"}, from_subagent=False
+    )
+
+    assert described["summary"] == "Map the callers"
+    assert "summary" not in bare

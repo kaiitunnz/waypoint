@@ -79,10 +79,10 @@ so a client gates only screen-read transports on `call_verified`.
 
 For `claude_tty`:
 
-- A tool approval is verified when exactly one pending call, in the main
-  transcript or the named subagent's, agrees with everything the dialog shows.
-  Identical calls of one transcript are taken oldest first. `tool_input` is then
-  the call's whole input. A call Claude has not written to its transcript while
+- A tool approval is verified when the pending calls, in the main transcript or
+  the named subagent's, that agree with everything the dialog shows are a single
+  call, or identical calls of one transcript, of which the oldest is named.
+  `tool_input` is then that call's whole input. A call Claude has not written to its transcript while
   the dialog is up, which is common on the main thread, stays unverified.
 - A plan approval is verified when its text is the content of the plan file the
   dialog names. An unreadable file leaves the item unverified and without text,

@@ -849,9 +849,10 @@ same `~/.claude/projects` transcript store as `claude_code`, so the same
 Claude threads appear under both backend ids.
 
 `claude_tty` reads permission dialogs off the pane and names the call each asks
-about ([call verification](pending_asks.md#call-verification)). A reply presses
-the option's digit only while the pane still shows the request, and messages are
-typed only while the composer is drawn.
+about when that is certain ([call
+verification](pending_asks.md#call-verification)). A reply presses the option's
+digit only while the pane still shows the request, and messages are typed only
+while the composer is drawn.
 
 `/clear` starts a new conversation in a new transcript, whose `derived-from`
 header record names the old thread with `via: "clear"`. After a `/clear` sent

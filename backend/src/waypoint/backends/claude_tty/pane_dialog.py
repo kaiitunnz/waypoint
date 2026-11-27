@@ -629,13 +629,13 @@ def parse_approval(screen: str) -> ApprovalDialog | None:
 def _read_heading(lines: list[str], start: int) -> tuple[str, str | None, int, bool]:
     """The heading at ``start``, the agent it names, the line after it, and
     whether it was fully read."""
-    joined = lines[start].strip()
+    text = lines[start].strip()
     for end in range(start + 1, min(start + _HEADING_MAX_LINES, len(lines)) + 1):
-        if suffixed := _AGENT_SUFFIX_RE.match(joined):
+        if suffixed := _AGENT_SUFFIX_RE.match(text):
             return suffixed.group(1), suffixed.group(2), end, True
         if end < len(lines):
             # A narrow pane wraps the agent suffix onto the following lines.
-            joined = f"{joined} {lines[end].strip()}"
+            text = f"{text} {lines[end].strip()}"
     near = " ".join(line.strip() for line in lines[start : start + _HEADING_MAX_LINES])
     return lines[start].strip(), None, start + 1, "· from" not in near
 

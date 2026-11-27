@@ -12,7 +12,7 @@ class PendingTtyApproval:
     # Which request this is: ``call:<id>``, ``pane:<digest>`` or
     # ``plan:<path>:<digest>``.
     signature: str
-    # The digest of the dialog as it was drawn when the ask was raised.
+    # The dialog on screen: a digest of it as drawn, or ``plan:<path>``.
     identity: str = ""
     # The call the ask names; None when it is a reading of the pane.
     call: PendingCall | None = None

@@ -12,7 +12,6 @@ call's full input; any other carries the pane's reading.
 """
 
 import asyncio
-import hashlib
 import json
 import logging
 import uuid
@@ -75,6 +74,7 @@ _REDRAW_POLLS = 2
 _LOST_REPLY_POLLS = 5
 # Scrollback captured when a tall dialog's heading is above the usual window.
 _DEEP_CAPTURE_LINE = -2000
+# The most of a plan file read; a longer plan counts as unreadable.
 _PLAN_LIMIT = 1024 * 1024
 _ARROW_DOWN = b"\x1b[B"
 _ARROW_UP = b"\x1b[A"
@@ -104,21 +104,25 @@ _RELOCATION_TAIL_BYTES = READ_LIMIT
 class _Surfaced:
     """The dialog the current card was raised for."""
 
-    identity: str
-    signature: str
-    approval_id: str
-    call: PendingCall | None = None
+    pending: PendingTtyApproval
     polls: int = 0
     polls_since_reply: int = 0
 
 
 def _plan_signature(path: str | None, content: str | None) -> str:
-    digest = (
-        hashlib.sha256(content.encode()).hexdigest()[:16]
-        if content is not None
-        else "unread"
-    )
-    return f"plan:{path}:{digest}"
+    text = pane_dialog.digest(content) if content is not None else "unread"
+    return f"plan:{path}:{text}"
+
+
+def _plan_identity(path: str | None) -> str:
+    return f"plan:{path}"
+
+
+def _reply_numbers(dialog: pane_dialog.ApprovalDialog) -> tuple[int, int | None]:
+    """The digits approving and declining ``dialog``; without one to decline,
+    the reply is Esc."""
+    approve = dialog.approve_option.number if dialog.approve_option else 1
+    return approve, dialog.decline_option.number if dialog.decline_option else None
 
 
 def _plan_approve_option(
@@ -597,7 +601,7 @@ class TranscriptTailer:
     def _note_departed(self) -> None:
         # One poll can catch the TUI mid-redraw, so wait for a second.
         if self._surfaced is not None:
-            self._departing = self._surfaced.call
+            self._departing = self._surfaced.pending.call
         elif self._departing is not None:
             self._answered.add(self._departing.tool_use_id)
             self._departing = None
@@ -637,7 +641,7 @@ class TranscriptTailer:
     ) -> bool:
         """Whether the open card for the dialog on screen needs raising again."""
         shown.polls += 1
-        if shown.call is None:
+        if (call := shown.pending.call) is None:
             # A record written late can still name an unverified card.
             return (
                 shown.polls <= _REMATCH_POLLS and await self._match(dialog) is not None
@@ -645,7 +649,7 @@ class TranscriptTailer:
         if shown.polls % _RESOLVED_CHECK_POLLS:
             return False
         # A resolved call's dialog is gone, so this one asks about another.
-        return await asyncio.to_thread(self._calls.is_resolved, shown.call)
+        return await asyncio.to_thread(self._calls.is_resolved, call)
 
     async def _replied_dialog_remains(
         self, dialog: pane_dialog.ApprovalDialog, shown: _Surfaced
@@ -653,8 +657,9 @@ class TranscriptTailer:
         """Whether a dialog drawn like the one just replied to needs a card: it
         may not have redrawn yet, belong to the next identical call, or have
         missed the keystroke."""
-        if shown.call is not None:
-            self._answered.add(shown.call.tool_use_id)
+        call = shown.pending.call
+        if call is not None:
+            self._answered.add(call.tool_use_id)
         shown.polls_since_reply += 1
         if shown.polls_since_reply < _REDRAW_POLLS:
             return False
@@ -662,19 +667,17 @@ class TranscriptTailer:
             return True
         if shown.polls_since_reply < _LOST_REPLY_POLLS:
             return False
-        if shown.call is not None:
-            self._answered.discard(shown.call.tool_use_id)
+        if call is not None:
+            self._answered.discard(call.tool_use_id)
         return True
 
     async def _surface_approval(self, dialog: pane_dialog.ApprovalDialog) -> None:
-        pending = self._plugin._pending_approvals.get(self._session_id)
         shown = self._surfaced
-        card_open = (
-            shown is not None
-            and pending is not None
-            and pending.approval_id == shown.approval_id
+        card_open = shown is not None and shown.pending is (
+            self._plugin._pending_approvals.get(self._session_id)
         )
-        if shown is not None and shown.identity == dialog.identity:
+        same_dialog = shown is not None and shown.pending.identity == dialog.identity
+        if shown is not None and same_dialog:
             if card_open:
                 if not await self._card_outdated(dialog, shown):
                     return
@@ -683,32 +686,31 @@ class TranscriptTailer:
 
         call = await self._match(dialog)
         signature = f"call:{call.tool_use_id}" if call else f"pane:{dialog.identity}"
-        if card_open and pending and shown and pending.signature == signature:
+        approve_number, decline_number = _reply_numbers(dialog)
+        if shown is not None and card_open and shown.pending.signature == signature:
             # The same request drawn differently, as after a resize.
-            pending.identity = shown.identity = dialog.identity
+            shown.pending.identity = dialog.identity
+            shown.pending.approve_number = approve_number
+            shown.pending.decline_number = decline_number
             return
 
-        approve_num = dialog.approve_option.number if dialog.approve_option else 1
-        decline_opt = dialog.decline_option
         tool_name, tool_input = (
             (call.name, dict(call.input)) if call else _pane_reading(dialog)
         )
         # An unverified card that a late record now names keeps its dialog.
         updated = (
             shown is not None
-            and shown.identity == dialog.identity
-            and shown.call is None
             and card_open
+            and same_dialog
+            and shown.pending.call is None
         )
         approval_id = await self._register_dialog(
             signature,
-            dialog.identity,
-            call,
             lambda approval_id: PendingTtyApproval(
                 approval_id=approval_id,
                 tool_name=tool_name,
-                approve_number=approve_num,
-                decline_number=decline_opt.number if decline_opt else None,
+                approve_number=approve_number,
+                decline_number=decline_number,
                 signature=signature,
                 identity=dialog.identity,
                 call=call,
@@ -779,43 +781,67 @@ class TranscriptTailer:
     async def still_shows(self, pending: PendingTtyApproval) -> bool:
         """Whether the pane still shows what ``pending``'s ask was raised for, so
         its keys answer that request. Raises ``TmuxError`` when the pane can't be
-        read."""
+        read.
+
+        The pane is looked at last, after the transcript and plan reads, which
+        take long enough for it to move on.
+        """
         session = self._runtime.storage.get_session(self._session_id)
         if session is None:
             return False
         pane = self._pane(session)
-        snapshot = await self._runtime.tmux.capture_snapshot(pane)
-        screen = pane_dialog.classify(snapshot)
         if pending.is_plan:
-            plan_dialog = pane_dialog.parse_plan_dialog(snapshot)
-            if plan_dialog is None:
+            return await self._plan_still_shown(session, pane, pending)
+        if pending.call is not None:
+            dialog = await self._approval_on_screen(pane)
+            if dialog is None or dialog.identity != pending.identity:
                 return False
-            content = await asyncio.to_thread(self._read_plan, plan_dialog.plan_path)
-            option, restore_mode = _plan_approve_option(session, plan_dialog)
-            return (
-                _plan_signature(plan_dialog.plan_path, content) == pending.signature
-                and option is not None
-                and option.number == pending.approve_number
-                and restore_mode == pending.restore_mode
-            )
-        if screen is not pane_dialog.PaneScreen.APPROVAL:
+            # The same words can come from another call.
+            if await asyncio.to_thread(self._calls.is_resolved, pending.call):
+                return False
+            match = await self._match(dialog)
+            if match is None or match.tool_use_id != pending.call.tool_use_id:
+                return False
+        dialog = await self._approval_on_screen(pane)
+        return (
+            dialog is not None
+            and dialog.identity == pending.identity
+            and _reply_numbers(dialog)
+            == (pending.approve_number, pending.decline_number)
+        )
+
+    async def _plan_still_shown(
+        self, session: SessionRecord, pane: str, pending: PendingTtyApproval
+    ) -> bool:
+        dialog = await self._plan_on_screen(pane)
+        if dialog is None:
             return False
-        dialog = await self._read_approval(pane, snapshot)
-        if dialog is None or dialog.identity != pending.identity:
+        content = await asyncio.to_thread(self._read_plan, dialog.plan_path)
+        if _plan_signature(dialog.plan_path, content) != pending.signature:
             return False
-        if pending.call is None:
-            return True
-        # The same words can come from another call.
-        if await asyncio.to_thread(self._calls.is_resolved, pending.call):
+        dialog = await self._plan_on_screen(pane)
+        if dialog is None or _plan_identity(dialog.plan_path) != pending.identity:
             return False
-        match = await self._match(dialog)
-        return match is not None and match.tool_use_id == pending.call.tool_use_id
+        option, restore_mode = _plan_approve_option(session, dialog)
+        return (
+            option is not None
+            and option.number == pending.approve_number
+            and restore_mode == pending.restore_mode
+        )
+
+    async def _approval_on_screen(self, pane: str) -> pane_dialog.ApprovalDialog | None:
+        snapshot = await self._runtime.tmux.capture_snapshot(pane)
+        if pane_dialog.classify(snapshot) is not pane_dialog.PaneScreen.APPROVAL:
+            return None
+        return await self._read_approval(pane, snapshot)
+
+    async def _plan_on_screen(self, pane: str) -> pane_dialog.PlanDialog | None:
+        snapshot = await self._runtime.tmux.capture_snapshot(pane)
+        return pane_dialog.parse_plan_dialog(snapshot)
 
     async def _register_dialog(
         self,
         signature: str,
-        identity: str,
-        call: PendingCall | None,
         make: Callable[[str], PendingTtyApproval],
         *,
         closing_note: str = _DIALOG_CLOSED_NOTE,
@@ -838,8 +864,9 @@ class TranscriptTailer:
         self._adoptable = [item for item in self._adoptable if item[1] != adopted]
         await self._expire_adoptable()
         approval_id = adopted or str(uuid.uuid4())
-        self._plugin._pending_approvals[self._session_id] = make(approval_id)
-        self._surfaced = _Surfaced(identity, signature, approval_id, call)
+        pending = make(approval_id)
+        self._plugin._pending_approvals[self._session_id] = pending
+        self._surfaced = _Surfaced(pending)
         if adopted:
             # No event reports the adoption, but the card is answerable again.
             self._runtime.asks.mark_dirty(self._session_id)
@@ -907,24 +934,24 @@ class TranscriptTailer:
             self._prev_dialog_sig = None
             self._dialog_stable_count = 0
             return
-        identity = f"plan:{dialog.plan_path}"
+        identity = _plan_identity(dialog.plan_path)
         if not self._is_stable(identity):
             return
 
         content = await asyncio.to_thread(self._read_plan, dialog.plan_path)
         signature = _plan_signature(dialog.plan_path, content)
-        pending = self._plugin._pending_approvals.get(self._session_id)
         shown = self._surfaced
-        if shown is not None and shown.identity == identity:
-            if pending is not None and pending.approval_id == shown.approval_id:
+        same_dialog = shown is not None and shown.pending.identity == identity
+        if shown is not None and same_dialog:
+            unchanged = signature == shown.pending.signature
+            if shown.pending is self._plugin._pending_approvals.get(self._session_id):
                 # A failed read is not a changed plan.
-                if signature == shown.signature or content is None:
+                if unchanged or content is None:
                     return
             else:
                 shown.polls_since_reply += 1
                 if shown.polls_since_reply < _REDRAW_POLLS or (
-                    signature == shown.signature
-                    and shown.polls_since_reply < _LOST_REPLY_POLLS
+                    unchanged and shown.polls_since_reply < _LOST_REPLY_POLLS
                 ):
                     return
 
@@ -941,19 +968,14 @@ class TranscriptTailer:
 
         approval_id = await self._register_dialog(
             signature,
-            identity,
-            call,
-            closing_note=(
-                _UPDATED_NOTE
-                if shown is not None and shown.identity == identity
-                else _DIALOG_CLOSED_NOTE
-            ),
+            closing_note=_UPDATED_NOTE if same_dialog else _DIALOG_CLOSED_NOTE,
             make=lambda approval_id: PendingTtyApproval(
                 approval_id=approval_id,
                 tool_name="ExitPlanMode",
                 approve_number=option.number,
                 decline_number=None,
                 signature=signature,
+                identity=identity,
                 call=call,
                 is_plan=True,
                 restore_mode=restore_mode,
@@ -977,10 +999,8 @@ class TranscriptTailer:
         session = self._runtime.storage.get_session(self._session_id)
         if session is None:
             return False
-        state = session.transport_state
-        target = state.get("tmux_pane") or state.get("tmux_session") or self._session_id
         try:
-            info = await self._runtime.tmux.describe_target(target)
+            info = await self._runtime.tmux.describe_target(self._pane(session))
         except TmuxError:
             return False
         return not info.pane_dead

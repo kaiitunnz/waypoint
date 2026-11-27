@@ -4,8 +4,8 @@ Uses captured pane fixtures and a fake runtime/tmux so no live TUI is needed.
 Verifies:
   - stable dialog (>=2 ticks) emits exactly ONE APPROVAL_REQUEST
   - single-tick dialog emits nothing (debounce)
-  - respond_to_approval('decline') sends the No-option digit + Enter
-  - respond_to_approval('approve') sends '1' + Enter
+  - respond_to_approval('decline') sends only the No-option digit
+  - respond_to_approval('approve') sends only '1'
   - respond_to_approval with no pending returns False
   - wrong approval_id returns False without clearing pending
   - auto-mode session never calls capture_snapshot
@@ -228,7 +228,12 @@ async def test_stable_plan_dialog_emits_exit_plan_approval(plan_file: Path) -> N
     plugin = ClaudeTtyPlugin()
     session = _make_session(permission_mode="plan")
     runtime = _make_runtime(session, _load("plan_approval.txt"))
-    call = PendingCall("toolu_plan", "ExitPlanMode", {"planFilePath": str(plan_file)})
+    call = PendingCall(
+        "toolu_plan",
+        "ExitPlanMode",
+        {"planFilePath": str(plan_file)},
+        home=str(plan_file.parents[2]),
+    )
     tailer = _make_tailer(plugin, runtime, calls=_Calls(call))
 
     await tailer._poll_dialog()  # tick 1: debounce
@@ -1041,7 +1046,7 @@ async def test_ready_for_input_reads_the_composer(
     assert caplog.text.count("no pane") == 1
 
 
-async def test_respond_approve_sends_digit_1_enter() -> None:
+async def test_respond_approve_sends_only_digit_1() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session()
     plugin._pending_approvals["sess-1"] = _pending(approve_number=1)
@@ -1069,7 +1074,7 @@ async def test_respond_accept_sends_approve_digit_not_decline() -> None:
     assert "sess-1" not in plugin._pending_approvals
 
 
-async def test_respond_decline_sends_no_digit_enter() -> None:
+async def test_respond_decline_sends_only_the_no_digit() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session()
     plugin._pending_approvals["sess-1"] = _pending(decline_number=3)

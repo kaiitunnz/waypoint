@@ -19,6 +19,7 @@ from claude_tty_transcripts import (
     use,
     write_subagent,
 )
+from waypoint.backends.claude_tty.pending_calls import PendingCall
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin, _TailerRun
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
@@ -262,6 +263,47 @@ async def test_reply_is_refused_once_the_named_call_resolved(tmp_path: Path) -> 
     pane.assert_no_keys()
     await pane.poll()
     assert pane.asks[-1]["tool_input"] == unsandboxed
+
+
+async def test_redrawn_options_move_the_keys_a_reply_presses(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    full = pane.screen
+    # First drawn with only Yes and No.
+    pane.screen = "\n".join(
+        line.replace("4. No", "2. No")
+        for line in full.splitlines()
+        if not line.startswith(("   2. Yes", "   3. Yes"))
+    )
+    await pane.poll()
+
+    pane.screen = full
+    await pane.poll()
+    assert len(pane.asks) == 1
+    assert await pane.reply("decline") is True
+    pane.runtime.tmux.send_input.assert_called_once_with("%0", "4", submit=False)
+
+
+async def test_reply_is_refused_when_the_pane_moves_during_its_reads(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+    reads = pane.tailer._calls
+    candidates = reads.candidates
+
+    def move_on(agent: str | None) -> list[PendingCall]:
+        found = candidates(agent)
+        pane.screen = _screen("approval_subagent_bash_decoy.txt")
+        return found
+
+    reads.candidates = move_on  # type: ignore[method-assign]
+
+    assert await pane.reply() is False
+    pane.assert_no_keys()
 
 
 async def test_reply_in_flight_leaves_the_card_alone(tmp_path: Path) -> None:

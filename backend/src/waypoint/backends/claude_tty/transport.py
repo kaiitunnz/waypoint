@@ -109,6 +109,31 @@ class ClaudeTtyTransport(TmuxTransport):
             await asyncio.sleep(poll_seconds)
         raise InputBlockedError()
 
+    async def _submit_confirmed(
+        self,
+        target: str,
+        confirmer: PaneSubmitConfirming,
+        sent_text: str,
+        *,
+        attempts: int = 30,
+        poll_seconds: float = 0.4,
+    ) -> None:
+        # As the base, but each Enter also waits for the composer: a popup nothing
+        # recognizes would take it as its answer.
+        for _ in range(attempts):
+            snapshot = await self.adapter.capture_snapshot(target)
+            if confirmer.pane_shows_blocking_dialog(snapshot):
+                return
+            if not pane_dialog.composer_drawn(snapshot):
+                await asyncio.sleep(poll_seconds)
+                continue
+            await self.adapter.submit(target)
+            await asyncio.sleep(poll_seconds)
+            if confirmer.confirm_pane_submit(
+                await self.adapter.capture_snapshot(target), sent_text
+            ):
+                return
+
     async def _require_composer(self, target: str) -> None:
         if not pane_dialog.composer_drawn(await self.adapter.capture_snapshot(target)):
             raise InputBlockedError()
@@ -129,8 +154,8 @@ class ClaudeTtyTransport(TmuxTransport):
         )
         target = self._target(session)
         await self.adapter.send_bytes(target, b"\x1b")
-        # Nothing else retries a stranded prompt: the tailer's surfaced-signature
-        # guard suppresses a re-emit and the pending entry is already popped.
+        # Retried here: the tailer takes several polls to raise a dialog that
+        # outlived its card.
         await self._ensure_dialog_dismissed(target)
 
     async def _ensure_dialog_dismissed(self, target: str) -> None:
@@ -190,7 +215,7 @@ class ClaudeTtyTransport(TmuxTransport):
                 # A key pressed on a dialog that has moved on would answer a
                 # request the human never saw.
                 if not await self._plugin.still_shows(session.id, pending):
-                    await self._refuse_reply(session, pending)
+                    await self._refuse_reply(session)
                     return False
                 if self._plugin._pending_approvals.get(session.id) is not pending:
                     return False  # interrupted meanwhile
@@ -214,18 +239,12 @@ class ClaudeTtyTransport(TmuxTransport):
             )
         return True
 
-    async def _refuse_reply(
-        self, session: SessionRecord, pending: PendingTtyApproval
-    ) -> None:
-        self._plugin._pending_approvals.pop(session.id, None)
+    async def _refuse_reply(self, session: SessionRecord) -> None:
+        # Forgotten before the entry goes, so the next poll raises what is on
+        # screen as a new request.
         self._plugin.forget_dialog(session.id)
-        await self._runtime._record_system_event(
-            session.id,
-            _STALE_REPLY_NOTE,
-            metadata={
-                "method": "approval.invalidated",
-                "approval_id": pending.approval_id,
-            },
+        await self._plugin.drop_pending_approval(
+            self._runtime, session.id, _STALE_REPLY_NOTE
         )
 
     async def _press(

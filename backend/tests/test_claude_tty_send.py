@@ -66,6 +66,18 @@ async def test_nothing_is_typed_without_the_composer(screen: str) -> None:
     _assert_untouched(tmux)
 
 
+async def test_no_enter_into_a_popup_that_opens_after_the_first() -> None:
+    ready = (FIXTURES / "ready.txt").read_text()
+    transport, tmux, session = _transport(ready)
+
+    async def open_popup(*_: object) -> None:
+        tmux.capture_snapshot.return_value = UNKNOWN_POPUPS[1]
+
+    tmux.submit.side_effect = open_popup
+    await transport.send_input(session, "hello")
+    assert tmux.submit.await_count == 1
+
+
 async def test_drawn_composer_takes_the_message() -> None:
     ready = (FIXTURES / "ready.txt").read_text()
     transport, tmux, session = _transport(ready)

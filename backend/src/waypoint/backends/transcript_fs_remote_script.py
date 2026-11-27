@@ -217,6 +217,9 @@ def op_read_range(path, offset, limit):
             data = b""
         else:
             with open(p, "rb") as fh:
+                # Describe the file the bytes come from: the path can be renamed
+                # and reused between the stat and the open.
+                st = os.fstat(fh.fileno())
                 fh.seek(want_offset)
                 data = fh.read(want_limit)
     except OSError as exc:

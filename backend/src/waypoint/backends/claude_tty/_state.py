@@ -1,5 +1,17 @@
 from dataclasses import dataclass
 
+from waypoint.schemas import SessionRecord
+
+# transport_state key: the folder the CLI was launched in, kept once Claude has
+# moved the session elsewhere.
+LAUNCH_CWD_KEY = "launch_cwd"
+
+
+def launch_folder(session: SessionRecord) -> str:
+    """The folder the session's CLI was launched in."""
+    recorded = session.transport_state.get(LAUNCH_CWD_KEY)
+    return recorded if isinstance(recorded, str) and recorded else session.cwd
+
 
 @dataclass
 class PendingTtyApproval:

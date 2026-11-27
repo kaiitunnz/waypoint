@@ -16,7 +16,7 @@ export function HeuristicCard({ event }: { event: EventRecord }) {
         <EventTime ts={event.ts} className={styles.time} />
         <CopyButton text={event.text} />
       </div>
-      <FoldedText text={event.text} keep="start" className={styles.text} />
+      <FoldedText text={event.text} className={styles.text} />
       <Attachments specs={attachmentSpecsFor(event)} />
     </div>
   );

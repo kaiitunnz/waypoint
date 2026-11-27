@@ -58,7 +58,7 @@ export function CallRow({ row }: { row: CallView }) {
       ) : null}
       {row.output ? (
         <div className={styles.inset}>
-          <FoldedText text={row.output} keep="end" className={styles.out} />
+          <FoldedText text={row.output} className={styles.out} />
         </div>
       ) : null}
       {row.attachments.length > 0 ? (

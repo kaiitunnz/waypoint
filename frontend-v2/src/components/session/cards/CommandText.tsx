@@ -22,7 +22,7 @@ export function Lines({ text }: { text: string }) {
 export function CommandText({ text, whole }: { text: string; whole?: boolean }) {
   return whole ? (
     <div className={styles.mono}>
-      <Lines text={foldLines(text, Infinity, "start").text} />
+      <Lines text={foldLines(text, Infinity).text} />
     </div>
   ) : (
     <FoldedCommand text={text} />
@@ -30,7 +30,7 @@ export function CommandText({ text, whole }: { text: string; whole?: boolean }) 
 }
 
 function FoldedCommand({ text }: { text: string }) {
-  const { open, toggle, shown, total, content, chip } = useFold<HTMLDivElement>(text, "start");
+  const { open, toggle, shown, total, content, chip } = useFold<HTMLDivElement>(text);
   return (
     <>
       <div className={cx(styles.mono, !open && clamp.clamp)}>

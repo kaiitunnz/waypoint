@@ -24,7 +24,7 @@ function ReportPreview({ state }: { state: ReportPreviewState | null }) {
   if (preview.binary || preview.content === null) return <p className={styles.caption}>Binary report. Open the full file.</p>;
   return (
     <>
-      <FoldedText text={preview.content} keep="start" className={styles.result} />
+      <FoldedText text={preview.content} className={styles.result} />
       {preview.truncated ? <p className={styles.caption}>Preview: first {Math.round(preview.content_bytes / 1024)} KB of the full report</p> : null}
     </>
   );
@@ -74,9 +74,9 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
       {teaser && !open ? <p className={styles.teaser}>{teaser}</p> : null}
       {open ? (
         <div className={styles.body}>
-          {view.resultPreview && !supersedes(view.resultPreview) ? <FoldedText text={view.resultPreview} keep="start" className={styles.result} /> : null}
+          {view.resultPreview && !supersedes(view.resultPreview) ? <FoldedText text={view.resultPreview} className={styles.result} /> : null}
           {caption(view.resultPreview, view.resultTruncated)}
-          {view.event && !supersedes(view.event) ? <FoldedText text={view.event} keep="start" className={styles.result} /> : null}
+          {view.event && !supersedes(view.event) ? <FoldedText text={view.event} className={styles.result} /> : null}
           {caption(view.event, view.eventTruncated)}
           {view.note ? <p className={styles.text}>{view.note}</p> : null}
           {caption(view.note, view.noteTruncated)}
@@ -86,7 +86,7 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
               <span className={styles.label}>{reportSpec !== null || inlineReports.length > 0 ? "Full report" : "Full output"}</span>
               {inlineReports.map((text, index) =>
                 text.trim() ? (
-                  <FoldedText key={index} text={text} keep="start" className={styles.result} />
+                  <FoldedText key={index} text={text} className={styles.result} />
                 ) : (
                   <p className={styles.caption} key={index}>
                     No output

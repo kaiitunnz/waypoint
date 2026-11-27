@@ -1,21 +1,21 @@
 {"type": "system", "subtype": "init"}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01Sx21g9NjZJBk9YRyPLthVU", "name": "Agent", "input": {"description": "Sleep 8s and report DONE", "prompt": "Run this exact shell command using the Bash tool and nothing else: python3 -c 'i", "run_in_background": true, "subagent_type": "general-purpose"}, "caller": {"type": "direct"}}], "stop_reason": null, "id": "msg_011ChTpe9zf6wZHqR5KNbqep"}, "parent_tool_use_id": null}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fixture_04", "name": "Agent", "input": {"description": "Sleep 8s and report DONE", "prompt": "Run this exact shell command using the Bash tool and nothing else: python3 -c 'i", "run_in_background": true, "subagent_type": "general-purpose"}, "caller": {"type": "direct"}}], "stop_reason": null, "id": "msg_fixture_04"}, "parent_tool_use_id": null}
 {"type": "system", "subtype": "background_tasks_changed"}
 {"type": "system", "subtype": "task_started"}
-{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_01Sx21g9NjZJBk9YRyPLthVU", "type": "tool_result", "content": [{"type": "text", "text": "Async agent launched successfully. (This tool result is internal metadata \u2014 neve"}]}]}, "parent_tool_use_id": null}
+{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_fixture_04", "type": "tool_result", "content": [{"type": "text", "text": "Async agent launched successfully. (This tool result is internal metadata \u2014 neve"}]}]}, "parent_tool_use_id": null}
 {"type": "rate_limit_event"}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "LAUNCHED"}], "stop_reason": null, "id": "msg_011ChTpeJRAfUUt3vHANTrTB"}, "parent_tool_use_id": null}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "LAUNCHED"}], "stop_reason": null, "id": "msg_fixture_05"}, "parent_tool_use_id": null}
 {"type": "result", "subtype": "success", "is_error": false, "terminal_reason": "completed"}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_013nHxUm9L6dFRweZzG6FutC", "name": "Bash", "input": {"command": "python3 -c 'import time; time.sleep(8)'", "description": "Sleep for 8 seconds using python3"}, "caller": {"type": "direct"}}], "stop_reason": null, "id": "msg_011ChTpeJUPEtJqtE6AZRyqV"}, "parent_tool_use_id": "toolu_01Sx21g9NjZJBk9YRyPLthVU"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fixture_05", "name": "Bash", "input": {"command": "python3 -c 'import time; time.sleep(8)'", "description": "Sleep for 8 seconds using python3"}, "caller": {"type": "direct"}}], "stop_reason": null, "id": "msg_fixture_06"}, "parent_tool_use_id": "toolu_fixture_04"}
 {"type": "system", "subtype": "task_progress"}
 {"type": "system", "subtype": "task_started"}
 {"type": "system", "subtype": "task_notification", "status": "completed"}
-{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_013nHxUm9L6dFRweZzG6FutC", "type": "tool_result", "content": "(Bash completed with no output)", "is_error": false}]}, "parent_tool_use_id": "toolu_01Sx21g9NjZJBk9YRyPLthVU"}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": ""}], "stop_reason": null, "id": "msg_011ChTpf3P5H7fhXSreee3ZK"}, "parent_tool_use_id": "toolu_01Sx21g9NjZJBk9YRyPLthVU"}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "DONE"}], "stop_reason": null, "id": "msg_011ChTpf3P5H7fhXSreee3ZK"}, "parent_tool_use_id": "toolu_01Sx21g9NjZJBk9YRyPLthVU"}
+{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_fixture_05", "type": "tool_result", "content": "(Bash completed with no output)", "is_error": false}]}, "parent_tool_use_id": "toolu_fixture_04"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": ""}], "stop_reason": null, "id": "msg_fixture_07"}, "parent_tool_use_id": "toolu_fixture_04"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "DONE"}], "stop_reason": null, "id": "msg_fixture_07"}, "parent_tool_use_id": "toolu_fixture_04"}
 {"type": "system", "subtype": "task_updated"}
 {"type": "system", "subtype": "task_notification", "status": "completed"}
 {"type": "system", "subtype": "background_tasks_changed"}
 {"type": "system", "subtype": "init"}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "The background subagent finished and reported DONE. Its sleep ran as requested."}], "stop_reason": null, "id": "msg_011ChTpf9hpG9HFakUTkjEao"}, "parent_tool_use_id": null}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "The background subagent finished and reported DONE. Its sleep ran as requested."}], "stop_reason": null, "id": "msg_fixture_08"}, "parent_tool_use_id": null}
 {"type": "result", "subtype": "success", "is_error": false, "terminal_reason": "completed"}

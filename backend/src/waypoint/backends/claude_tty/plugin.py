@@ -603,7 +603,6 @@ class ClaudeTtyPlugin:
             runtime=runtime,
             plugin=self,
             start_at_end=start_at_end,
-            config_dir=config_dir,
             context_window_resolver=self._context_window_resolver_for(
                 runtime, backend_id
             ),
@@ -701,6 +700,16 @@ class ClaudeTtyPlugin:
             extra={"session_id": session_id, "thread_id": successor},
         )
         return True
+
+    async def still_shows(self, session_id: str, pending: PendingTtyApproval) -> bool:
+        """Whether the pane still shows what ``pending``'s ask was raised for."""
+        run = self._tailers.get(session_id)
+        return run is not None and await run.tailer.still_shows(pending)
+
+    def forget_dialog(self, session_id: str) -> None:
+        """Have the tailer raise whatever dialog is on screen afresh."""
+        if run := self._tailers.get(session_id):
+            run.tailer.forget_dialog()
 
     async def drop_pending_approval(
         self, runtime: "SessionRuntime", session_id: str, note: str

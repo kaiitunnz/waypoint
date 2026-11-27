@@ -11,16 +11,12 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from waypoint.backends.claude_code.normalize import iter_content_blocks
-from waypoint.backends.claude_tty.byte_source import (
-    SubagentTranscript,
-    Tail,
-    TranscriptTreeReader,
-)
+from waypoint.backends.claude_tty.byte_source import Tail, TranscriptTreeReader
 
 # A pending call's own record has to fit in the window.
 _CANDIDATE_WINDOW = 4 * 1024 * 1024
-# A result is appended at the end, so a short window finds it.
-_RESOLVED_WINDOW = 256 * 1024
+# A result or a newer message is at the end, so a shorter window shows it.
+_RESOLVED_WINDOW = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -36,12 +32,12 @@ class PendingCall:
 
 
 class CallSource(Protocol):
-    def candidates(self, agent: str | None, *, everywhere: bool) -> list[PendingCall]:
+    def candidates(self, agent: str | None) -> list[PendingCall]:
         """Pending calls a dialog may be asking about, oldest first.
 
         ``agent`` is the subagent a dialog names, None for the main thread.
-        ``everywhere`` is for a dialog whose heading is cut off, where either
-        could be asking. Never raises.
+        Empty when they can't all be read, since a partial set could make one
+        call look like the only one. Never raises.
         """
         ...
 
@@ -110,43 +106,36 @@ def pending_calls(tail: Tail, transcript: str | None = None) -> list[PendingCall
     return list(calls.values())
 
 
-def has_result(tail: Tail, tool_use_id: str) -> bool:
-    return any(
-        block.get("type") == "tool_result" and block.get("tool_use_id") == tool_use_id
-        for record in _records(tail)
-        if record.get("type") == "user"
-        for block in iter_content_blocks(_message(record).get("content"))
-    )
-
-
 class TranscriptCalls:
     """Candidates from the session's transcripts."""
 
     def __init__(self, reader: TranscriptTreeReader) -> None:
         self._reader = reader
 
-    def candidates(self, agent: str | None, *, everywhere: bool) -> list[PendingCall]:
-        calls: list[PendingCall] = []
+    def candidates(self, agent: str | None) -> list[PendingCall]:
         if agent is None:
-            if tail := self._reader.read_transcript_tail(_CANDIDATE_WINDOW):
-                calls += pending_calls(tail)
-            if not everywhere:
-                return calls
-        for subagent in self._reader.list_subagents():
-            if agent is not None and not _is_named(subagent, agent):
+            tail = self._reader.read_transcript_tail(_CANDIDATE_WINDOW)
+            return [] if tail is None else pending_calls(tail)
+        if (subagents := self._reader.list_subagents()) is None:
+            return []
+        calls: list[PendingCall] = []
+        for subagent in subagents:
+            if subagent.finished or agent not in (subagent.agent_type, subagent.name):
                 continue
-            if tail := self._reader.read_tail(subagent.path, _CANDIDATE_WINDOW):
-                calls += pending_calls(tail, subagent.path)
+            tail = self._reader.read_tail(subagent.path, _CANDIDATE_WINDOW)
+            if tail is None:
+                return []
+            calls += pending_calls(tail, subagent.path)
         return calls
 
     def is_resolved(self, call: PendingCall) -> bool:
+        """The call has a result, or the transcript has moved to a later
+        message."""
         tail = (
             self._reader.read_transcript_tail(_RESOLVED_WINDOW)
             if call.transcript is None
             else self._reader.read_tail(call.transcript, _RESOLVED_WINDOW)
         )
-        return tail is not None and has_result(tail, call.tool_use_id)
-
-
-def _is_named(subagent: SubagentTranscript, agent: str) -> bool:
-    return agent in (subagent.agent_type, subagent.name)
+        return tail is not None and call.tool_use_id not in {
+            pending.tool_use_id for pending in pending_calls(tail)
+        }

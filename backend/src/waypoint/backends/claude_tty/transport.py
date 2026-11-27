@@ -10,8 +10,9 @@ Thin subclass of ``TmuxTransport`` that overrides:
 - ``send_input`` and ``resume`` send keystrokes only with the composer drawn,
   since anything that replaces it, recognized or not, would take them.
 - ``has_pending_approval`` / ``respond_to_approval`` — drive tool-permission
-  dialogs by sending the appropriate digit + Enter keystroke to the TUI pane.
-  Pending state is owned by the plugin singleton (``ClaudeTtyPlugin``).
+  dialogs by pressing the option's digit in the TUI pane, after checking the
+  pane still shows what the ask was raised for. Pending state is owned by the
+  plugin singleton (``ClaudeTtyPlugin``).
 """
 
 import asyncio
@@ -47,6 +48,7 @@ _INTERRUPTIBLE_DIALOGS = frozenset(
 # dialog left the pane and re-send it a bounded number of times.
 _INTERRUPT_ESC_RETRIES = 4
 _INTERRUPT_ESC_POLL_SECONDS = 0.3
+_STALE_REPLY_NOTE = "Reply not sent: the terminal no longer shows this request"
 # Polls for the composer before a send gives up, long enough for a slow remote
 # resume to draw it.
 _COMPOSER_WAIT_ATTEMPTS = 100
@@ -173,24 +175,34 @@ class ClaudeTtyTransport(TmuxTransport):
         approval_id: str | None = None,
     ) -> bool:
         pending = self._plugin._pending_approvals.get(session.id)
-        if pending is None:
+        if pending is None or pending.replying:
             return False
         if approval_id is not None and pending.approval_id != approval_id:
             return False
 
-        # Claim the approval before the await below, so a concurrent call
-        # (double-click, retried POST) short-circuits on the None lookup above
-        # rather than sending a second keystroke and double-deleting the key.
-        self._plugin._pending_approvals.pop(session.id, None)
+        # Claim the approval before the awaits below, so a concurrent call
+        # (double-click, retried POST) short-circuits above rather than sending
+        # a second keystroke.
+        pending.replying = True
         approve = is_approve_decision(decision)
         try:
             async with self._input_lock(session):
+                # A key pressed on a dialog that has moved on would answer a
+                # request the human never saw.
+                if not await self._plugin.still_shows(session.id, pending):
+                    await self._refuse_reply(session, pending)
+                    return False
+                if self._plugin._pending_approvals.get(session.id) is not pending:
+                    return False  # interrupted meanwhile
                 await self._press(session, pending, approve)
         except Exception:
             # Nothing reached the dialog: keep it answerable.
-            self._plugin._pending_approvals.setdefault(session.id, pending)
             self._runtime.asks.mark_dirty(session.id)
             raise
+        finally:
+            pending.replying = False
+        if self._plugin._pending_approvals.get(session.id) is pending:
+            del self._plugin._pending_approvals[session.id]
         if approve and pending.is_plan:
             # Approving exits plan mode in the TUI; the pressed option already
             # lands the pane in ``restore_mode`` (the pre-plan mode the dialog
@@ -201,6 +213,20 @@ class ClaudeTtyTransport(TmuxTransport):
                 session.id, permission_mode=pending.restore_mode or "default"
             )
         return True
+
+    async def _refuse_reply(
+        self, session: SessionRecord, pending: PendingTtyApproval
+    ) -> None:
+        self._plugin._pending_approvals.pop(session.id, None)
+        self._plugin.forget_dialog(session.id)
+        await self._runtime._record_system_event(
+            session.id,
+            _STALE_REPLY_NOTE,
+            metadata={
+                "method": "approval.invalidated",
+                "approval_id": pending.approval_id,
+            },
+        )
 
     async def _press(
         self, session: SessionRecord, pending: PendingTtyApproval, approve: bool

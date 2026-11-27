@@ -4,16 +4,20 @@ Polls the session JSONL transcript by byte offset, normalizes each new record
 into canonical events, and emits them through the runtime.  Periodically checks
 whether the tmux pane is still alive and marks the session EXITED when it dies.
 
-Also polls the live pane for tool-permission dialogs (when the session's
-permission_mode requires them) and emits APPROVAL_REQUEST events so the
-frontend can surface them.
+Also polls the live pane for tool-permission dialogs and emits APPROVAL_REQUEST
+events so the frontend can surface them. The pane only shows a dialog; the call
+it asks about is looked up in the transcripts (``pending_calls``) and named when
+``call_match`` is certain of it. Such an ask has ``call_verified`` true and the
+call's full input; any other carries the pane's reading.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from waypoint.backends.approvals import open_approval_requests
@@ -31,15 +35,22 @@ from waypoint.backends.claude_code.normalize import format_approval_text
 from waypoint.backends.claude_code.session_folder import follow_relocation
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval
-from waypoint.backends.claude_tty.byte_source import READ_LIMIT, TranscriptByteSource
+from waypoint.backends.claude_tty.byte_source import READ_LIMIT, TailedTranscript
+from waypoint.backends.claude_tty.call_match import match_call, match_plan_call
 from waypoint.backends.claude_tty.normalize import (
     SYNTHETIC_MODEL_ID,
     TranscriptNormalizer,
+)
+from waypoint.backends.claude_tty.pending_calls import (
+    CallSource,
+    PendingCall,
+    TranscriptCalls,
 )
 from waypoint.backends.events import (
     INTERACTION_METADATA_KEY,
     InteractionChoice,
     InteractionEnvelope,
+    InteractionKind,
 )
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import EventKind, SessionRecord, SessionStatus
@@ -54,6 +65,17 @@ _POLL_INTERVAL = 0.5  # seconds between transcript polls
 _PANE_CHECK_INTERVAL = 10.0  # seconds between tmux pane liveness checks
 _DIALOG_POLL_INTERVAL = 1.0  # seconds between live-pane dialog captures
 _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
+# Dialog polls an unverified card is matched again for a late-written call.
+_REMATCH_POLLS = 5
+# Dialog polls between checks that a verified card's call is still pending.
+_RESOLVED_CHECK_POLLS = 5
+# Polls a replied-to dialog is given to redraw, and after which one still drawn
+# is raised again even without another call to name.
+_REDRAW_POLLS = 2
+_LOST_REPLY_POLLS = 5
+# Scrollback captured when a tall dialog's heading is above the usual window.
+_DEEP_CAPTURE_LINE = -2000
+_PLAN_LIMIT = 1024 * 1024
 _ARROW_DOWN = b"\x1b[B"
 _ARROW_UP = b"\x1b[A"
 # Polls an unchanged trust prompt waits before re-sending a dropped arrow burst.
@@ -67,6 +89,8 @@ _ESC_DISMISS_LOG: dict[pane_dialog.PaneScreen, str] = {
     ),
 }
 _DIALOG_CLOSED_NOTE = "Approval dialog closed in the terminal"
+# The dialog is still up, and what its card said about it has changed.
+_UPDATED_NOTE = "Approval request updated"
 _EXPIRED_NOTE = "Pending approval expired"
 # Protective cap on the unparsed trailing buffer: a JSONL record that never
 # completes past this size is dropped rather than grown without bound.
@@ -74,6 +98,57 @@ _MAX_PARTIAL_BYTES = 8 * 1024 * 1024
 # The CLI re-appends ``relocated`` about every 32 KB it writes, so the tail of an
 # existing transcript holds the latest one. One remote read covers it.
 _RELOCATION_TAIL_BYTES = READ_LIMIT
+
+
+@dataclass
+class _Surfaced:
+    """The dialog the current card was raised for."""
+
+    identity: str
+    signature: str
+    approval_id: str
+    call: PendingCall | None = None
+    polls: int = 0
+    polls_since_reply: int = 0
+
+
+def _plan_signature(path: str | None, content: str | None) -> str:
+    digest = (
+        hashlib.sha256(content.encode()).hexdigest()[:16]
+        if content is not None
+        else "unread"
+    )
+    return f"plan:{path}:{digest}"
+
+
+def _plan_approve_option(
+    session: SessionRecord, dialog: pane_dialog.PlanDialog
+) -> tuple[pane_dialog.DialogOption | None, str]:
+    """The option approving a plan presses, and the mode it lands in.
+
+    Approving restores the pre-plan mode, the way Chat does — but only as far as
+    the dialog can express it: the auto option exits to ``auto`` and the manual
+    option to ``default``. A pre-plan ``auto`` is restored when that option is
+    present; everything else (including ``acceptEdits``/``bypassPermissions``/
+    ``dontAsk``, which no option maps to, and a launched-in-plan session with no
+    recorded prior mode) falls back to the manual option → ``default``, which
+    never widens permissions.
+    """
+    pre_plan = session.transport_state.get("pre_plan_mode")
+    if pre_plan == "auto" and dialog.auto_option is not None:
+        return dialog.auto_option, "auto"
+    return dialog.manual_option, "default"
+
+
+def _pane_reading(dialog: pane_dialog.ApprovalDialog) -> tuple[str, dict[str, Any]]:
+    """Tool name and input as the dialog reads, for an ask that names no call."""
+    tool_name = dialog.tool_name or "Unknown"
+    target = dialog.target or ""
+    if tool_name == "Bash":
+        return tool_name, {"command": target}
+    if tool_name in {"Write", "Edit", "MultiEdit"}:
+        return tool_name, {"file_path": target}
+    return tool_name, {"description": target}
 
 
 def _relocated_folder(record: dict[str, Any]) -> str | None:
@@ -97,12 +172,12 @@ class TranscriptTailer:
     def __init__(
         self,
         session_id: str,
-        source: TranscriptByteSource,
+        source: TailedTranscript,
         runtime: "SessionRuntime",
         plugin: "ClaudeTtyPlugin",
         *,
         start_at_end: bool = False,
-        config_dir: str | None = None,
+        calls: CallSource | None = None,
         context_window_resolver: ClaudeContextWindowResolver = (
             claude_context_window_for_model
         ),
@@ -112,9 +187,9 @@ class TranscriptTailer:
         self._runtime = runtime
         self._plugin = plugin
         self._context_window_resolver = context_window_resolver
+        self._calls = calls or TranscriptCalls(source)
         self._normalizer = TranscriptNormalizer(
-            config_dir,
-            capture_enabled=runtime.settings.task_output_capture_enabled,
+            capture_enabled=runtime.settings.task_output_capture_enabled
         )
         self._pane_check_elapsed = 0.0
         self._dialog_check_elapsed = 0.0
@@ -141,10 +216,14 @@ class TranscriptTailer:
         # the polls since, and consecutive polls showing the trust option selected.
         self._trust_arrowed: tuple[str, int] | None = None
         self._trust_selected_polls: int = 0
-        # Signature of the dialog already surfaced as an APPROVAL_REQUEST; held
-        # until the dialog leaves the screen so a response that clears pending
-        # before the pane redraws cannot trigger a duplicate emit.
-        self._surfaced_sig: str | None = None
+        # The dialog already surfaced as an APPROVAL_REQUEST; held until it
+        # leaves the screen so a response that clears pending before the pane
+        # redraws cannot trigger a duplicate emit.
+        self._surfaced: _Surfaced | None = None
+        # Ids of calls that cannot be asking: replied to, or whose dialog left
+        # the screen (answered in the terminal) two polls running.
+        self._answered: set[str] = set()
+        self._departing: PendingCall | None = None
         # Screen kind already Esc-dismissed this appearance. Keyed on the kind
         # (not a bool) so one popup replacing another does not suppress the next
         # Escape; reset when the pane leaves the screen.
@@ -410,10 +489,11 @@ class TranscriptTailer:
         session = self._runtime.storage.get_session(self._session_id)
         if session is None:
             return
+        pending = self._plugin._pending_approvals.get(self._session_id)
+        if pending is not None and pending.replying:
+            return  # our own keystroke is moving the pane
 
-        state = session.transport_state
-        pane = state.get("tmux_pane") or state.get("tmux_session") or self._session_id
-
+        pane = self._pane(session)
         try:
             snapshot = await self._runtime.tmux.capture_snapshot(pane)
         except TmuxError:
@@ -483,117 +563,283 @@ class TranscriptTailer:
             return
 
         if screen_type is pane_dialog.PaneScreen.PLAN:
-            await self._surface_plan_dialog(session, snapshot)
+            self._departing = None
+            await self._poll_plan(session, snapshot)
             return
 
         if screen_type is not pane_dialog.PaneScreen.APPROVAL:
             # Dialog gone without a Waypoint response (answered or dismissed
             # in the terminal): close its card.
+            self._note_departed()
             await self._expire_adoptable()
             await self._plugin.drop_pending_approval(
                 self._runtime, self._session_id, _DIALOG_CLOSED_NOTE
             )
-            self._prev_dialog_sig = None
-            self._dialog_stable_count = 0
-            self._surfaced_sig = None
+            self.forget_dialog()
             self._dismissed_screen = None
             return
 
-        dialog = pane_dialog.parse_approval(snapshot)
+        self._departing = None
+        dialog = await self._read_approval(pane, snapshot)
         if dialog is None:
             self._prev_dialog_sig = None
             self._dialog_stable_count = 0
             return
+        if self._is_stable(dialog.identity):
+            await self._surface_approval(dialog)
 
-        sig = f"{dialog.tool_name}:{dialog.target}:{dialog.question}"
+    def forget_dialog(self) -> None:
+        """Treat whatever dialog is on screen as not yet surfaced."""
+        self._surfaced = None
+        self._prev_dialog_sig = None
+        self._dialog_stable_count = 0
 
-        if sig == self._prev_dialog_sig:
+    def _note_departed(self) -> None:
+        # One poll can catch the TUI mid-redraw, so wait for a second.
+        if self._surfaced is not None:
+            self._departing = self._surfaced.call
+        elif self._departing is not None:
+            self._answered.add(self._departing.tool_use_id)
+            self._departing = None
+
+    def _pane(self, session: SessionRecord) -> str:
+        state = session.transport_state
+        return state.get("tmux_pane") or state.get("tmux_session") or self._session_id
+
+    def _is_stable(self, identity: str) -> bool:
+        if identity == self._prev_dialog_sig:
             self._dialog_stable_count += 1
         else:
-            self._prev_dialog_sig = sig
+            self._prev_dialog_sig = identity
             self._dialog_stable_count = 1
+        return self._dialog_stable_count >= _DIALOG_STABLE_TICKS
 
-        if self._dialog_stable_count < _DIALOG_STABLE_TICKS:
-            return
+    async def _read_approval(
+        self, pane: str, snapshot: str
+    ) -> pane_dialog.ApprovalDialog | None:
+        dialog = pane_dialog.parse_approval(snapshot)
+        if dialog is None or dialog.heading is not None:
+            return dialog
+        try:
+            deeper = await self._runtime.tmux.capture_snapshot(pane, _DEEP_CAPTURE_LINE)
+        except TmuxError:
+            return dialog
+        return pane_dialog.parse_approval(deeper) or dialog
 
-        # Already surfaced this exact dialog — do not re-emit, even once the
-        # response has cleared the pending entry but the pane has not yet
-        # redrawn the box away.
-        if sig == self._surfaced_sig:
+    async def _match(self, dialog: pane_dialog.ApprovalDialog) -> PendingCall | None:
+        if not dialog.matchable:
+            return None
+        calls = await asyncio.to_thread(self._calls.candidates, dialog.agent)
+        return match_call(dialog, calls, self._answered)
+
+    async def _card_outdated(
+        self, dialog: pane_dialog.ApprovalDialog, shown: _Surfaced
+    ) -> bool:
+        """Whether the open card for the dialog on screen needs raising again."""
+        shown.polls += 1
+        if shown.call is None:
+            # A record written late can still name an unverified card.
+            return (
+                shown.polls <= _REMATCH_POLLS and await self._match(dialog) is not None
+            )
+        if shown.polls % _RESOLVED_CHECK_POLLS:
+            return False
+        # A resolved call's dialog is gone, so this one asks about another.
+        return await asyncio.to_thread(self._calls.is_resolved, shown.call)
+
+    async def _replied_dialog_remains(
+        self, dialog: pane_dialog.ApprovalDialog, shown: _Surfaced
+    ) -> bool:
+        """Whether a dialog drawn like the one just replied to needs a card: it
+        may not have redrawn yet, belong to the next identical call, or have
+        missed the keystroke."""
+        if shown.call is not None:
+            self._answered.add(shown.call.tool_use_id)
+        shown.polls_since_reply += 1
+        if shown.polls_since_reply < _REDRAW_POLLS:
+            return False
+        if await self._match(dialog) is not None:
+            return True
+        if shown.polls_since_reply < _LOST_REPLY_POLLS:
+            return False
+        if shown.call is not None:
+            self._answered.discard(shown.call.tool_use_id)
+        return True
+
+    async def _surface_approval(self, dialog: pane_dialog.ApprovalDialog) -> None:
+        pending = self._plugin._pending_approvals.get(self._session_id)
+        shown = self._surfaced
+        card_open = (
+            shown is not None
+            and pending is not None
+            and pending.approval_id == shown.approval_id
+        )
+        if shown is not None and shown.identity == dialog.identity:
+            if card_open:
+                if not await self._card_outdated(dialog, shown):
+                    return
+            elif not await self._replied_dialog_remains(dialog, shown):
+                return
+
+        call = await self._match(dialog)
+        signature = f"call:{call.tool_use_id}" if call else f"pane:{dialog.identity}"
+        if card_open and pending and shown and pending.signature == signature:
+            # The same request drawn differently, as after a resize.
+            pending.identity = shown.identity = dialog.identity
             return
 
         approve_num = dialog.approve_option.number if dialog.approve_option else 1
         decline_opt = dialog.decline_option
-        decline_num = decline_opt.number if decline_opt else None
-
-        target = dialog.target or ""
-        tool_name, tool_input = self._resolve_approval_tool(dialog)
-        new_id = await self._register_dialog(
-            sig,
+        tool_name, tool_input = (
+            (call.name, dict(call.input)) if call else _pane_reading(dialog)
+        )
+        # An unverified card that a late record now names keeps its dialog.
+        updated = (
+            shown is not None
+            and shown.identity == dialog.identity
+            and shown.call is None
+            and card_open
+        )
+        approval_id = await self._register_dialog(
+            signature,
+            dialog.identity,
+            call,
             lambda approval_id: PendingTtyApproval(
                 approval_id=approval_id,
                 tool_name=tool_name,
-                target=target or None,
                 approve_number=approve_num,
-                decline_number=decline_num,
-                signature=sig,
+                decline_number=decline_opt.number if decline_opt else None,
+                signature=signature,
+                identity=dialog.identity,
+                call=call,
             ),
+            closing_note=_UPDATED_NOTE if updated else _DIALOG_CLOSED_NOTE,
         )
-        if new_id is None:
+        if approval_id is None:
             return
-        approval_id = new_id
-
-        payload: dict[str, Any] = {"tool_name": tool_name, "tool_input": tool_input}
-        text = format_approval_text(payload)
-
-        interaction = InteractionEnvelope(
+        extra: dict[str, Any] = {"subagent": dialog.agent} if dialog.agent else {}
+        await self._emit_approval(
+            approval_id,
+            signature,
+            tool_name,
+            tool_input,
+            call,
+            verified=call is not None,
             kind="approval",
-            request_id=approval_id,
             title=f"Approve {tool_name}",
-            body=text,
+            extra=extra,
+        )
+
+    async def _emit_approval(
+        self,
+        approval_id: str,
+        signature: str,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        call: PendingCall | None,
+        *,
+        verified: bool,
+        kind: InteractionKind,
+        title: str,
+        extra: dict[str, Any],
+    ) -> None:
+        payload = {"tool_name": tool_name, "tool_input": tool_input}
+        text = format_approval_text(payload)
+        interaction = InteractionEnvelope(
+            kind=kind,
+            request_id=approval_id,
+            title=title,
+            body=tool_input.get("plan") or None if kind == "plan_approval" else text,
+            plan_item_id=approval_id if kind == "plan_approval" else None,
             choices=[
                 InteractionChoice(label="approve"),
                 InteractionChoice(label="decline"),
             ],
         )
+        metadata: dict[str, Any] = {
+            **payload,
+            **extra,
+            "approval_id": approval_id,
+            "call_verified": verified,
+            "dialog_signature": signature,
+            "method": "tty_permission",
+            "status": SessionStatus.WAITING_INPUT,
+            INTERACTION_METADATA_KEY: interaction.to_metadata(),
+        }
+        if call is not None:
+            metadata["tool_use_id"] = call.tool_use_id
         await self._runtime._emit_adapter_event(
             self._session_id,
             EventKind.APPROVAL_REQUEST,
             text,
-            {
-                "tool_name": tool_name,
-                "tool_input": tool_input,
-                "approval_id": approval_id,
-                "dialog_signature": sig,
-                "method": "tty_permission",
-                "status": SessionStatus.WAITING_INPUT,
-                INTERACTION_METADATA_KEY: interaction.to_metadata(),
-            },
+            metadata,
             SessionStatus.WAITING_INPUT,
         )
 
+    async def still_shows(self, pending: PendingTtyApproval) -> bool:
+        """Whether the pane still shows what ``pending``'s ask was raised for, so
+        its keys answer that request. Raises ``TmuxError`` when the pane can't be
+        read."""
+        session = self._runtime.storage.get_session(self._session_id)
+        if session is None:
+            return False
+        pane = self._pane(session)
+        snapshot = await self._runtime.tmux.capture_snapshot(pane)
+        screen = pane_dialog.classify(snapshot)
+        if pending.is_plan:
+            plan_dialog = pane_dialog.parse_plan_dialog(snapshot)
+            if plan_dialog is None:
+                return False
+            content = await asyncio.to_thread(self._read_plan, plan_dialog.plan_path)
+            option, restore_mode = _plan_approve_option(session, plan_dialog)
+            return (
+                _plan_signature(plan_dialog.plan_path, content) == pending.signature
+                and option is not None
+                and option.number == pending.approve_number
+                and restore_mode == pending.restore_mode
+            )
+        if screen is not pane_dialog.PaneScreen.APPROVAL:
+            return False
+        dialog = await self._read_approval(pane, snapshot)
+        if dialog is None or dialog.identity != pending.identity:
+            return False
+        if pending.call is None:
+            return True
+        # The same words can come from another call.
+        if await asyncio.to_thread(self._calls.is_resolved, pending.call):
+            return False
+        match = await self._match(dialog)
+        return match is not None and match.tool_use_id == pending.call.tool_use_id
+
     async def _register_dialog(
-        self, sig: str, make: Callable[[str], PendingTtyApproval]
+        self,
+        signature: str,
+        identity: str,
+        call: PendingCall | None,
+        make: Callable[[str], PendingTtyApproval],
+        *,
+        closing_note: str = _DIALOG_CLOSED_NOTE,
     ) -> str | None:
-        """Register the stable dialog ``sig`` as the pending approval.
+        """Register the dialog on screen as the pending approval.
 
         Returns the new card's approval id, or None when the dialog adopted a
-        card an earlier tailer left open (nothing to emit). A different dialog
-        still pending was resolved in the terminal, so its card closes first.
+        card an earlier tailer left open (nothing to emit). A card still open
+        for a different request closes first, with ``closing_note``.
         """
         current = self._plugin._pending_approvals.get(self._session_id)
-        if current is not None and current.signature != sig:
+        if current is not None and current.signature != signature:
             await self._plugin.drop_pending_approval(
-                self._runtime, self._session_id, _DIALOG_CLOSED_NOTE
+                self._runtime, self._session_id, closing_note
             )
         adopted = next(
-            (approval_id for key, approval_id in self._adoptable if key == sig), None
+            (approval_id for key, approval_id in self._adoptable if key == signature),
+            None,
         )
         self._adoptable = [item for item in self._adoptable if item[1] != adopted]
         await self._expire_adoptable()
         approval_id = adopted or str(uuid.uuid4())
         self._plugin._pending_approvals[self._session_id] = make(approval_id)
-        self._surfaced_sig = sig
+        self._surfaced = _Surfaced(identity, signature, approval_id, call)
         if adopted:
             # No event reports the adoption, but the card is answerable again.
             self._runtime.asks.mark_dirty(self._session_id)
@@ -633,119 +879,98 @@ class TranscriptTailer:
             self._runtime, self._session_id, _EXPIRED_NOTE
         )
 
-    def _resolve_approval_tool(
-        self, dialog: pane_dialog.ApprovalDialog
-    ) -> tuple[str, dict[str, Any]]:
-        """Tool name and input for the approval card.
+    def _read_plan(self, path: str | None) -> str | None:
+        """The plan file's text as Claude holds it, or None when it can't be
+        read whole."""
+        if path is None:
+            return None
+        tail = self._source.read_tail(path, _PLAN_LIMIT)
+        if tail is None or tail.truncated:
+            return None
+        try:
+            text = tail.data.decode()
+        except UnicodeDecodeError:
+            return None
+        return text if text.strip() else None
 
-        A dialog whose box overflows the pane drops its tool label, so
-        `parse_approval` yields tool_name=None; recover the tool and its full,
-        untruncated input from the pending transcript tool_use in that case.
-        """
-        if dialog.tool_name is None:
-            pending = self._normalizer.pending_tool_use
-            if pending is not None:
-                name, tool_input = pending
-                return name, dict(tool_input)
-        tool_name = dialog.tool_name or "Unknown"
-        target = dialog.target or ""
-        if tool_name == "Bash":
-            return tool_name, {"command": target}
-        if tool_name in {"Write", "Edit", "MultiEdit"}:
-            return tool_name, {"file_path": target}
-        return tool_name, {"description": target}
-
-    async def _surface_plan_dialog(self, session: SessionRecord, snapshot: str) -> None:
+    async def _poll_plan(self, session: SessionRecord, snapshot: str) -> None:
         """Surface the ExitPlanMode dialog as the same approval card Chat shows.
 
-        The dialog is the plan-mode analogue of a tool-permission prompt: the
-        binary withholds the ExitPlanMode tool_use from the transcript while the
-        dialog blocks, so it is read off the pane. The plan body comes from the
-        plan-file Write the normalizer already captured, matching the Chat card's
-        ``tool_input.plan``. Decline falls through to Esc (``decline_number=None``),
-        which keeps plan mode.
-
-        Approve presses the option that restores the pre-plan mode, the way Chat
-        does — but only as far as the dialog can express it: the auto option exits
-        to ``auto`` and the manual option to ``default``. A pre-plan ``auto`` is
-        restored when that option is present; everything else (including
-        ``acceptEdits``/``bypassPermissions``/``dontAsk``, which no option maps to,
-        and a launched-in-plan session with no recorded prior mode) falls back to
-        the manual option → ``default``, which never widens permissions.
+        The dialog is the plan-mode analogue of a tool-permission prompt. Its
+        footer names the plan file, whose text is the plan the card carries,
+        matching the Chat card's ``tool_input.plan``; a plan that can't be read
+        is left out and the card is unverified. Decline falls through to Esc
+        (``decline_number=None``), which keeps plan mode.
         """
         dialog = pane_dialog.parse_plan_dialog(snapshot)
-        manual_option = dialog.manual_option if dialog is not None else None
-        if dialog is None or manual_option is None:
+        if dialog is None or dialog.manual_option is None:
             self._prev_dialog_sig = None
             self._dialog_stable_count = 0
             return
-
-        sig = f"ExitPlanMode:{dialog.plan_path}"
-        if sig == self._prev_dialog_sig:
-            self._dialog_stable_count += 1
-        else:
-            self._prev_dialog_sig = sig
-            self._dialog_stable_count = 1
-        if self._dialog_stable_count < _DIALOG_STABLE_TICKS:
-            return
-        if sig == self._surfaced_sig:
+        identity = f"plan:{dialog.plan_path}"
+        if not self._is_stable(identity):
             return
 
-        pre_plan = session.transport_state.get("pre_plan_mode")
-        target_mode = pre_plan if isinstance(pre_plan, str) and pre_plan else "default"
-        if target_mode == "auto" and dialog.auto_option is not None:
-            approve_option, restore_mode = dialog.auto_option, "auto"
-        else:
-            approve_option, restore_mode = manual_option, "default"
+        content = await asyncio.to_thread(self._read_plan, dialog.plan_path)
+        signature = _plan_signature(dialog.plan_path, content)
+        pending = self._plugin._pending_approvals.get(self._session_id)
+        shown = self._surfaced
+        if shown is not None and shown.identity == identity:
+            if pending is not None and pending.approval_id == shown.approval_id:
+                # A failed read is not a changed plan.
+                if signature == shown.signature or content is None:
+                    return
+            else:
+                shown.polls_since_reply += 1
+                if shown.polls_since_reply < _REDRAW_POLLS or (
+                    signature == shown.signature
+                    and shown.polls_since_reply < _LOST_REPLY_POLLS
+                ):
+                    return
 
-        plan_path = self._normalizer.last_plan_path or dialog.plan_path
-        tool_input: dict[str, Any] = {"plan": self._normalizer.last_plan_content or ""}
+        option, restore_mode = _plan_approve_option(session, dialog)
+        assert option is not None
+        call = None
+        if dialog.plan_path is not None:
+            calls = await asyncio.to_thread(self._calls.candidates, None)
+            call = match_plan_call(calls, dialog.plan_path, self._answered)
+        tool_input: dict[str, Any] = {"plan": content or ""}
+        plan_path = call.input.get("planFilePath") if call else dialog.plan_path
         if plan_path:
             tool_input["planFilePath"] = plan_path
 
-        new_id = await self._register_dialog(
-            sig,
-            lambda approval_id: PendingTtyApproval(
+        approval_id = await self._register_dialog(
+            signature,
+            identity,
+            call,
+            closing_note=(
+                _UPDATED_NOTE
+                if shown is not None and shown.identity == identity
+                else _DIALOG_CLOSED_NOTE
+            ),
+            make=lambda approval_id: PendingTtyApproval(
                 approval_id=approval_id,
                 tool_name="ExitPlanMode",
-                target=plan_path,
-                approve_number=approve_option.number,
+                approve_number=option.number,
                 decline_number=None,
-                signature=sig,
+                signature=signature,
+                call=call,
                 is_plan=True,
                 restore_mode=restore_mode,
             ),
         )
-        if new_id is None:
+        if approval_id is None:
             return
-        approval_id = new_id
-
-        payload = {"tool_name": "ExitPlanMode", "tool_input": tool_input}
-        interaction = InteractionEnvelope(
+        await self._emit_approval(
+            approval_id,
+            signature,
+            "ExitPlanMode",
+            tool_input,
+            call,
+            verified=content is not None,
             kind="plan_approval",
-            request_id=approval_id,
             title="Approve plan",
-            body=tool_input.get("plan") or None,
-            plan_item_id=approval_id,
-            choices=[
-                InteractionChoice(label="approve"),
-                InteractionChoice(label="decline"),
-            ],
-        )
-        await self._runtime._emit_adapter_event(
-            self._session_id,
-            EventKind.APPROVAL_REQUEST,
-            format_approval_text(payload),
-            {
-                "tool_name": "ExitPlanMode",
-                "tool_input": tool_input,
-                "approval_id": approval_id,
-                "dialog_signature": sig,
-                "method": "tty_permission",
-                "status": SessionStatus.WAITING_INPUT,
-                INTERACTION_METADATA_KEY: interaction.to_metadata(),
-            },
-            SessionStatus.WAITING_INPUT,
+            extra={},
         )
 
     async def _pane_alive(self) -> bool:

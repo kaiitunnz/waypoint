@@ -83,12 +83,9 @@ _TRUST_FOOTER = "Enter to confirm"
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
 _QUESTION_RE = re.compile(r"^\s*(Do you want to .*\?)\s*$", re.MULTILINE)
 _PLAN_QUESTION_RE = re.compile(r"Would you like to proceed\?")
-# The saved-plan path the dialog footer names ("… · ~/.claude/plans/<slug>.md").
-# Only a fallback for the ``planFilePath`` echoed on the approval card; the
-# canonical (absolute) path and body come from the plan-file Write the transcript
-# normalizer captured. The footer renders it tilde-unexpanded, so this yields
-# the literal "~/…" form — display/echo only, not a path to open on disk.
-_PLAN_PATH_RE = re.compile(r"(\S*/\.claude/plans/\S+\.md)")
+# The plan file the dialog footer names ("… · ~/.claude/plans/<slug>.md"), in
+# whichever config dir the session runs with.
+_PLAN_PATH_RE = re.compile(r"(?:^|·)\s*((?:~|/)[^·]*/plans/[^/·]+\.md)")
 # Sub-hint line that sits directly below the plan options; bounds the option
 # slice so it is not scanned past the interactive rows.
 _PLAN_FOOTER = "to approve with this feedback"
@@ -682,13 +679,11 @@ def parse_plan_dialog(screen: str) -> PlanDialog | None:
     )
     options = _parse_options(lines[question_idx + 1 : footer_idx])
 
-    plan_path: str | None = None
-    for line in lines[question_idx:]:
-        match = _PLAN_PATH_RE.search(line)
-        if match is not None:
-            plan_path = match.group(1)
+    # Below the sub-hint, where a long path wraps onto the following lines.
+    below = lines[footer_idx + 1 if footer_idx < len(lines) else question_idx + 1 :]
+    paths = _PLAN_PATH_RE.findall("".join(line.strip() for line in below))
 
-    return PlanDialog(options=options, plan_path=plan_path)
+    return PlanDialog(options=options, plan_path=paths[-1] if paths else None)
 
 
 # Dialog headings that name the tool by themselves.

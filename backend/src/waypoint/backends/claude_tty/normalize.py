@@ -39,7 +39,6 @@ import uuid
 from collections import Counter
 from typing import Any
 
-from waypoint.backends.claude_code.adapter import _apply_plan_edit, _is_plan_file_path
 from waypoint.backends.claude_code.normalize import (
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
@@ -104,12 +103,7 @@ class TranscriptNormalizer:
     ``process_record``.  Usage deduplication state is accumulated across calls.
     """
 
-    def __init__(
-        self, config_dir: str | None = None, *, capture_enabled: bool = True
-    ) -> None:
-        # The session's CLAUDE_CONFIG_DIR (an account profile's), so plan-file
-        # detection anchors to the profile's plans/ dir rather than the default.
-        self._config_dir = config_dir
+    def __init__(self, *, capture_enabled: bool = True) -> None:
         # Operator switch (``task_output_capture_enabled``) for keeping task
         # output as session attachments.
         self._capture_enabled = capture_enabled
@@ -143,28 +137,6 @@ class TranscriptNormalizer:
         # (which carries the applied diff in its toolUseResult) can attach a
         # diff preview. The TUI records the change on the result, not the call.
         self._file_edit_tool_use_ids: set[str] = set()
-        # Plan mode writes the plan to ~/.claude/plans/<slug>.md before raising
-        # the ExitPlanMode dialog (which is withheld from the transcript while it
-        # blocks). The dialog has no plan text on the wire, so the tailer reads
-        # the body captured here when it surfaces the plan-approval card.
-        self.last_plan_path: str | None = None
-        self.last_plan_content: str | None = None
-        # Unresolved tool_use records (name + full input) in submission order.
-        # The tool_use is flushed with its untruncated input before the
-        # permission dialog blocks, so the tailer recovers the tool from here
-        # when a tall dialog overflows the pane and drops its label off-screen.
-        self._pending_tool_uses: dict[str, tuple[str, dict[str, Any]]] = {}
-
-    @property
-    def pending_tool_use(self) -> tuple[str, dict[str, Any]] | None:
-        """The oldest unresolved tool_use (name, input), or None.
-
-        Batched calls prompt in submission order, so the oldest is the one the
-        current dialog is asking about.
-        """
-        for name, tool_input in self._pending_tool_uses.values():
-            return name, tool_input
-        return None
 
     def process_record(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         rec_type = record.get("type")
@@ -350,15 +322,8 @@ class TranscriptNormalizer:
                         )
                     )
                     continue
-                if tool_name in FILE_EDIT_TOOL_NAMES:
-                    self._maybe_capture_plan(tool_name, block.get("input") or {})
-                    if tool_use_id:
-                        self._file_edit_tool_use_ids.add(tool_use_id)
-                if tool_use_id:
-                    self._pending_tool_uses[tool_use_id] = (
-                        tool_name,
-                        block.get("input") or {},
-                    )
+                if tool_name in FILE_EDIT_TOOL_NAMES and tool_use_id:
+                    self._file_edit_tool_use_ids.add(tool_use_id)
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 events.append(
                     NormalizedEvent(
@@ -412,9 +377,6 @@ class TranscriptNormalizer:
         ):
             if message_id:
                 self._result_emitted_ids.add(message_id)
-            # Turn resolved; drop any tool_use that never got a result so it
-            # cannot leak into the next turn's approval recovery.
-            self._pending_tool_uses.clear()
             usage_payload: dict[str, Any] = usage if first_seen else {}
             output_tokens = int(usage.get("output_tokens") or 0)
             if stop_reason == "end_turn":
@@ -442,26 +404,6 @@ class TranscriptNormalizer:
             )
 
         return events
-
-    def _maybe_capture_plan(self, tool_name: str, tool_input: dict[str, Any]) -> None:
-        """Track the plan body when a file-edit targets ~/.claude/plans/.
-
-        Mirrors the claude_code adapter: capture the written content (or apply an
-        Edit/MultiEdit patch to the running copy) so the body is in hand from the
-        transcript, never read off disk — which would fail for remote sessions.
-        """
-        path = str(tool_input.get("file_path") or "")
-        if not _is_plan_file_path(path, self._config_dir):
-            return
-        self.last_plan_path = path
-        if tool_name == "Write":
-            content = tool_input.get("content")
-            if isinstance(content, str):
-                self.last_plan_content = content
-        elif isinstance(self.last_plan_content, str):
-            self.last_plan_content = _apply_plan_edit(
-                self.last_plan_content, tool_name, tool_input
-            )
 
     def _task_notification_events(
         self, content: str, record_uuid: str | None, status: SessionStatus | None
@@ -568,8 +510,6 @@ class TranscriptNormalizer:
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
-            if tool_use_id:
-                self._pending_tool_uses.pop(tool_use_id, None)
             if tool_use_id and tool_use_id in self._dismissed_question_ids:
                 self._dismissed_question_ids.discard(tool_use_id)
                 if turn_aborted:

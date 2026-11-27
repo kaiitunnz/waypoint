@@ -213,7 +213,7 @@ def test_remote_successor_searches_config_root() -> None:
     [("clear", "Context cleared"), ("status", "Command complete")],
 )
 def test_local_command_note(command: str, expected: str) -> None:
-    events = TranscriptNormalizer(None).process_record(
+    events = TranscriptNormalizer().process_record(
         {
             "type": "system",
             "subtype": "local_command",

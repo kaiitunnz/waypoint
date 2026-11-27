@@ -60,6 +60,20 @@ def match_call(
     return first
 
 
+def match_plan_call(
+    calls: Sequence[PendingCall], shown_path: str, excluded: Container[str] = ()
+) -> PendingCall | None:
+    """The one pending ExitPlanMode call for the plan file the dialog names."""
+    hits = [
+        call
+        for call in calls
+        if call.name == "ExitPlanMode"
+        and call.tool_use_id not in excluded
+        and _path_matches(shown_path, str(call.input.get("planFilePath")), call.cwd)
+    ]
+    return hits[0] if len(hits) == 1 else None
+
+
 def _consistent(dialog: ApprovalDialog, call: PendingCall) -> bool:
     heading = dialog.heading or ""
     if heading == "Bash command":

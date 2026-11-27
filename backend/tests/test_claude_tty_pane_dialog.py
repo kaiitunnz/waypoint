@@ -969,3 +969,27 @@ def test_booting_pane_is_neither_ready_nor_blocked() -> None:
     screen = "\n  Claude Code is starting…\n"
     assert not composer_drawn(screen)
     assert not shows_blocking_dialog(screen)
+
+
+@pytest.mark.parametrize(
+    "footer, path",
+    [
+        (
+            " ctrl+g to edit in Vim · ~/.claude-work/plans/a-b.md",
+            "~/.claude-work/plans/a-b.md",
+        ),
+        (
+            " ctrl+g to edit in Vim · /home/u/.claude/plans/a-very-long-na\n me.md",
+            "/home/u/.claude/plans/a-very-long-name.md",
+        ),
+        (" ~/.claude/plans/no-editor.md", "~/.claude/plans/no-editor.md"),
+        (" ctrl+g to edit in Vim", None),
+    ],
+)
+def test_plan_path_is_read_from_the_footer(footer: str, path: str | None) -> None:
+    screen = _load("plan_approval_file_footer.txt")
+    lines = screen.rstrip("\n").split("\n")
+    start = next(i for i, line in enumerate(lines) if "/plans/" in line)
+    dialog = parse_plan_dialog("\n".join([*lines[:start], footer]))
+    assert dialog is not None
+    assert dialog.plan_path == path

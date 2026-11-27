@@ -194,6 +194,7 @@ class SubagentTranscript:
     path: str
     agent_type: str | None
     name: str | None
+    finished: bool = False
 
 
 def _subagent(path: str, meta: bytes) -> SubagentTranscript:
@@ -208,6 +209,7 @@ def _subagent(path: str, meta: bytes) -> SubagentTranscript:
         path=path,
         agent_type=agent_type if isinstance(agent_type, str) else None,
         name=name if isinstance(name, str) else None,
+        finished=fields.get("finished") is True,
     )
 
 
@@ -233,8 +235,9 @@ class TranscriptTreeReader(Protocol):
         """The last ``limit`` bytes of the session's transcript. Never raises."""
         ...
 
-    def list_subagents(self) -> list[SubagentTranscript]:
-        """The transcript's subagent transcripts. Never raises."""
+    def list_subagents(self) -> list[SubagentTranscript] | None:
+        """The transcript's subagent transcripts, or None when they can't all
+        be listed. Never raises."""
         ...
 
     def read_tail(self, path: str, limit: int) -> Tail | None:
@@ -243,7 +246,11 @@ class TranscriptTreeReader(Protocol):
         ...
 
 
-class ClaudeTranscriptSource(TranscriptByteSource, TranscriptTreeReader, Protocol):
+class TailedTranscript(TranscriptByteSource, TranscriptTreeReader, Protocol):
+    """What a tailer reads: the transcript by offset, and the files around it."""
+
+
+class ClaudeTranscriptSource(TailedTranscript, Protocol):
     def find_clear_successor(
         self, parent_thread_id: str, max_age_seconds: float
     ) -> str | None:
@@ -309,7 +316,7 @@ class LocalTranscriptByteSource:
             path = found
         return self.read_tail(str(path), limit)
 
-    def list_subagents(self) -> list[SubagentTranscript]:
+    def list_subagents(self) -> list[SubagentTranscript] | None:
         root = self._path.with_suffix("") / "subagents"
         found = []
         try:
@@ -317,11 +324,11 @@ class LocalTranscriptByteSource:
                 for path in sorted(root.glob(pattern)):
                     try:
                         meta = Path(_meta_path(str(path))).read_bytes()
-                    except OSError:
+                    except FileNotFoundError:
                         meta = b""
                     found.append(_subagent(str(path), meta))
         except OSError:
-            return []
+            return None
         return found
 
     def read_tail(self, path: str, limit: int) -> Tail | None:
@@ -454,15 +461,17 @@ class RemoteClaudeTranscriptByteSource:
             return None
         return self.read_tail(path, limit)
 
-    def list_subagents(self) -> list[SubagentTranscript]:
+    def list_subagents(self) -> list[SubagentTranscript] | None:
         if (path := self._transcript_path()) is None:
-            return []
+            return None
         root = path.removesuffix(".jsonl") + "/subagents"
         found = []
         try:
             for pattern in _SUBAGENT_PATTERNS:
                 for transcript in self._fs.glob(root, pattern):
                     meta = self._fs.read_range(_meta_path(transcript), 0, _META_LIMIT)
+                    if meta is None:
+                        return None
                     found.append(
                         _subagent(
                             transcript,
@@ -471,7 +480,7 @@ class RemoteClaudeTranscriptByteSource:
                     )
         except Exception:
             self._warn_once("subagents", "remote subagent listing failed")
-            return []
+            return None
         return found
 
     def read_tail(self, path: str, limit: int) -> Tail | None:

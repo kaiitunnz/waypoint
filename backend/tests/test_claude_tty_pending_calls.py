@@ -1,62 +1,28 @@
 """Reading a claude_tty session's pending tool calls off its transcripts."""
 
-import json
 from pathlib import Path
 from typing import Any
 
+from claude_tty_transcripts import (
+    CWD,
+    THREAD,
+    jsonl,
+    prompt,
+    result,
+    session_tree,
+    use,
+    write_subagent,
+)
 from waypoint.backends.claude_tty.byte_source import (
     LocalTranscriptByteSource,
     RemoteClaudeTranscriptByteSource,
     Tail,
-    transcript_path,
 )
 from waypoint.backends.claude_tty.pending_calls import (
     TranscriptCalls,
     pending_calls,
 )
 from waypoint.backends.transcript_fs_remote import RemoteMissing, RemoteRead
-
-THREAD = "0f8fad5b-d9cb-469f-a165-70867728950e"
-CWD = "/work/repo"
-
-
-def use(
-    tool_use_id: str, name: str, tool_input: dict[str, Any], msg: str = "msg-1"
-) -> dict[str, Any]:
-    return {
-        "type": "assistant",
-        "cwd": CWD,
-        "message": {
-            "id": msg,
-            "content": [
-                {
-                    "type": "tool_use",
-                    "id": tool_use_id,
-                    "name": name,
-                    "input": tool_input,
-                }
-            ],
-        },
-    }
-
-
-def result(tool_use_id: str) -> dict[str, Any]:
-    return {
-        "type": "user",
-        "message": {
-            "content": [
-                {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}
-            ]
-        },
-    }
-
-
-def prompt(text: str, **extra: Any) -> dict[str, Any]:
-    return {"type": "user", "message": {"content": text}, **extra}
-
-
-def jsonl(*records: dict[str, Any]) -> bytes:
-    return b"".join(json.dumps(record).encode() + b"\n" for record in records)
 
 
 def ids(data: bytes, *, truncated: bool = False) -> list[str]:
@@ -101,34 +67,10 @@ def test_history_copies_and_partial_lines_are_ignored() -> None:
     assert ids(cut, truncated=True) == ["a"]
 
 
-def _tree(tmp_path: Path) -> tuple[LocalTranscriptByteSource, Path]:
-    config_dir = str(tmp_path / "config")
-    main = transcript_path(CWD, THREAD, config_dir)
-    main.parent.mkdir(parents=True)
-    return LocalTranscriptByteSource(CWD, THREAD, config_dir), main
-
-
-def write_subagent(
-    main: Path,
-    agent_id: str,
-    agent_type: str,
-    records: bytes,
-    folder: str = "",
-) -> Path:
-    root = main.with_suffix("") / "subagents" / folder
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / f"agent-{agent_id}.jsonl"
-    path.write_bytes(records)
-    (root / f"agent-{agent_id}.meta.json").write_text(
-        json.dumps({"agentType": agent_type})
-    )
-    return path
-
-
 def test_candidates_come_from_the_transcript_the_dialog_names(
     tmp_path: Path,
 ) -> None:
-    source, main = _tree(tmp_path)
+    source, main = session_tree(tmp_path)
     main.write_bytes(jsonl(use("main-1", "Bash", {"command": "sleep 60"})))
     write_subagent(
         main, "a1", "general-purpose", jsonl(use("sub-1", "Bash", {"command": "ls"}))
@@ -143,27 +85,45 @@ def test_candidates_come_from_the_transcript_the_dialog_names(
         jsonl(use("flow-1", "Bash", {"command": "id"})),
         folder="workflows/wf-1",
     )
+    write_subagent(
+        main,
+        "a4",
+        "general-purpose",
+        jsonl(use("done-1", "Bash", {"command": "ls"})),
+        meta={"finished": True},
+    )
     calls = TranscriptCalls(source)
 
-    def found(agent: str | None, everywhere: bool = False) -> list[str]:
-        return [c.tool_use_id for c in calls.candidates(agent, everywhere=everywhere)]
+    def found(agent: str | None) -> list[str]:
+        return [c.tool_use_id for c in calls.candidates(agent)]
 
     assert found(None) == ["main-1"]
     assert found("general-purpose") == ["sub-1", "flow-1"]
     assert found("web-fetch") == ["web-1"]
     assert found("code-reviewer") == []
-    assert found(None, everywhere=True) == ["main-1", "sub-1", "web-1", "flow-1"]
+
+
+def test_an_unreadable_subagent_yields_no_candidates(tmp_path: Path) -> None:
+    source, main = session_tree(tmp_path)
+    main.write_bytes(b"")
+    write_subagent(
+        main, "a1", "general-purpose", jsonl(use("sub-1", "Bash", {"command": "ls"}))
+    )
+    broken = write_subagent(main, "a2", "general-purpose", b"")
+    broken.unlink()
+    broken.mkdir()
+    assert TranscriptCalls(source).candidates("general-purpose") == []
 
 
 def test_resolution_is_read_from_the_calls_own_transcript(tmp_path: Path) -> None:
-    source, main = _tree(tmp_path)
+    source, main = session_tree(tmp_path)
     main.write_bytes(jsonl(use("main-1", "Bash", {"command": "ls"})))
     sub = write_subagent(
         main, "a1", "general-purpose", jsonl(use("sub-1", "Bash", {"command": "ls"}))
     )
     calls = TranscriptCalls(source)
-    (main_call,) = calls.candidates(None, everywhere=False)
-    (sub_call,) = calls.candidates("general-purpose", everywhere=False)
+    (main_call,) = calls.candidates(None)
+    (sub_call,) = calls.candidates("general-purpose")
 
     assert not calls.is_resolved(main_call)
     assert not calls.is_resolved(sub_call)
@@ -171,12 +131,17 @@ def test_resolution_is_read_from_the_calls_own_transcript(tmp_path: Path) -> Non
         fh.write(jsonl(result("sub-1")))
     assert calls.is_resolved(sub_call)
     assert not calls.is_resolved(main_call)
+    # A later message means the call is behind the transcript.
+    with main.open("ab") as fh:
+        fh.write(jsonl(use("main-2", "Bash", {"command": "ls"}, msg="msg-2")))
+    assert calls.is_resolved(main_call)
 
 
 def test_missing_transcript_yields_nothing(tmp_path: Path) -> None:
     source = LocalTranscriptByteSource(CWD, THREAD, str(tmp_path / "config"))
     calls = TranscriptCalls(source)
-    assert calls.candidates(None, everywhere=True) == []
+    assert calls.candidates(None) == []
+    assert calls.candidates("general-purpose") == []
     assert source.read_tail(str(tmp_path / "plan.md"), 10) is None
 
 
@@ -232,10 +197,8 @@ def test_remote_source_reads_the_same_tree() -> None:
     source._warned = set()
     calls = TranscriptCalls(source)
 
-    assert [c.tool_use_id for c in calls.candidates(None, everywhere=True)] == [
-        "main-1",
-        "sub-1",
-    ]
+    assert [c.tool_use_id for c in calls.candidates(None)] == ["main-1"]
+    assert [c.tool_use_id for c in calls.candidates("general-purpose")] == ["sub-1"]
     assert source.read_tail("/home/u/.claude/plans/p.md", 4) == Tail(
         b"6789", truncated=True
     )

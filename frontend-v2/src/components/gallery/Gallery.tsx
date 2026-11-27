@@ -17,6 +17,7 @@ import { GlassBar } from "@/components/ui/GlassBar";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { InlineCode } from "@/components/ui/InlineCode";
+import { SummaryText } from "@/components/ui/SummaryText";
 import { List, ListRow } from "@/components/ui/List";
 import { MenuButton } from "@/components/ui/MenuButton";
 import { Meter } from "@/components/ui/Meter";
@@ -145,6 +146,9 @@ export function Gallery() {
         </ActionChip>
         <span>
           Running <InlineCode>npm run lint</InlineCode>
+        </span>
+        <span>
+          <SummaryText text="Read `SKILL.md`" />
         </span>
       </div>
 

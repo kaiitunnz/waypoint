@@ -1,5 +1,5 @@
-// The server's clock against this client's. A server timestamp is compared with
-// serverNow(), never with Date.now(), which a skewed clock on either side breaks.
+// Compare a server timestamp with serverNow(), never Date.now(): the two clocks can
+// disagree.
 
 // A `Date` header drops the milliseconds and uvicorn rewrites it once a second, so the
 // server's clock reads up to this much later than the header says.
@@ -32,10 +32,11 @@ export function subscribeServerClock(listener: () => void): () => void {
 }
 
 // The offset one `Date` header shows, from a request sent and answered at these client
-// times; 0 where it cannot tell the clocks apart, and null where there is no header.
-export function estimateClockOffset(date: string | null, sentAt: number, receivedAt: number): number | null {
+// times; 0 where it cannot tell the clocks apart or has no readable date.
+export function estimateClockOffset(date: string | null, sentAt: number, receivedAt: number): number {
   const header = date ? Date.parse(date) : Number.NaN;
-  if (!Number.isFinite(header)) return null;
+  // A server that does not expose its `Date` is taken to agree.
+  if (!Number.isFinite(header)) return 0;
   const least = header - receivedAt;
   const most = header + DATE_LAG_MS - sentAt;
   if (least <= 0 && most >= 0) return 0;
@@ -66,11 +67,9 @@ async function measure(host: string): Promise<void> {
   if (receivedAt - sentAt > MAX_ROUND_TRIP_MS) return;
   // Another host was connected to meanwhile.
   if (measured !== host) return;
-  // A server that does not expose its `Date` is taken to agree.
-  setOffset(estimateClockOffset(date, sentAt, receivedAt) ?? 0);
+  setOffset(estimateClockOffset(date, sentAt, receivedAt));
 }
 
-// Measures the offset against `host`; called when a connection to it opens.
 export function syncServerClock(host: string): Promise<void> {
   if (measured !== host) {
     measured = host;

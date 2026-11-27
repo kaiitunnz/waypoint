@@ -111,6 +111,7 @@ describe("rankSessionsForSwitcher with the search syntax", () => {
     expect(ids(entries)).toEqual(["both", "codex"]);
     expect(entries[0].positions).toEqual([0, 1, 2, 3]);
     expect(search("Rese agent:codex")).toEqual(["both", "codex"]);
+    expect(search("research agent:codex dev")).toEqual(["both"]);
   });
 
   it("keeps smart case for the free text", () => {

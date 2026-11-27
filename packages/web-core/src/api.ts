@@ -2120,8 +2120,8 @@ interface SocketHandlers {
   onClose?: (event: CloseEvent) => void;
 }
 
-// Each connection through here measures the host's clock again.
-function attachHandlers(host: string, socket: WebSocket, handlers: SocketHandlers): WebSocket {
+function openSocket(host: string, path: string, handlers: SocketHandlers): WebSocket {
+  const socket = new WebSocket(`${host.replace(/^http/, "ws")}${path}`);
   socket.onmessage = (event) => {
     handlers.onMessage(JSON.parse(event.data) as SessionEnvelope);
   };
@@ -2146,8 +2146,8 @@ export function connectSessionsSocket(
   onAuthFailure?: () => void,
   extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
 ): WebSocket {
-  const url = `${host.replace(/^http/, "ws")}/ws/sessions?token=${encodeURIComponent(token)}`;
-  return attachHandlers(host, new WebSocket(url), { onMessage, onAuthFailure, ...extra });
+  const path = `/ws/sessions?token=${encodeURIComponent(token)}`;
+  return openSocket(host, path, { onMessage, onAuthFailure, ...extra });
 }
 
 export function connectSessionSocket(
@@ -2158,8 +2158,8 @@ export function connectSessionSocket(
   onAuthFailure?: () => void,
   extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
 ): WebSocket {
-  const url = `${host.replace(/^http/, "ws")}/ws/sessions/${sessionId}?token=${encodeURIComponent(token)}`;
-  return attachHandlers(host, new WebSocket(url), { onMessage, onAuthFailure, ...extra });
+  const path = `/ws/sessions/${sessionId}?token=${encodeURIComponent(token)}`;
+  return openSocket(host, path, { onMessage, onAuthFailure, ...extra });
 }
 
 export interface InboxListPage {
@@ -2328,8 +2328,8 @@ export function connectInboxSocket(
   onAuthFailure?: () => void,
   extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
 ): WebSocket {
-  const url = `${host.replace(/^http/, "ws")}/ws/inbox/${id}?token=${encodeURIComponent(token)}`;
-  return attachHandlers(host, new WebSocket(url), { onMessage, onAuthFailure, ...extra });
+  const path = `/ws/inbox/${id}?token=${encodeURIComponent(token)}`;
+  return openSocket(host, path, { onMessage, onAuthFailure, ...extra });
 }
 
 interface TerminalSocketHandlers {

@@ -55,15 +55,15 @@ describe("estimateClockOffset", () => {
     ["fast", MINUTES_3],
     ["slow", -MINUTES_3],
   ])("measures a client three minutes %s", (_, skew) => {
-    const offset = estimateClockOffset(header(SERVER), sent + skew, received + skew)!;
+    const offset = estimateClockOffset(header(SERVER), sent + skew, received + skew);
     expect(Math.abs(offset + skew)).toBeLessThanOrEqual(2000);
     // Erring late: the corrected clock never trails the server's.
     expect(received + skew + offset).toBeGreaterThanOrEqual(received);
   });
 
-  it("has no answer without a readable date", () => {
-    expect(estimateClockOffset(null, sent, received)).toBeNull();
-    expect(estimateClockOffset("soon", sent, received)).toBeNull();
+  it("reads no offset without a readable date", () => {
+    expect(estimateClockOffset(null, sent + MINUTES_3, received + MINUTES_3)).toBe(0);
+    expect(estimateClockOffset("soon", sent + MINUTES_3, received + MINUTES_3)).toBe(0);
   });
 });
 
@@ -179,20 +179,21 @@ describe("a connection", () => {
     onopen: (() => void) | null = null;
     onmessage: unknown = null;
     onclose: unknown = null;
-    constructor() {
+    constructor(readonly url: string) {
       FakeSocket.opened.push(this);
     }
   }
 
   it.each([
-    ["sessions", (host: string) => connectSessionsSocket(host, "t", () => {})],
-    ["session", (host: string) => connectSessionSocket(host, "t", "s1", () => {})],
-    ["inbox", (host: string) => connectInboxSocket(host, "t", "i1", () => {})],
-  ])("measures the clock when the %s socket opens", (_, connect) => {
+    ["sessions", "sessions", (host: string) => connectSessionsSocket(host, "t k", () => {})],
+    ["session", "sessions/s1", (host: string) => connectSessionSocket(host, "t k", "s1", () => {})],
+    ["inbox", "inbox/i1", (host: string) => connectInboxSocket(host, "t k", "i1", () => {})],
+  ])("measures the clock when the %s socket opens", (_, path, connect) => {
     vi.stubGlobal("WebSocket", FakeSocket);
     const fetch = serve(SERVER);
     const host = freshHost();
     connect(host);
+    expect(FakeSocket.opened.at(-1)?.url).toBe(`${host.replace("http", "ws")}/ws/${path}?token=t%20k`);
     expect(fetch).not.toHaveBeenCalled();
     FakeSocket.opened.at(-1)?.onopen?.();
     expect(fetch).toHaveBeenCalledWith(`${host}/health`, expect.objectContaining({ cache: "no-store" }));
@@ -240,7 +241,6 @@ describe.each([
   });
 
   it("previews a picked time by the server's clock and a delay by itself", () => {
-    // The picked time is ten minutes ahead of the server's clock.
     const picked = new Date(SERVER + 600_000);
     const local = new Date(picked.getTime() - picked.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
     expect(schedulePreview("datetime", "", local, new Date())?.relative).toBe("in 10 min");

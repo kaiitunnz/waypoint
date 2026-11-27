@@ -83,3 +83,20 @@ async def test_drawn_composer_takes_the_message() -> None:
     transport, tmux, session = _transport(ready)
     await transport.send_input(session, "hello")
     assert tmux.type_input.await_count + tmux.send_input.await_count == 1
+
+
+async def test_the_submit_budget_outlasts_image_ingestion() -> None:
+    # The TUI drops Enters while it turns pasted image paths into chips.
+    ready = (FIXTURES / "ready.txt").read_text()
+    # The prompt is followed by a no-break space.
+    holding = ready.replace('❯\xa0Try "fix typecheck errors"', "❯\xa0[Image #1] msg")
+    assert holding != ready
+    transport, tmux, session = _transport(holding)
+
+    async def clear_late(*_: Any) -> None:
+        if tmux.submit.await_count == 20:
+            tmux.capture_snapshot.return_value = ready
+
+    tmux.submit.side_effect = clear_late
+    await transport.send_input(session, "msg")
+    assert tmux.submit.await_count == 20

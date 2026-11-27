@@ -114,14 +114,23 @@ async def test_resume_that_submits_nothing_keeps_status(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("transport", ["claude_tty", "tmux"])
+@pytest.mark.parametrize(
+    "pending",
+    [
+        PENDING_MESSAGE,
+        (PANES / "composer_labelled.txt").read_text(),
+        (PANES / "composer_shell.txt").read_text(),
+    ],
+    ids=["message", "labelled", "shell"],
+)
 async def test_resume_that_submits_input_marks_running(
-    tmp_path, monkeypatch, transport: str
+    tmp_path, monkeypatch, transport: str, pending: str
 ) -> None:
     runtime = make_runtime(tmp_path)
     runtime.storage.create_session(
         make_session(runtime.settings, transport, SessionStatus.IDLE)
     )
-    enters = stub_pane(runtime, monkeypatch, PENDING_MESSAGE)
+    enters = stub_pane(runtime, monkeypatch, pending)
 
     updated = await runtime.resume("sess")
 

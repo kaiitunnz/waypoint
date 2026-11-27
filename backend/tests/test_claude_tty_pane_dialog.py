@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from waypoint.backends.claude_tty.pane_dialog import (
+    ApprovalDialog,
     PaneScreen,
     classify,
     composer_drawn,
@@ -891,20 +892,27 @@ def test_identity_ignores_the_highlight_but_not_the_spacing() -> None:
     assert original.identity != spaced.identity
 
 
+_SUBAGENT_HEADING = " Bash command · from the general-purpose agent"
+
+
+def _with_heading(heading: str) -> ApprovalDialog:
+    screen = _load("approval_subagent_bash_decoy.txt")
+    assert _SUBAGENT_HEADING in screen
+    dialog = parse_approval(screen.replace(_SUBAGENT_HEADING, heading))
+    assert dialog is not None
+    return dialog
+
+
 @pytest.mark.parametrize(
     "wrapped",
     [
-        " Bash command\n · from the general-purpose agent",
-        " Bash command · from the\n general-purpose agent",
-        " Bash command · from the general-purpose\n agent",
+        " Bash command · from the general-purpose\n              agent",
+        " Bash command · from the\n              general-purpose agent",
+        " Bash command ·\n              from the general-purpose\n              agent",
     ],
 )
-def test_wrapped_agent_suffix_is_rejoined(wrapped: str) -> None:
-    screen = _load("approval_subagent_bash_decoy.txt").replace(
-        " Bash command · from the general-purpose agent", wrapped
-    )
-    dialog = parse_approval(screen)
-    assert dialog is not None
+def test_a_suffix_wrapped_in_its_column_is_rejoined(wrapped: str) -> None:
+    dialog = _with_heading(wrapped)
     assert (dialog.heading, dialog.agent, dialog.matchable) == (
         "Bash command",
         "general-purpose",
@@ -912,13 +920,42 @@ def test_wrapped_agent_suffix_is_rejoined(wrapped: str) -> None:
     )
 
 
-def test_unreadable_agent_suffix_is_not_matchable() -> None:
-    screen = _load("approval_subagent_bash_decoy.txt").replace(
-        " Bash command · from the general-purpose agent", " Bash command · from the"
-    )
-    dialog = parse_approval(screen)
+@pytest.mark.parametrize(
+    "heading",
+    [
+        # Cut short.
+        " Bash command · from the",
+        # The title wraps in its own column on a narrow pane.
+        " Bash       · from the general-purpose\n command    agent",
+        " Bash     · from the\n command  general-purpose\n          agent",
+        # A suffix on its own line is no known layout.
+        " Bash command\n · from the general-purpose agent",
+    ],
+)
+def test_an_unreadable_heading_is_not_matchable(heading: str) -> None:
+    assert not _with_heading(heading).matchable
+
+
+@pytest.mark.parametrize(
+    ("fixture", "text", "heading"),
+    [
+        ("approval_bash_boxed.txt", " Create probe dir\n", "Bash command"),
+        (
+            "approval_websearch.txt",
+            "search the web for: tmux capture-pane docs\n",
+            "Tool use",
+        ),
+    ],
+)
+def test_text_below_a_heading_names_no_subagent(
+    fixture: str, text: str, heading: str
+) -> None:
+    screen = _load(fixture)
+    assert text in screen
+    forged = f"{text.rstrip()} · from the general-purpose agent\n"
+    dialog = parse_approval(screen.replace(text, forged))
     assert dialog is not None
-    assert not dialog.matchable
+    assert (dialog.heading, dialog.agent, dialog.matchable) == (heading, None, True)
 
 
 def test_stale_composer_above_a_popup_is_not_a_composer() -> None:
@@ -1001,3 +1038,17 @@ def test_plan_path_is_read_from_the_footer(footer: str, path: str | None) -> Non
     dialog = parse_plan_dialog("\n".join([*lines[:start], footer]))
     assert dialog is not None
     assert dialog.plan_path == path
+
+
+@pytest.mark.parametrize("fixture", ["composer_labelled.txt", "composer_shell.txt"])
+def test_a_labelled_or_shell_composer_holds_its_input(fixture: str) -> None:
+    screen = _load(fixture)
+    assert composer_drawn(screen)
+    assert composer_holds_input(screen)
+    assert not shows_blocking_dialog(screen)
+
+
+def test_a_typed_numbered_line_is_input_not_an_option() -> None:
+    screen = _load("composer_labelled.txt").replace("plain draft", "1. numbered draft")
+    assert composer_drawn(screen)
+    assert composer_holds_input(screen)

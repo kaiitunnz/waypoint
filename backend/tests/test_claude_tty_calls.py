@@ -27,13 +27,19 @@ from waypoint.backends.claude_tty.pending_calls import PendingCall
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin, _TailerRun
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
-from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+from waypoint.schemas import (
+    EventKind,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+)
 
 BASH = {"command": "mkdir -p probe_dir_one", "description": "Create probe dir"}
 SUB_BASH = {
     "command": SUBAGENT_COMMAND,
     "description": "Create directory and echo marker text",
-    "dangerouslyDisableSandbox": True,
+    # Not drawn, and carried all the same.
+    "timeout": 90000,
 }
 DECOY = {"command": "echo main-start && sleep 60", "description": "Sleep"}
 PLAN_NAME = "make-a-very-short-pure-nest-of-cdf35b79-a2ab-4155-9ae2-a402c6ec93f9.md"
@@ -81,6 +87,7 @@ class Pane:
         runtime._record_system_event = AsyncMock()
         runtime.update_session_fields = AsyncMock()
         self.runtime = runtime
+        self.source = source
         self.tailer = TranscriptTailer("s1", source, runtime, self.plugin)
         self.plugin._tailers["s1"] = _TailerRun(self.tailer, MagicMock())
         self.transport = ClaudeTtyTransport(runtime, self.plugin)
@@ -168,9 +175,9 @@ async def test_calls_that_cannot_be_told_apart_stay_unverified(tmp_path: Path) -
     write_subagent(
         pane.main, "a1", "general-purpose", jsonl(use("one", "Bash", SUB_BASH))
     )
-    sandboxed = {**SUB_BASH, "dangerouslyDisableSandbox": False}
+    longer = {**SUB_BASH, "timeout": 100000}
     write_subagent(
-        pane.main, "a2", "general-purpose", jsonl(use("two", "Bash", sandboxed))
+        pane.main, "a2", "general-purpose", jsonl(use("two", "Bash", longer))
     )
 
     await pane.poll(8)
@@ -217,9 +224,105 @@ async def test_lingering_dialog_is_not_raised_again_at_once(tmp_path: Path) -> N
     await pane.poll(2)
     assert len(pane.asks) == 1
 
-    # Still drawn polls later: the keystroke did not take.
-    await pane.poll(4)
-    assert [_named(ask) for ask in pane.asks] == [(True, "first"), (True, "first")]
+    # Still drawn polls later: the keystroke may not have taken. The replied call
+    # is not named again all the same.
+    await pane.poll(8)
+    assert [_named(ask) for ask in pane.asks] == [(True, "first"), (False, None)]
+
+
+async def test_a_look_alike_dialog_is_not_given_the_answered_calls_input(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_agent.txt")
+    one = {"description": "Say hello greeting", "prompt": "Say hello and stop."}
+    two = {"description": "Say hello greeting", "prompt": "Delete everything."}
+    append(pane.main, use("one", "Agent", one))
+    await pane.poll()
+    assert await pane.reply() is True
+
+    # The second call's dialog reads the same, and its record is late.
+    await pane.poll(7)
+    assert _named(pane.asks[-1]) == (False, None)
+
+    append(pane.main, use("two", "Agent", two))
+    await pane.poll(1)
+    assert _named(pane.asks[-1]) == (True, "two")
+    assert pane.asks[-1]["tool_input"] == two
+
+
+async def test_an_answered_call_stays_answered_across_a_blank_frame(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+    assert await pane.reply() is True
+
+    dialog = pane.screen
+    pane.screen = _screen("ready.txt")
+    await pane.poll(1)
+    pane.screen = dialog
+    await pane.poll()
+    assert _named(pane.asks[-1]) == (False, None)
+
+
+async def test_a_call_survives_one_blank_capture(tmp_path: Path) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+
+    # One capture can catch the TUI mid-redraw.
+    dialog = pane.screen
+    pane.screen = _screen("ready.txt")
+    await pane.poll(1)
+    pane.screen = dialog
+    await pane.poll()
+    assert _named(pane.asks[-1]) == (True, "first")
+
+
+async def test_a_poll_overtaken_by_a_reply_raises_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    await pane.poll()
+    append(pane.main, use("late", "Bash", BASH))
+    dialogs = pane.tailer.dialogs
+    match = dialogs._match
+    raised = len(pane.asks)
+
+    async def reply_meanwhile(dialog: Any) -> PendingCall | None:
+        monkeypatch.setattr(dialogs, "_match", match)
+        assert await pane.reply() is True
+        return await match(dialog)
+
+    # The poll that would name the late call is still looking when a reply lands.
+    monkeypatch.setattr(dialogs, "_match", reply_meanwhile)
+    await pane.poll(1)
+
+    assert len(pane.asks) == raised
+    assert "s1" not in pane.plugin._pending_approvals
+
+
+async def test_a_restart_adopts_the_open_verified_card(tmp_path: Path) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+    (card,) = pane.asks
+
+    event = MagicMock()
+    event.kind = EventKind.APPROVAL_REQUEST
+    event.metadata = card
+    pane.runtime.storage.list_approval_events.return_value = [event]
+    pane.plugin._pending_approvals.clear()
+    pane.tailer = TranscriptTailer("s1", pane.source, pane.runtime, pane.plugin)
+    pane.tailer.dialogs.adopt_open_cards()
+    await pane.poll()
+
+    assert len(pane.asks) == 1
+    assert pane.notes == []
+    pending = pane.plugin._pending_approvals["s1"]
+    assert pending.approval_id == card["approval_id"]
+    assert pending.call is not None and pending.call.tool_use_id == "first"
 
 
 async def test_second_identical_call_answered_in_the_terminal(tmp_path: Path) -> None:
@@ -254,13 +357,32 @@ async def test_reply_is_refused_once_the_named_call_resolved(tmp_path: Path) -> 
     await pane.poll()
 
     # The same words on screen, asked by a call the ask does not name.
-    unsandboxed = {**BASH, "dangerouslyDisableSandbox": True}
-    append(pane.main, result("first"), use("second", "Bash", unsandboxed, msg="m2"))
+    longer = {**BASH, "timeout": 100000}
+    append(pane.main, result("first"), use("second", "Bash", longer, msg="m2"))
     assert await pane.reply() is False
 
     pane.assert_no_keys()
+    assert pane.notes == ["Reply not sent: this request couldn't be confirmed"]
     await pane.poll()
-    assert pane.asks[-1]["tool_input"] == unsandboxed
+    assert pane.asks[-1]["tool_input"] == longer
+
+
+@pytest.mark.parametrize("missing", ["transcript", "tailer"])
+async def test_a_reply_that_cannot_be_checked_says_so(
+    tmp_path: Path, missing: str
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+
+    if missing == "transcript":
+        pane.main.unlink()
+    else:
+        pane.plugin._tailers.clear()
+    assert await pane.reply() is False
+
+    pane.assert_no_keys()
+    assert pane.notes == ["Reply not sent: this request couldn't be confirmed"]
 
 
 async def test_redrawn_options_move_the_keys_a_reply_presses(tmp_path: Path) -> None:
@@ -431,3 +553,4 @@ async def test_unreadable_plan_keeps_the_card_it_already_has(
     assert len(pane.asks) == 1
     assert await pane.reply() is False
     pane.assert_no_keys()
+    assert pane.notes == ["Reply not sent: this request couldn't be confirmed"]

@@ -95,7 +95,7 @@ from waypoint.backends.claude_tty.byte_source import (
     resolve_remote_config_root,
 )
 from waypoint.backends.claude_tty.dialog_watch import (
-    STALE_REPLY_NOTE,
+    UNCONFIRMED_REPLY_NOTE,
     PendingTtyApproval,
 )
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
@@ -704,18 +704,28 @@ class ClaudeTtyPlugin:
         )
         return True
 
-    async def still_shows(self, session_id: str, pending: PendingTtyApproval) -> bool:
-        """Whether the pane still shows what ``pending``'s ask was raised for."""
-        run = self._tailers.get(session_id)
-        return run is not None and await run.tailer.dialogs.still_shows(pending)
+    async def reply_refusal(
+        self, session_id: str, pending: PendingTtyApproval
+    ) -> str | None:
+        """Why a reply to ``pending`` must not be sent, or None when it may be."""
+        if (run := self._tailers.get(session_id)) is None:
+            return UNCONFIRMED_REPLY_NOTE
+        return await run.tailer.dialogs.reply_refusal(pending)
 
-    async def refuse_reply(self, runtime: "SessionRuntime", session_id: str) -> None:
-        """Close the card of a reply that was not sent."""
+    def mark_replied(self, session_id: str, pending: PendingTtyApproval) -> None:
+        """Note that ``pending``'s key was pressed."""
+        if run := self._tailers.get(session_id):
+            run.tailer.dialogs.mark_replied(pending)
+
+    async def refuse_reply(
+        self, runtime: "SessionRuntime", session_id: str, note: str
+    ) -> None:
+        """Close the card of a reply that was not sent, with ``note`` on why."""
         # Forgotten before the entry goes, so the next poll raises what is on
         # screen as a new request.
         if run := self._tailers.get(session_id):
             run.tailer.dialogs.forget()
-        await self.drop_pending_approval(runtime, session_id, STALE_REPLY_NOTE)
+        await self.drop_pending_approval(runtime, session_id, note)
 
     async def drop_pending_approval(
         self, runtime: "SessionRuntime", session_id: str, note: str

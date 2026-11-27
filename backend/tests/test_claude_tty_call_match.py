@@ -60,7 +60,6 @@ SHOWN: list[tuple[str, str, dict[str, Any]]] = [
         {
             "command": MULTILINE,
             "description": "Run multi-line probe command",
-            "dangerouslyDisableSandbox": True,
         },
     ),
     (
@@ -422,7 +421,7 @@ def test_identical_calls_of_one_transcript_prompt_in_order() -> None:
     "other",
     [
         {"transcript": "/s/agent-2.jsonl"},
-        {"tool_input": {**SHOWN[0][2], "dangerouslyDisableSandbox": True}},
+        {"tool_input": {**SHOWN[0][2], "timeout": 90000}},
     ],
     ids=["another-transcript", "differing-input"],
 )
@@ -443,3 +442,85 @@ def test_cut_off_dialog_matches_nothing() -> None:
     call = _call("Bash", {"command": 'echo "bigtree created with 70 items"'})
     assert not dialog.matchable
     assert match_call(dialog, [call]) is None
+
+
+_NARROW = (
+    'touch probe_a.txt\n\nif true; then\n    echo "indented body"\nfi\n'
+    "echo one two three four five six seven eight nine ten eleven twelve thirteen "
+    "fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo"
+    " > probe_out.txt"
+)
+
+
+def _bash(command: str, description: str, **extra: Any) -> PendingCall:
+    return _call("Bash", {"command": command, "description": description, **extra})
+
+
+def test_blank_lines_and_wraps_match_at_another_width() -> None:
+    dialog = _dialog("approval_bash_multiline_narrow.txt")
+    call = _bash(_NARROW, "Probe run from the general-purpose agent")
+    assert dialog.width == 50
+    assert match_call(dialog, [call]) == call
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        MULTILINE.replace("\n", " "),
+        MULTILINE.replace("then\n    echo", "then echo"),
+        MULTILINE.replace('body"\nfi', 'body"\n\nfi'),
+    ],
+    ids=["all-newlines", "one-newline", "blank-line-added"],
+)
+def test_a_short_line_break_is_a_newline_of_the_command(command: str) -> None:
+    dialog = _dialog("approval_bash_multiline_boxed.txt")
+    assert match_call(dialog, [_bash(command, "Run multi-line probe command")]) is None
+
+
+def test_a_newline_the_dialog_does_not_draw_does_not_match() -> None:
+    dialog = _dialog("approval_bash_wrapped_boxed.txt")
+    command = WRAPPED.replace("probe line", "probe\nline")
+    call = _bash(command, "Create probe file and echo long line")
+    assert match_call(dialog, [call]) is None
+
+
+def test_an_edit_keeps_the_diffs_line_breaks() -> None:
+    merged = {
+        "file_path": f"{CWD}/notes.txt",
+        "old_string": "alpha\nbeta",
+        "new_string": "alpha BETA",
+    }
+    assert match_call(_dialog("approval_edit.txt"), [_call("Edit", merged)]) is None
+    kept = {**merged, "new_string": "alpha\nBETA"}
+    call = _call("Edit", kept)
+    assert match_call(_dialog("approval_edit.txt"), [call]) == call
+
+
+def test_an_edit_deleting_a_line_matches_without_its_newline() -> None:
+    dialog = _dialog("approval_edit.txt", (" 2 +BETA\n", ""))
+    edit = {"file_path": f"{CWD}/notes.txt", "old_string": "beta", "new_string": ""}
+    call = _call("Edit", edit)
+    assert match_call(dialog, [call]) == call
+
+
+@pytest.mark.parametrize(
+    ("fixture", "command", "description", "unsandboxed"),
+    [
+        ("approval_bash_unsandboxed.txt", "mkdir -p probe_dds3", "Probe flags", True),
+        (
+            "approval_bash_boxed.txt",
+            "mkdir -p probe_dir_one",
+            "Create probe dir",
+            False,
+        ),
+    ],
+)
+def test_the_unsandboxed_heading_is_compared(
+    fixture: str, command: str, description: str, unsandboxed: bool
+) -> None:
+    dialog = _dialog(fixture)
+    flagged = _bash(command, description, dangerouslyDisableSandbox=True)
+    plain = _bash(command, description)
+    drawn, other = (flagged, plain) if unsandboxed else (plain, flagged)
+    assert match_call(dialog, [drawn]) == drawn
+    assert match_call(dialog, [other]) is None

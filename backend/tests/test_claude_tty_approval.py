@@ -1010,7 +1010,7 @@ def _pending(
 def _register_tailer(plugin: ClaudeTtyPlugin, session_id: str = "sess-1") -> MagicMock:
     """A tailer that finds the pane still showing the dialog."""
     tailer = MagicMock()
-    tailer.dialogs.still_shows = AsyncMock(return_value=True)
+    tailer.dialogs.reply_refusal = AsyncMock(return_value=None)
     plugin._tailers[session_id] = _TailerRun(tailer, MagicMock())
     return tailer
 

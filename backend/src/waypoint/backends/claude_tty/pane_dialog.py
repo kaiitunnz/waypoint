@@ -11,6 +11,7 @@ TUI.
 A permission dialog is a ruled block: a solid rule, a heading naming the tool
 (with `` · from the <name> agent`` for a subagent's), then the call between dashed
 rules, a "Do you want to …?" question, numbered options and, usually, a footer.
+The solid rule spans the pane, so it gives the width the text was wrapped to.
 
 Verified against fixtures captured from Claude Code 2.1.177 to 2.1.332 in
 ``tests/fixtures/claude_tty_pane/``.
@@ -116,16 +117,18 @@ _INTERACTIVE_HINTS = (
 _RULE_CHAR = "─"
 _MIN_RULE_WIDTH = 20
 _DASHED_RULE_RE = re.compile(r"[╌─]{20,}")
-_AGENT_SUFFIX_RE = re.compile(r"^(.*?)\s+· from the (.+?) agent$")
+# Where a subagent's suffix starts on the heading line, and the suffix whole.
+_AGENT_MARK_RE = re.compile(r"(?<= )·(?= from\b|$)")
+_AGENT_SUFFIX_RE = re.compile(r"· from the (.+?) agent")
 SKILL_HEADING_RE = re.compile(r'^Use skill "(.+)"\?$')
 # The heading whose tool is named by the lines below it.
 TOOL_USE_HEADING = "Tool use"
+# A command run outside the sandbox, drawn only while sandboxing is on.
+UNSANDBOXED_BASH_HEADING = "Bash command (unsandboxed)"
 # A line the options block ends with when the dialog is scrolled.
 _MORE_LINES_PREFIX = "↑"
 # The indent of an option's wrapped label or description.
 _OPTION_DETAIL_INDENT = " " * 5
-# The most lines a wrapped heading takes.
-_HEADING_MAX_LINES = 3
 
 
 def digest(text: str) -> str:
@@ -191,6 +194,8 @@ class ApprovalDialog:
     # False when the dialog does not show enough to say which call it asks
     # about: its top is cut off, or its heading cannot be read.
     matchable: bool
+    # The pane's width in columns; 0 when the dialog's top is cut off.
+    width: int
 
     @property
     def described_header(self) -> list[str]:
@@ -277,6 +282,8 @@ class PlanDialog:
 
 
 _COMPOSER_PROMPT = "❯"
+# The composer's prompt, and the one it shows in shell mode.
+_COMPOSER_PREFIXES = (_COMPOSER_PROMPT, "!")
 # An idle composer shows dim ghost placeholder text (``Try "…"``) after the
 # prompt rather than a bare prompt; it is empty for submit-confirmation
 # purposes. A pending message never collides with this — an attachment turn
@@ -322,24 +329,23 @@ def _is_column0_rule(line: str) -> bool:
 def _live_composer_frame(lines: list[str]) -> tuple[int, int] | None:
     """Indices of the live composer's top and bottom borders, when it is drawn.
 
-    The composer is framed by two full-width rules starting at column 0, with
-    the ``❯`` prompt at column 0 directly under the top one. Its text wraps onto
-    indented lines, so a message quoting a dialog (borders, footers, ``❯``
+    The composer is framed by two rules starting at column 0, which may carry a
+    label, with its prompt at column 0 directly under the top one. Its text wraps
+    onto indented lines, so a message quoting a dialog (borders, footers, ``❯``
     rows) can never reproduce that frame.
     """
     for top in range(len(lines) - 3, -1, -1):
-        prompt = lines[top + 1]
         if not (
-            _is_column0_rule(lines[top])
-            and prompt.startswith(_COMPOSER_PROMPT)
-            and _is_composer_line(prompt)
+            _is_border(lines[top]) and lines[top + 1].startswith(_COMPOSER_PREFIXES)
         ):
             continue
-        width = len(lines[top].rstrip())
-        for bottom in range(top + 2, len(lines)):
-            if _is_column0_rule(lines[bottom]) and len(lines[bottom].rstrip()) == width:
-                return top, bottom
-        return None
+        bottom = top + 2
+        while bottom < len(lines) and (
+            not lines[bottom].strip() or lines[bottom][0].isspace()
+        ):
+            bottom += 1
+        if bottom < len(lines) and _is_border(lines[bottom]):
+            return top, bottom
     return None
 
 
@@ -473,29 +479,16 @@ def composer_drawn(screen: str) -> bool:
     """Whether the composer's bordered input box is on screen.
 
     A dialog or panel replaces it, so no composer means keystrokes would land in
-    something else. Borders may carry a label, and shell mode prompts with ``!``.
+    something else.
     """
     lines = _plain_lines(screen)
-    for top in range(len(lines) - 3, -1, -1):
-        if not (
-            _is_border(lines[top])
-            and lines[top + 1].startswith((_COMPOSER_PROMPT, "!"))
-        ):
-            continue
-        # The typed text wraps onto indented lines until the bottom border.
-        bottom = top + 2
-        while bottom < len(lines) and (
-            not lines[bottom].strip() or lines[bottom].startswith(" ")
-        ):
-            bottom += 1
-        if bottom < len(lines) and _is_border(lines[bottom]):
-            # A popup below the box has taken its place: the box is left over
-            # from earlier in the scrollback.
-            return not any(
-                _is_border(line) or _is_interactive_line(line)
-                for line in lines[bottom + 1 :]
-            )
-    return False
+    if (frame := _live_composer_frame(lines)) is None:
+        return False
+    # A popup below the box has taken its place: the box is left over from
+    # earlier in the scrollback.
+    return not any(
+        _is_border(line) or _is_interactive_line(line) for line in lines[frame[1] + 1 :]
+    )
 
 
 def _is_interactive_line(line: str) -> bool:
@@ -540,17 +533,19 @@ def trust_option_offset(screen: str) -> int | None:
 
 
 def composer_holds_input(screen: str) -> bool:
-    """Whether the live composer holds an unsent message that ``Enter`` submits.
+    """Whether the live composer holds an unsent message or shell command that
+    ``Enter`` submits.
 
-    Read from the framed composer only: a panel or shell-mode prompt replaces
-    it, and earlier prompts echo above with the same ``❯`` glyph.
+    Read from the framed composer only: a panel replaces it, and earlier prompts
+    echo above with the same ``❯`` glyph.
     """
     lines = _plain_lines(screen)
     frame = _live_composer_frame(lines)
     if frame is None or shows_blocking_dialog(screen):
         return False
     top, bottom = frame
-    text = "\n".join(lines[top + 1 : bottom]).removeprefix(_COMPOSER_PROMPT).strip()
+    # The first line leads with the prompt character.
+    text = "\n".join([lines[top + 1][1:], *lines[top + 2 : bottom]]).strip()
     return bool(text) and not text.startswith(_COMPOSER_PLACEHOLDER_PREFIX)
 
 
@@ -609,7 +604,9 @@ def parse_approval(screen: str) -> ApprovalDialog | None:
         len(lines),
     )
     options = _parse_options(lines[question_idx + 1 : footer_idx])
-    heading, agent, matchable, header, body, extra = _split_dialog(lines[:question_idx])
+    width, heading, agent, matchable, header, body, extra = _split_dialog(
+        lines[:question_idx]
+    )
     tool_name, target = _read_tool_target(heading, header, body, question)
 
     return ApprovalDialog(
@@ -623,26 +620,51 @@ def parse_approval(screen: str) -> ApprovalDialog | None:
         body=body,
         extra=extra,
         matchable=matchable,
+        width=width,
+    )
+
+
+def _names_a_tool(heading: str) -> bool:
+    return (
+        heading in _HEADING_TOOLS
+        or heading == TOOL_USE_HEADING
+        or SKILL_HEADING_RE.match(heading) is not None
     )
 
 
 def _read_heading(lines: list[str], start: int) -> tuple[str, str | None, int, bool]:
     """The heading at ``start``, the agent it names, the line after it, and
-    whether it was fully read."""
-    text = lines[start].strip()
-    for end in range(start + 1, min(start + _HEADING_MAX_LINES, len(lines)) + 1):
-        if suffixed := _AGENT_SUFFIX_RE.match(text):
-            return suffixed.group(1), suffixed.group(2), end, True
-        if end < len(lines):
-            # A narrow pane wraps the agent suffix onto the following lines.
-            text = f"{text} {lines[end].strip()}"
-    near = " ".join(line.strip() for line in lines[start : start + _HEADING_MAX_LINES])
-    return lines[start].strip(), None, start + 1, "· from" not in near
+    whether it was fully read.
+
+    A subagent's suffix is a column beside the title and wraps within it, so its
+    later lines are indented to where its ``·`` stands. Text below a heading
+    without one is the call's, which the model wrote.
+    """
+    first = lines[start].rstrip()
+    if (mark := _AGENT_MARK_RE.search(first)) is None:
+        below = lines[start + 1].strip() if start + 1 < len(lines) else ""
+        # A suffix on a line of its own is no known layout.
+        return first.strip(), None, start + 1, not below.startswith("· from")
+    column = mark.start()
+    title, suffix = first[:column].strip(), first[column:]
+    end = start + 1
+    while (
+        (agent := _AGENT_SUFFIX_RE.fullmatch(suffix)) is None
+        and end < len(lines)
+        and len(lines[end]) - len(lines[end].lstrip(" ")) == column
+    ):
+        suffix = f"{suffix} {lines[end].strip()}"
+        end += 1
+    # A pane too narrow for the title wraps it in its own column, leaving only
+    # part of it here.
+    if agent is None or not _names_a_tool(title):
+        return first.strip(), None, start + 1, False
+    return title, agent.group(1), end, True
 
 
 def _split_dialog(
     lines: list[str],
-) -> tuple[str | None, str | None, bool, list[str], list[str] | None, list[str]]:
+) -> tuple[int, str | None, str | None, bool, list[str], list[str] | None, list[str]]:
     """Split the lines above a dialog's question into its parts."""
     top = next(
         (i for i in range(len(lines) - 1, -1, -1) if _is_column0_rule(lines[i])), None
@@ -650,7 +672,9 @@ def _split_dialog(
     heading: str | None = None
     agent: str | None = None
     matchable = False
+    width = 0
     if top is not None:
+        width = len(lines[top].rstrip())
         start = next(
             (i for i in range(top + 1, len(lines)) if lines[i].strip()), len(lines)
         )
@@ -667,7 +691,7 @@ def _split_dialog(
     elif rules and heading is None:
         # Only the bottom rule is left of a dialog whose top scrolled away.
         header, body, extra = [], lines[: rules[0]], lines[rules[0] + 1 :]
-    return heading, agent, matchable, _trim(header), body, _trim(extra)
+    return width, heading, agent, matchable, _trim(header), body, _trim(extra)
 
 
 def _trim(lines: list[str]) -> list[str]:
@@ -718,6 +742,7 @@ def parse_plan_dialog(screen: str) -> PlanDialog | None:
 # Dialog headings that name the tool by themselves.
 _HEADING_TOOLS: dict[str, str] = {
     "Bash command": "Bash",
+    UNSANDBOXED_BASH_HEADING: "Bash",
     "Create file": "Write",
     "Write file": "Write",
     "Overwrite file": "Write",

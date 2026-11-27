@@ -70,6 +70,8 @@ _DIALOG_CLOSED_NOTE = "Approval dialog closed in the terminal"
 _UPDATED_NOTE = "Approval request updated"
 _EXPIRED_NOTE = "Pending approval expired"
 STALE_REPLY_NOTE = "Reply not sent: the terminal no longer shows this request"
+# The terminal may still show it: what it asks about could not be checked.
+UNCONFIRMED_REPLY_NOTE = "Reply not sent: this request couldn't be confirmed"
 
 
 @dataclass
@@ -154,7 +156,10 @@ def _pane_reading(dialog: pane_dialog.ApprovalDialog) -> tuple[str, dict[str, An
     target = dialog.target or ""
     match tool_name:
         case "Bash":
-            return tool_name, {"command": target}
+            reading: dict[str, Any] = {"command": target}
+            if dialog.heading == pane_dialog.UNSANDBOXED_BASH_HEADING:
+                reading["dangerouslyDisableSandbox"] = True
+            return tool_name, reading
         case "Write" | "Edit" | "MultiEdit":
             return tool_name, {"file_path": target}
         case _:
@@ -190,7 +195,7 @@ class DialogWatcher:
         # that clears pending before the pane redraws raises no duplicate.
         self._surfaced: _Surfaced | None = None
         # Ids of calls that cannot be asking: replied to, or whose dialog was
-        # answered in the terminal.
+        # answered in the terminal. A call stays here once added.
         self._answered: set[str] = set()
         # The call whose dialog was missing from the last poll.
         self._departing: PendingCall | None = None
@@ -227,14 +232,16 @@ class DialogWatcher:
         session = self._runtime.storage.get_session(self._session_id)
         if session is None:
             return
-        pending = self._plugin._pending_approvals.get(self._session_id)
-        if pending is not None and pending.replying:
+        entry = self._plugin._pending_approvals.get(self._session_id)
+        if entry is not None and entry.replying:
             return  # our own keystroke is moving the pane
 
         pane = pane_target(session)
         try:
             snapshot = await self._runtime.tmux.capture_snapshot(pane)
         except TmuxError:
+            return
+        if self._overtaken(entry):
             return
 
         screen = pane_dialog.classify(snapshot)
@@ -248,10 +255,10 @@ class DialogWatcher:
                 await self._dismiss(pane, screen)
             case pane_dialog.PaneScreen.PLAN:
                 self._departing = None
-                await self._poll_plan(session, snapshot)
+                await self._poll_plan(session, snapshot, entry)
             case pane_dialog.PaneScreen.APPROVAL:
                 self._departing = None
-                await self._poll_approval(pane, snapshot)
+                await self._poll_approval(pane, snapshot, entry)
             case _:
                 await self._on_no_dialog()
 
@@ -260,35 +267,44 @@ class DialogWatcher:
         self._surfaced = None
         self._reset_debounce()
 
-    async def still_shows(self, pending: PendingTtyApproval) -> bool:
-        """Whether the pane still shows what ``pending``'s ask was raised for, so
-        its keys answer that request. Raises ``TmuxError`` when the pane can't be
-        read.
+    def mark_replied(self, pending: PendingTtyApproval) -> None:
+        """Note that ``pending``'s key was pressed: its call is not named again,
+        even for a dialog that reads the same."""
+        if pending.call is not None:
+            self._answered.add(pending.call.tool_use_id)
+
+    async def reply_refusal(self, pending: PendingTtyApproval) -> str | None:
+        """Why a reply to ``pending`` must not be sent, as the note for its card;
+        None when the pane still shows what the ask was raised for, so its keys
+        answer that request. Raises ``TmuxError`` when the pane can't be read.
 
         The pane is looked at last, after the transcript and plan reads, which
         take long enough for it to move on.
         """
         session = self._runtime.storage.get_session(self._session_id)
         if session is None:
-            return False
+            return UNCONFIRMED_REPLY_NOTE
         pane = pane_target(session)
         if pending.is_plan:
-            return await self._plan_still_shown(session, pane, pending)
+            return await self._plan_refusal(session, pane, pending)
         if pending.call is not None:
             dialog = await self._approval_on_screen(pane)
             if dialog is None or dialog.identity != pending.identity:
-                return False
+                return STALE_REPLY_NOTE
             # The same words can come from another call, with the named one over.
+            # A transcript that can't be read matches nothing either.
             match = await self._match(dialog)
             if match is None or match.tool_use_id != pending.call.tool_use_id:
-                return False
+                return UNCONFIRMED_REPLY_NOTE
         dialog = await self._approval_on_screen(pane)
-        return (
-            dialog is not None
-            and dialog.identity == pending.identity
-            and _reply_numbers(dialog)
-            == (pending.approve_number, pending.decline_number)
-        )
+        if (
+            dialog is None
+            or dialog.identity != pending.identity
+            or _reply_numbers(dialog)
+            != (pending.approve_number, pending.decline_number)
+        ):
+            return STALE_REPLY_NOTE
+        return None
 
     async def close(self) -> None:
         """Close the cards of a tailer that stopped on its own (pane gone,
@@ -360,6 +376,13 @@ class DialogWatcher:
         self.forget()
         self._dismissed_screen = None
 
+    def _overtaken(self, entry: PendingTtyApproval | None) -> bool:
+        """Whether a reply or an interrupt has acted on the card since a poll
+        that started with ``entry`` as the pending request: what the poll saw is
+        then out of date."""
+        current = self._plugin._pending_approvals.get(self._session_id)
+        return current is not entry or (current is not None and current.replying)
+
     def _is_stable(self, identity: str) -> bool:
         if identity == self._stable_identity:
             self._stable_count += 1
@@ -374,11 +397,13 @@ class DialogWatcher:
 
     # ── tool approvals ──
 
-    async def _poll_approval(self, pane: str, snapshot: str) -> None:
+    async def _poll_approval(
+        self, pane: str, snapshot: str, entry: PendingTtyApproval | None
+    ) -> None:
         if (dialog := await self._read_approval(pane, snapshot)) is None:
             self._reset_debounce()
         elif self._is_stable(dialog.identity):
-            await self._surface_approval(dialog)
+            await self._surface_approval(dialog, entry)
 
     async def _read_approval(
         self, pane: str, snapshot: str
@@ -421,23 +446,18 @@ class DialogWatcher:
         self, dialog: pane_dialog.ApprovalDialog, shown: _Surfaced
     ) -> bool:
         """Whether a dialog drawn like the one just replied to needs a card: it
-        may not have redrawn yet, belong to the next identical call, or have
-        missed the keystroke."""
-        call = shown.pending.call
-        if call is not None:
-            self._answered.add(call.tool_use_id)
+        may not have redrawn yet, belong to another call that reads the same, or
+        have missed the keystroke."""
         shown.polls_since_reply += 1
         if shown.polls_since_reply < _REDRAW_POLLS:
             return False
-        if await self._match(dialog) is not None:
+        if shown.polls_since_reply >= _LOST_REPLY_POLLS:
             return True
-        if shown.polls_since_reply < _LOST_REPLY_POLLS:
-            return False
-        if call is not None:
-            self._answered.discard(call.tool_use_id)
-        return True
+        return await self._match(dialog) is not None
 
-    async def _surface_approval(self, dialog: pane_dialog.ApprovalDialog) -> None:
+    async def _surface_approval(
+        self, dialog: pane_dialog.ApprovalDialog, entry: PendingTtyApproval | None
+    ) -> None:
         shown = self._surfaced
         card_open = shown is not None and self._card_open(shown)
         same_dialog = shown is not None and shown.pending.identity == dialog.identity
@@ -449,6 +469,8 @@ class DialogWatcher:
                 return
 
         call = await self._match(dialog)
+        if self._overtaken(entry):
+            return
         signature = f"call:{call.tool_use_id}" if call else f"pane:{dialog.identity}"
         approve_number, decline_number = _reply_numbers(dialog)
         if shown is not None and card_open and shown.pending.signature == signature:
@@ -484,7 +506,12 @@ class DialogWatcher:
 
     # ── plan approvals ──
 
-    async def _poll_plan(self, session: SessionRecord, snapshot: str) -> None:
+    async def _poll_plan(
+        self,
+        session: SessionRecord,
+        snapshot: str,
+        entry: PendingTtyApproval | None,
+    ) -> None:
         """Raise the ExitPlanMode dialog as the approval card Chat shows.
 
         The card's plan is the text of the file the dialog's footer names; a plan
@@ -521,6 +548,8 @@ class DialogWatcher:
         if dialog.plan_path is not None:
             calls = await asyncio.to_thread(self._calls.candidates, None)
             call = match_plan_call(calls, dialog.plan_path, self._answered)
+        if self._overtaken(entry):
+            return
         tool_input: dict[str, Any] = {"plan": content or ""}
         if plan_path := call.input.get("planFilePath") if call else dialog.plan_path:
             tool_input["planFilePath"] = plan_path
@@ -540,25 +569,26 @@ class DialogWatcher:
         if await self._register(pending, closing_note):
             await self._emit_card(pending, tool_input, verified=content is not None)
 
-    async def _plan_still_shown(
+    async def _plan_refusal(
         self, session: SessionRecord, pane: str, pending: PendingTtyApproval
-    ) -> bool:
+    ) -> str | None:
         dialog = await self._plan_on_screen(pane)
         if dialog is None:
-            return False
+            return STALE_REPLY_NOTE
         content = await asyncio.to_thread(self._read_plan, dialog.plan_path)
         if _plan_signature(dialog.plan_path, content) != pending.signature:
-            return False
+            # A plan that can't be read may well be unchanged.
+            return UNCONFIRMED_REPLY_NOTE if content is None else STALE_REPLY_NOTE
         dialog = await self._plan_on_screen(pane)
         if dialog is None or _plan_identity(dialog.plan_path) != pending.identity:
-            return False
-        if (approval := _plan_approve_option(session, dialog)) is None:
-            return False
-        option, restore_mode = approval
-        return (
-            option.number == pending.approve_number
-            and restore_mode == pending.restore_mode
-        )
+            return STALE_REPLY_NOTE
+        approval = _plan_approve_option(session, dialog)
+        if approval is None or (approval[0].number, approval[1]) != (
+            pending.approve_number,
+            pending.restore_mode,
+        ):
+            return STALE_REPLY_NOTE
+        return None
 
     async def _plan_on_screen(self, pane: str) -> pane_dialog.PlanDialog | None:
         snapshot = await self._runtime.tmux.capture_snapshot(pane)

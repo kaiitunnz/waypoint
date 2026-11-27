@@ -1,13 +1,16 @@
 """Which pending tool call a permission dialog is asking about.
 
-The dialog is only evidence: a call is named when everything the dialog shows of
-it agrees, and only one call can be meant. Anything unread or unrecognized
-matches nothing, since a wrong name gets another call approved.
+The dialog is only evidence: a call is named when everything the dialog draws of
+it agrees, and only one call can be meant. Runs of whitespace within a line are
+not told apart, and an input the dialog does not draw is not compared. Anything
+unread or unrecognized matches nothing, since a wrong name gets another call
+approved.
 """
 
 import json
 import posixpath
 import re
+import unicodedata
 from collections.abc import Container, Sequence
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -15,6 +18,7 @@ from urllib.parse import quote, urlsplit
 from waypoint.backends.claude_tty.pane_dialog import (
     SKILL_HEADING_RE,
     TOOL_USE_HEADING,
+    UNSANDBOXED_BASH_HEADING,
     ApprovalDialog,
     joined,
     unboxed,
@@ -106,7 +110,7 @@ def match_plan_call(
 
 def _consistent(dialog: ApprovalDialog, call: PendingCall) -> bool:
     heading = dialog.heading or ""
-    if heading == "Bash command":
+    if heading in ("Bash command", UNSANDBOXED_BASH_HEADING):
         return call.name == "Bash" and _bash_matches(dialog, call)
     if names := _FILE_HEADINGS.get(heading):
         return call.name in names and _file_matches(dialog, heading, call)
@@ -153,19 +157,71 @@ def _some_lines_spell(text: str, lines: Sequence[str]) -> bool:
 # ── Bash ──
 
 
+def _columns(text: str) -> int:
+    """The terminal columns ``text`` takes."""
+    return sum(
+        (
+            2
+            if unicodedata.east_asian_width(char) in "WF"
+            else 0 if unicodedata.combining(char) else 1
+        )
+        for char in text
+    )
+
+
+def _wraps(line: str, below: str, width: int) -> bool:
+    """Whether ``below`` may continue ``line`` in a dialog ``width`` columns wide:
+    its first word did not fit."""
+    words = unboxed(below).split()
+    return bool(words) and _columns(line.rstrip()) + 1 + _columns(words[0]) >= width
+
+
+def _draws(command: str, lines: Sequence[str], width: int) -> bool:
+    """Whether ``lines`` are ``command`` as a dialog ``width`` columns wide draws
+    it: each new line is a newline of the command unless the one above was full."""
+    if shown := [i for i, line in enumerate(lines) if unboxed(line).strip()]:
+        lines = lines[shown[0] : shown[-1] + 1]
+    position = 0
+    for source in command.strip().split("\n"):
+        target = _words(source)
+        if position == len(lines):
+            return False
+        drawn = _words(unboxed(lines[position]))
+        position += 1
+        if not target.startswith(drawn) or (target and not drawn):
+            return False
+        spelled = len(drawn)
+        while spelled < len(target):
+            if position == len(lines) or not _wraps(
+                lines[position - 1], lines[position], width
+            ):
+                return False
+            segment = _words(unboxed(lines[position]))
+            position += 1
+            if target.startswith(" ", spelled):
+                spelled += 1
+            if not target.startswith(segment, spelled):
+                return False
+            spelled += len(segment)
+    return position == len(lines)
+
+
 def _bash_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:
     command = call.input.get("command")
     description = call.input.get("description")
     if not isinstance(command, str) or not command.strip():
         return False
+    unsandboxed = bool(call.input.get("dangerouslyDisableSandbox"))
+    if unsandboxed != (dialog.heading == UNSANDBOXED_BASH_HEADING):
+        return False
     header = dialog.described_header
     if dialog.body is not None:
-        return _spells(command, [unboxed(line) for line in dialog.body]) and (
+        return _draws(command, dialog.body, dialog.width) and (
             not description or _some_lines_spell(str(description), header)
         )
     # Without dashed rules: the command's lines, then its description.
     for end in range(1, len(header) + 1):
-        if _spells(command, header[:end]):
+        if _draws(command, header[:end], dialog.width):
             rest = header[end:]
             return _spells(str(description), rest) if description else not rest
     return False
@@ -313,23 +369,24 @@ def _overwrite_matches(body: list[str], content: str) -> bool:
 
 
 def _squash(text: str) -> str:
-    """``text`` without whitespace, which wrapping adds and drops unmarked."""
-    return "".join(text.split())
+    """``text`` without whitespace within its lines, which wrapping adds and drops
+    unmarked. Line breaks are kept."""
+    return "\n".join("".join(line.split()) for line in text.split("\n"))
 
 
 def _side(entries: list[tuple[int, str, list[str]]], without: str) -> str:
-    """One side of a diff, squashed: all its lines but those marked ``without``."""
+    """One side of a diff, squashed: all its lines but those marked ``without``,
+    each ended by a newline."""
     return "".join(
-        _squash(segment)
+        "".join(_squash(segment) for segment in segments) + "\n"
         for _, marker, segments in entries
         if marker != without
-        for segment in segments
     )
 
 
 def _edits_match(body: list[str], edits: list[Any]) -> bool:
     """Whether making ``edits`` to what the diff removes from gives what it adds,
-    so the diff shows these edits and nothing else."""
+    line for line, so the diff shows these edits and no other change."""
     entries = _diff_entries(body)
     if all(marker == " " for _, marker, _ in entries):
         return False
@@ -340,8 +397,12 @@ def _edits_match(body: list[str], edits: list[Any]) -> bool:
         old, new = edit.get("old_string"), edit.get("new_string")
         if not isinstance(old, str) or not isinstance(new, str) or old == new:
             return False
-        if not (target := _squash(old)):
+        if not old.strip():
             return False
+        target = _squash(old)
+        # Claude deletes the line's newline too when the text to delete lacks it.
+        if not new and not old.endswith("\n") and f"{target}\n" in text:
+            target = f"{target}\n"
         found = text.count(target)
         # Without ``replace_all`` Claude requires the text to occur once.
         if not found or (found > 1 and not edit.get("replace_all")):

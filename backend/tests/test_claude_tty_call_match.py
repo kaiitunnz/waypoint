@@ -494,10 +494,16 @@ def test_an_edit_keeps_the_diffs_line_breaks() -> None:
     assert match_call(_dialog("approval_edit.txt"), [call]) == call
 
 
-def test_an_edit_deleting_a_line_matches_without_its_newline() -> None:
-    dialog = _dialog("approval_edit.txt", (" 2 +BETA\n", ""))
-    edit = {"file_path": f"{CWD}/notes.txt", "old_string": "beta", "new_string": ""}
-    call = _call("Edit", edit)
+def test_a_deletion_is_drawn_as_the_text_replaced_by_nothing() -> None:
+    # The dialog leaves an empty line, though the edit drops the newline too.
+    dialog = _dialog("approval_edit_delete_line.txt")
+    edit = {
+        "file_path": f"{CWD}/pkg/settings.py",
+        "old_string": "delta = 4",
+        "new_string": "",
+    }
+    call = dataclasses.replace(_call("Edit", edit), cwd=CWD)
+    assert dialog.agent == "general-purpose"
     assert match_call(dialog, [call]) == call
 
 

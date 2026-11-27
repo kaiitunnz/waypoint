@@ -400,9 +400,6 @@ def _edits_match(body: list[str], edits: list[Any]) -> bool:
         if not old.strip():
             return False
         target = _squash(old)
-        # Claude deletes the line's newline too when the text to delete lacks it.
-        if not new and not old.endswith("\n") and f"{target}\n" in text:
-            target = f"{target}\n"
         found = text.count(target)
         # Without ``replace_all`` Claude requires the text to occur once.
         if not found or (found > 1 and not edit.get("replace_all")):

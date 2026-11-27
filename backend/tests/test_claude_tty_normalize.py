@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -860,7 +861,7 @@ def test_user_rejected_tool_resolves_session_to_idle() -> None:
     ],
 )
 def test_launch_acknowledgement_is_marked_deferred(
-    tool_use_result: object, deferred: bool
+    tool_use_result: Any, deferred: bool
 ) -> None:
     record = _user_record([_tool_result_block("tu9", "launched")])
     record["toolUseResult"] = tool_use_result

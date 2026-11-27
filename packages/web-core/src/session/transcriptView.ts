@@ -19,11 +19,10 @@ export interface TranscriptView {
 // A reasoning step whose text is not shared leaves only a marker note.
 const isReasoningMarker = (event: EventRecord) => event.kind === "system_note" && event.metadata.item_type === "reasoning";
 
-// Gives each call the latest task notification about it, whatever the density shows of
-// the notification itself.
+// Reads every event, since Summary can hide a notification whose call it still shows.
 function withReports(items: TranscriptItem[], events: EventRecord[]): TranscriptItem[] {
   const reports = new Map<string, EventRecord>();
-  // A task may notify again naming only itself, not the call that started it.
+  // A later notification may name only its task: it belongs to the last call that named the task.
   const callOfTask = new Map<string, string>();
   for (const event of events) {
     const note = parseTaskNotification(event);
@@ -38,9 +37,7 @@ function withReports(items: TranscriptItem[], events: EventRecord[]): Transcript
     const report = reports.get(item.pair.itemId);
     return report ? { ...item, pair: { ...item.pair, report } } : item;
   };
-  return items.map((item) =>
-    item.kind === "pair" || item.kind === "single" ? attach(item) : { ...item, items: item.items.map(attach) },
-  );
+  return items.map((item) => ("items" in item ? { ...item, items: item.items.map(attach) } : attach(item)));
 }
 
 // The plan waiting for approval is shown above the composer, so the transcript

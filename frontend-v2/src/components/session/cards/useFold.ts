@@ -6,7 +6,7 @@ import { useClamp } from "./useClamp";
 
 // How much of a folded block shows. A line takes at least one visual line, so cutting
 // to this many first keeps long text out of the page until it is opened.
-const FOLD_LINES = 8;
+export const FOLD_LINES = 8;
 
 // Text that shows only its start until it is opened. `content` goes on the
 // element just inside the clamped box, and `chip` on the wrapper around its disclosure.

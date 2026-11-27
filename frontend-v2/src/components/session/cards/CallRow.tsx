@@ -15,16 +15,14 @@ import { Attachments } from "./Attachments";
 import { Markdown } from "./Markdown";
 import { PathLabel } from "./PathLabel";
 import { TodoItems } from "./TodoItems";
+import { FOLD_LINES } from "./useFold";
 
-const PROSE_LINES = 8;
-
-// What a subagent was asked, or what it reported.
 function Prose({ caption, text }: { caption: string; text: string }) {
   const { total } = foldLines(text, Infinity);
   return (
     <>
       <div className={styles.caption}>{caption}</div>
-      <Clamped lines={PROSE_LINES} more={total > PROSE_LINES ? `Show all ${total} lines` : undefined} frame={styles.prose}>
+      <Clamped lines={FOLD_LINES} more={total > FOLD_LINES ? `Show all ${total} lines` : undefined} frame={styles.prose}>
         <Markdown text={text} />
       </Clamped>
     </>
@@ -32,7 +30,7 @@ function Prose({ caption, text }: { caption: string; text: string }) {
 }
 
 export function CallRow({ row }: { row: CallView }) {
-  const { todos } = row;
+  const { todos, reply } = row;
   const command = row.mono && !row.path;
 
   const status =
@@ -50,8 +48,6 @@ export function CallRow({ row }: { row: CallView }) {
         {row.durationMs !== null ? ` ${formatCallDuration(row.durationMs)}` : ""}
       </span>
     );
-
-  const cut = row.cut ? <div className={styles.cut}>Preview of a longer report</div> : null;
 
   return (
     <div className={styles.call}>
@@ -95,16 +91,14 @@ export function CallRow({ row }: { row: CallView }) {
           <Prose caption="Prompt" text={row.prompt} />
         </div>
       ) : null}
-      {row.result ? (
+      {reply ? (
         <div className={styles.inset}>
-          <Prose caption="Result" text={row.result} />
-          {cut}
-        </div>
-      ) : null}
-      {row.output ? (
-        <div className={styles.inset}>
-          <FoldedText text={row.output} className={styles.out} />
-          {cut}
+          {reply.kind === "report" ? (
+            <Prose caption="Result" text={reply.text} />
+          ) : (
+            <FoldedText text={reply.text} className={styles.out} />
+          )}
+          {reply.cut ? <div className={styles.cut}>Preview of a longer report</div> : null}
         </div>
       ) : null}
       {row.attachments.length > 0 ? (

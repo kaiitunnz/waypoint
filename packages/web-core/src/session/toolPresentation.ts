@@ -61,7 +61,6 @@ export interface ToolNameParts {
   tool: string;
 }
 
-// An MCP or plugin tool's server and tool, from `mcp__server__tool` or `server:tool`.
 export function toolNameParts(name: string): ToolNameParts {
   const parts = /^mcp__(.+?)__(.+)$/.exec(name) ?? /^([^:]+):(.+)$/.exec(name);
   return parts ? { server: parts[1], tool: parts[2] } : { server: null, tool: name };
@@ -112,7 +111,7 @@ function startedItem(event: EventRecord): Record<string, unknown> | null {
   return asRecord(asRecord(meta?.item)?.item) ?? asRecord(asRecord(meta?.payload)?.item);
 }
 
-// A call's arguments: its input, or the item's for the MCP and plugin tools Codex runs.
+// Codex carries an MCP or plugin tool's arguments on its item.
 export function callArgumentsForEvent(event: EventRecord): Record<string, unknown> | null {
   return toolInputForEvent(event) ?? asRecord(startedItem(event)?.arguments);
 }
@@ -125,23 +124,32 @@ export interface Delegation {
   report: string | null;
 }
 
-// A call by which Codex's agent drives a subagent: what it told the subagent, and what the
-// subagents it covers reported. Closing one repeats the report the wait gave.
 export function delegationForEvent(event: EventRecord): Delegation | null {
   if (event.metadata?.item_type !== "collabAgentToolCall") return null;
   const item = startedItem(event);
   const messages = Object.values(asRecord(item?.agentsStates) ?? {}).flatMap(
     (state) => filledText(asRecord(state)?.message) ?? [],
   );
+  // Closing a subagent repeats the report the wait gave.
   const report = readToolName(event) === "closeAgent" ? null : messages.join("\n\n") || null;
   return { prompt: filledText(item?.prompt), report };
 }
 
+// What a call asks of a subagent: its prompt, and the kind of subagent where the agent
+// names one.
+export function subagentRequestForEvent(event: EventRecord): { prompt: string | null; agentType: string | null } {
+  const delegation = delegationForEvent(event);
+  const input = isAgentToolName(readToolName(event)) ? toolInputForEvent(event) : null;
+  return {
+    prompt: delegation ? delegation.prompt : filledText(input?.prompt),
+    agentType: filledText(input?.subagent_type) ?? filledText(input?.agent),
+  };
+}
+
 const carriesBytes = (block: Record<string, unknown>) => "source" in block || "data" in block || "imageUrl" in block;
 
-// What a tool returned, where its result event's own text is not fit to show: a Codex
-// plugin tool's content items, or content holding media. Media reads as its kind, so its
-// bytes stay out of the transcript.
+// Null leaves the event's own text to show. Media reads as its kind, which keeps its bytes
+// out of the transcript.
 export function resultContentForEvent(event: EventRecord): string | null {
   const items = startedItem(event)?.contentItems;
   const content = Array.isArray(items) ? items : asRecord(event.metadata?.payload)?.content;

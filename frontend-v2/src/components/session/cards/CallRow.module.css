@@ -44,7 +44,6 @@
   letter-spacing: -0.01em;
 }
 
-/* A tool's server and a subagent's kind, beside what names the call. */
 .aside {
   color: var(--faint);
 }
@@ -89,7 +88,7 @@
   color: var(--text);
 }
 
-/* A code block keeps its own surface inside the inset. */
+/* Markdown's code blocks are --sunken, like this inset. */
 .prose pre {
   background: var(--plane);
 }

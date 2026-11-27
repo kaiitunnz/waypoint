@@ -14,7 +14,7 @@ interface ClampedProps {
   // The disclosure's folded label.
   more?: string;
   className?: string;
-  // Class of a box drawn around the content, with the disclosure outside it.
+  // A box around the content; the disclosure stays outside it.
   frame?: string;
   children: ReactNode;
 }

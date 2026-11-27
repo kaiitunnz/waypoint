@@ -44,16 +44,16 @@ describe("docked plan", () => {
   });
 });
 
-describe("deferred reports", () => {
+describe("task notification reports", () => {
   const notification = (sequence: number, callId: string | null, text: string, taskId?: string) =>
     ev(sequence, "system_note", text, {
       method: "task_notification",
       visibility: "detail",
       task_notification: { version: 1, id: text, kind: "agent", tool_use_id: callId, task_id: taskId },
     });
-  const launch = (sequence: number, id: string, extra: Record<string, unknown> = { result_deferred: true }) => [
+  const launch = (sequence: number, id: string) => [
     ev(sequence, "tool_call", "", { item_id: id, tool_name: "Agent" }),
-    ev(sequence + 1, "tool_result", "launched", { item_id: id, ...extra }),
+    ev(sequence + 1, "tool_result", "launched", { item_id: id }),
   ];
   const reportsOf = (events: ReturnType<typeof ev>[], density: "summary" | "full") => {
     const reports: Record<string, string | undefined> = {};
@@ -72,7 +72,7 @@ describe("deferred reports", () => {
     const events = [
       ...launch(1, "a"),
       ...launch(3, "b"),
-      ...launch(5, "c", {}),
+      ...launch(5, "c"),
       notification(7, "a", "first"),
       notification(8, "a", "second"),
       notification(9, "c", "stray"),
@@ -99,7 +99,7 @@ describe("deferred reports", () => {
     const events = [
       ...launch(1, "a"),
       notification(3, "a", "first", "t1"),
-      ...launch(4, "send", {}),
+      ...launch(4, "send"),
       notification(6, "send", "second", "t1"),
       notification(7, null, "third", "t1"),
     ];

@@ -23,9 +23,15 @@ const isReasoningMarker = (event: EventRecord) => event.kind === "system_note" &
 // the density shows of the notification itself.
 function withReports(items: TranscriptItem[], events: EventRecord[]): TranscriptItem[] {
   const reports = new Map<string, EventRecord>();
+  // A task may notify again naming only itself, not the call that started it.
+  const callOfTask = new Map<string, string>();
   for (const event of events) {
-    const callId = parseTaskNotification(event)?.toolUseId;
-    if (callId) reports.set(callId, event);
+    const note = parseTaskNotification(event);
+    if (!note) continue;
+    const callId = note.toolUseId ?? (note.taskId ? callOfTask.get(note.taskId) : undefined);
+    if (!callId) continue;
+    if (note.taskId) callOfTask.set(note.taskId, callId);
+    reports.set(callId, event);
   }
   const attach = (item: LeafItem): LeafItem => {
     if (item.kind !== "pair" || item.pair.result?.metadata.result_deferred !== true) return item;

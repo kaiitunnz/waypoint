@@ -45,11 +45,11 @@ describe("docked plan", () => {
 });
 
 describe("deferred reports", () => {
-  const notification = (sequence: number, callId: string, text: string) =>
+  const notification = (sequence: number, callId: string | null, text: string, taskId?: string) =>
     ev(sequence, "system_note", text, {
       method: "task_notification",
       visibility: "detail",
-      task_notification: { version: 1, id: text, kind: "agent", tool_use_id: callId },
+      task_notification: { version: 1, id: text, kind: "agent", tool_use_id: callId, task_id: taskId },
     });
   const launch = (sequence: number, id: string, extra: Record<string, unknown> = { result_deferred: true }) => [
     ev(sequence, "tool_call", "", { item_id: id, tool_name: "Agent" }),
@@ -80,5 +80,18 @@ describe("deferred reports", () => {
     for (const density of ["summary", "full"] as const) {
       expect(reportsOf(events, density)).toEqual({ a: "second", b: undefined, c: undefined });
     }
+  });
+
+  it("follows a task to a later notification that names no call", () => {
+    const events = [
+      ...launch(1, "a"),
+      ...launch(3, "b"),
+      notification(5, "a", "interim", "t1"),
+      notification(6, "b", "other", "t2"),
+      notification(7, null, "final", "t1"),
+      notification(8, null, "unknown task", "t3"),
+      notification(9, null, "no task"),
+    ];
+    expect(reportsOf(events, "summary")).toEqual({ a: "final", b: "other" });
   });
 });

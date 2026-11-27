@@ -541,13 +541,14 @@ def stringify_tool_result(content: Any) -> str:
 
 
 def deferred_result_metadata(tool_use_result: Any) -> dict[str, bool]:
-    """``result_deferred`` for a tool result that only acknowledges a launch, from
-    the CLI's structured record of the result. The call's outcome arrives later as
-    a task notification carrying its ``tool_use_id``.
+    """``result_deferred`` for a launch acknowledgement, whose outcome follows as a
+    task notification.
     """
-    if isinstance(tool_use_result, dict):
-        if tool_use_result.get("status") == "async_launched":
-            return {"result_deferred": True}
+    if (
+        isinstance(tool_use_result, dict)
+        and tool_use_result.get("status") == "async_launched"
+    ):
+        return {"result_deferred": True}
     return {}
 
 

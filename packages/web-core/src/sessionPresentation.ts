@@ -3,8 +3,7 @@ import { CLAUDE_MODEL_FAMILY_LABELS, formatResolvedModelLabel } from "./modelDis
 import { connectionLabel, type ConnectionState } from "./session/connection";
 import type { SessionRecord, SessionStatus } from "./types";
 
-// What a session is doing; an exited one draws no lamp. Lamps differ by shape and
-// fill as well as hue.
+// What a session is doing; an exited one draws no lamp.
 export type SessionLamp = "needs" | "working" | "error" | "idle" | "exited";
 
 export function isUnread(session: SessionRecord): boolean {

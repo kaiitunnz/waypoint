@@ -7,8 +7,7 @@ import { HOLD_MS } from "./useHoldMenu";
 // A finger that drifts further than this is scrolling, not pressing.
 const SLOP_PX = 10;
 
-// A held touch on an element. Its release does nothing, even on something the press
-// just opened over the element; a tap is left alone.
+// A held touch on an element; the release that ends it does nothing, and a tap is left alone.
 export function useLongPress(onLongPress: (element: Element) => void) {
   const timer = useRef<number | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);

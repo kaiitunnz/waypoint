@@ -6,8 +6,8 @@ import { pendingCallOf } from "./toolRun";
 import { isStandaloneToolCard, isToolResultDelta, minRawSequence } from "./transcript";
 import { lastRunIndex, runCallsOf, type TranscriptTurn } from "./turns";
 
-// An event carries the session's status as it was recorded, which is how a
-// transcript says where its turns start and end; one without a status says neither.
+// Turn boundaries come from the session status each event was recorded with; an
+// event without one marks neither.
 const ACTIVE = new Set(["starting", "running", "waiting_input"]);
 const ENDED = new Set(["idle", "interrupted", "error", "exited"]);
 const CUT_SHORT = new Set(["interrupted", "error", "exited"]);
@@ -48,7 +48,6 @@ function lastTurnEnd(events: readonly EventRecord[]): number {
 // A note about the session, which can be recorded as running between turns.
 const isNote = (event: EventRecord): boolean => event.kind === "system_note" || event.kind === "status_update";
 
-// The events since the turn before ended.
 function currentTurn(events: readonly EventRecord[]): { events: readonly EventRecord[]; bounded: boolean } {
   const end = lastTurnEnd(events);
   const since = events.slice(end + 1);
@@ -81,8 +80,8 @@ export type FetchOlderEvents = (beforeSequence: number) => Promise<{ events: Eve
 // Enough pages for all but the longest turns.
 const MAX_PAGES = 25;
 
-// The start of a turn that began before the loaded events, paged back to; null
-// when it is not within reach.
+// Pages back to the start of a turn that began before the loaded events; null when
+// it is out of reach.
 export async function findTurnStart(
   events: readonly EventRecord[],
   oldestSequence: number,
@@ -118,8 +117,8 @@ function hasLiveRun(turns: readonly TranscriptTurn[]): boolean {
   return item !== undefined && pendingCallOf(runCallsOf(item)) !== undefined;
 }
 
-// A call still running: no result, or only streamed output. A card of its own is
-// left out, since its call never records a result.
+// A call still running: no result, or only streamed output. Calls drawn as their
+// own card never record a result, so they are skipped.
 function runningCall(events: readonly EventRecord[]): EventRecord | undefined {
   const finished = new Set(
     events.filter((event) => event.kind === "tool_result" && !isToolResultDelta(event)).map(itemIdForEvent),
@@ -131,7 +130,7 @@ function runningCall(events: readonly EventRecord[]): EventRecord | undefined {
   });
 }
 
-const isSpoken = (event: EventRecord): boolean =>
+const isTurnContent = (event: EventRecord): boolean =>
   event.kind === "user_input" ||
   event.kind === "tool_call" ||
   event.kind === "tool_result" ||
@@ -147,7 +146,7 @@ export function workingStep(turns: readonly TranscriptTurn[], events: readonly E
     const tool = readToolName(call);
     return tool ? `Running ${toolBadgeFor(tool).label.toLowerCase()}` : null;
   }
-  const last = turn.findLast(isSpoken);
+  const last = turn.findLast(isTurnContent);
   if (last?.kind === "agent_output" && last.metadata?.item_kind !== "reasoning") return null;
   return "Thinking";
 }

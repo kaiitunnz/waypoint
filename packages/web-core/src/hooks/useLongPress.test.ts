@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOLD_MS } from "./useHoldMenu";
 import { useLongPress } from "./useLongPress";
 
-// The handlers of one rendered hook; they are all the hook does between renders.
+// The hook keeps its state in refs, so the handlers from one server render are enough.
 function press(onLongPress: () => void) {
   let handlers: ReturnType<typeof useLongPress> | undefined;
   function Probe() {
@@ -30,7 +30,7 @@ describe("useLongPress", () => {
     vi.useRealTimers();
   });
 
-  it("refuses the release of a long press, and no click after it", () => {
+  it("refuses the release of a long press and leaves a later click alone", () => {
     const onLongPress = vi.fn();
     const handlers = press(onLongPress);
     handlers.onPointerDown(down);
@@ -44,6 +44,16 @@ describe("useLongPress", () => {
     const later = click();
     handlers.onClickCapture(later as unknown as MouseEvent);
     expect(later.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("swallows the click of a long press whose release it never saw", () => {
+    const handlers = press(vi.fn());
+    handlers.onPointerDown(down);
+    vi.advanceTimersByTime(HOLD_MS);
+    const swallowed = click();
+    handlers.onClickCapture(swallowed as unknown as MouseEvent);
+    expect(swallowed.preventDefault).toHaveBeenCalledOnce();
+    expect(swallowed.stopPropagation).toHaveBeenCalledOnce();
   });
 
   it("leaves a tap alone", () => {

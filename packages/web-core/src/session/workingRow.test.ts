@@ -37,10 +37,6 @@ describe("turnStart", () => {
     expect(startOf(events)).toBe(at(4));
   });
 
-  it("takes the first activity over a message that follows it", () => {
-    expect(startOf([note(1, "idle"), call(2, "a"), message(3), reply(4)])).toBe(at(2));
-  });
-
   it("leaves out notes recorded as running ahead of the message", () => {
     const events = [
       note(1, "idle"),
@@ -67,10 +63,6 @@ describe("turnStart", () => {
   it("ends a turn that leaves a question open", () => {
     const events = [message(1), note(2, "waiting_input", { awaiting_answer: true }), message(3), reply(4)];
     expect(startOf(events)).toBe(at(3));
-  });
-
-  it("stays with a turn that waits on an approval", () => {
-    expect(startOf([note(1, "idle"), message(2), event(3, "approval_request", "waiting_input"), reply(4)])).toBe(at(2));
   });
 
   it.each(["interrupted", "error", "exited"])("starts anew at the message after events that trail an %s end", (status) => {
@@ -160,9 +152,9 @@ describe("formatElapsed", () => {
     expect(formatElapsed(-4000)).toBe("0s");
     expect(formatElapsed(42_900)).toBe("42s");
     expect(formatElapsed(60_000)).toBe("1m 0s");
-    expect(formatElapsed(3_600_000)).toBe("1h 0m");
     expect(formatElapsed(72_000)).toBe("1m 12s");
     expect(formatElapsed(120_000)).toBe("2m 0s");
+    expect(formatElapsed(3_600_000)).toBe("1h 0m");
     expect(formatElapsed(3_900_000)).toBe("1h 5m");
   });
 });

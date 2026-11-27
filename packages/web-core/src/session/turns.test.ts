@@ -97,6 +97,9 @@ describe("lastRunIndex", () => {
     expect(lastRunIndex(turn)).toBe(0);
   });
 
+});
+
+describe("runCallsOf", () => {
   it("counts a tool pair standing alone", () => {
     const [pair] = buildTranscriptItems([call(1, "a")]).flatMap((item) => (item.kind === "tool_run" ? item.items : []));
     expect(runCallsOf(pair)).toEqual([pair]);

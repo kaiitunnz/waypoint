@@ -295,7 +295,6 @@ function argumentLines(tool: string | null, input: Record<string, unknown> | nul
   }
 }
 
-// The latest call of a run that has no result yet.
 export function pendingCallOf(items: readonly LeafItem[]): LeafItem | undefined {
   return items.findLast((child) => (child.kind === "pair" ? !child.pair.result : child.event.kind === "tool_call"));
 }

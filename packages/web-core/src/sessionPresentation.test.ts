@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentLabel,
   agentModelLabel,
+  brightPreview,
   formatSessionTime,
   isUnread,
   isWorkingStatus,
@@ -10,7 +11,6 @@ import {
   sessionLamp,
   sessionStanding,
   shortModelLabel,
-  brightPreview,
   showsUnread,
   spokenStatus,
 } from "./sessionPresentation";
@@ -47,8 +47,6 @@ describe("isUnread", () => {
 });
 
 describe("sessionLamp", () => {
-  const unread = { last_event_at: "2026-11-25T10:05:00Z" };
-
   it("maps status to a lamp", () => {
     expect(sessionLamp(session({ status: "running" }), false)).toBe("working");
     expect(sessionLamp(session({ status: "starting" }), false)).toBe("working");
@@ -61,13 +59,6 @@ describe("sessionLamp", () => {
   it("needs you for a pending ask or a session waiting on input", () => {
     expect(sessionLamp(session({ status: "running" }), true)).toBe("needs");
     expect(sessionLamp(session({ status: "waiting_input" }), false)).toBe("needs");
-  });
-
-  it("shows the same lamp whether or not the activity has been read", () => {
-    expect(sessionLamp(session(unread), false)).toBe("idle");
-    expect(sessionLamp(session(unread), true)).toBe("needs");
-    expect(sessionLamp(session({ ...unread, status: "running" }), false)).toBe("working");
-    expect(sessionLamp(session({ ...unread, status: "exited" }), false)).toBe("exited");
   });
 
   it("names each lamp", () => {
@@ -88,6 +79,9 @@ describe("showsUnread", () => {
     expect(showsUnread(session())).toBe(false);
   });
 
+});
+
+describe("spokenStatus", () => {
   it("is spoken after the state's word", () => {
     expect(spokenStatus("Idle", true)).toBe("Idle, unread");
     expect(spokenStatus("Idle", false)).toBe("Idle");

@@ -28,7 +28,7 @@ describe("rankSessionsForSwitcher", () => {
   ];
   const asks = new Set(["ask", "pin"]);
 
-  it("keeps the section order with a blank query, newest first inside a section", () => {
+  it("keeps the section order with a blank query", () => {
     const entries = rankSessionsForSwitcher(sessions, asks, "");
     expect(entries.map((e) => [e.session.id, e.section])).toEqual([
       ["ask", "needs"],
@@ -62,8 +62,10 @@ describe("rankSessionsForSwitcher", () => {
     const entries = rankSessionsForSwitcher(sessions, asks, "fix");
     expect(ids(entries)).toEqual(["ask"]);
     expect(entries[0].positions).toEqual([0, 1, 2]);
-    expect(ids(rankSessionsForSwitcher(sessions, asks, "pa"))).toEqual(["pin", "pin-gone"]);
-    expect(rankSessionsForSwitcher(sessions, asks, "pa").map((e) => e.section)).toEqual(["needs", "exited"]);
+    expect(rankSessionsForSwitcher(sessions, asks, "pa").map((e) => [e.session.id, e.section])).toEqual([
+      ["pin", "needs"],
+      ["pin-gone", "exited"],
+    ]);
     expect(ids(rankSessionsForSwitcher(sessions, asks, "hmka"))).toEqual(["live-old"]);
   });
 

@@ -1,22 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { connectInboxSocket, connectSessionSocket, connectSessionsSocket } from "./api";
-import { inboxRelativeTime } from "./inbox";
-import { formatRelative } from "./scheduleTime";
-import {
-  estimateClockOffset,
-  serverClockOffset,
-  serverNow,
-  subscribeServerClock,
-  syncServerClock,
-} from "./serverClock";
-import { schedulePreview } from "./session/scheduleMessage";
+import { formatInboxTime, inboxRelativeTime, updatedToday } from "./inbox";
+import { formatThreadTime } from "./launch/threads";
+import { formatClock, formatRelative } from "./scheduleTime";
+import { serverClockOffset, serverNow, subscribeServerClock, syncServerClock } from "./serverClock";
+import { relativeFromNow, schedulePreview } from "./session/scheduleMessage";
 import { schedulePollIntervalMs } from "./session/scheduledMessages";
 import { formatElapsed } from "./session/workingRow";
 import { formatSessionTime } from "./sessionPresentation";
 import { formatRelativeTime } from "./usage";
-import { formatResetsIn } from "./usageSummary";
-import type { MessageSchedule } from "./types";
+import {
+  accountWindows,
+  formatResetsIn,
+  formatShortWhen,
+  mostConstrainedWindow,
+  summarizeScheduled,
+} from "./usageSummary";
+import type { InboxItem, MessageSchedule, ScheduledSession, UsageDashboardBucket } from "./types";
 
 // The server's clock, mid-second so the header's truncation shows.
 const SERVER = Date.parse("2026-11-27T12:00:00.400Z");
@@ -42,32 +43,73 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("estimateClockOffset", () => {
-  const sent = SERVER;
-  const received = SERVER + 100;
-
-  it("reads agreeing clocks as no offset, whatever the header's truncation", () => {
-    expect(estimateClockOffset(header(SERVER), sent, received)).toBe(0);
-    expect(estimateClockOffset(header(SERVER - 1000), sent, received)).toBe(0);
+describe("syncServerClock", () => {
+  it("reads agreeing clocks as no offset, whatever the header's truncation", async () => {
+    vi.setSystemTime(SERVER);
+    for (const at of [SERVER, SERVER - 1000]) {
+      serve(at);
+      await syncServerClock(freshHost());
+      expect(serverClockOffset()).toBe(0);
+    }
   });
 
   it.each([
     ["fast", MINUTES_3],
     ["slow", -MINUTES_3],
-  ])("measures a client three minutes %s", (_, skew) => {
-    const offset = estimateClockOffset(header(SERVER), sent + skew, received + skew);
-    expect(Math.abs(offset + skew)).toBeLessThanOrEqual(2000);
+  ])("measures a client three minutes %s", async (_, skew) => {
+    vi.setSystemTime(SERVER + skew);
+    serve(SERVER);
+    await syncServerClock(freshHost());
+    expect(Math.abs(serverClockOffset() + skew)).toBeLessThanOrEqual(2000);
     // Erring late: the corrected clock never trails the server's.
-    expect(received + skew + offset).toBeGreaterThanOrEqual(received);
+    expect(serverNow()).toBeGreaterThanOrEqual(SERVER);
   });
 
-  it("reads no offset without a readable date", () => {
-    expect(estimateClockOffset(null, sent + MINUTES_3, received + MINUTES_3)).toBe(0);
-    expect(estimateClockOffset("soon", sent + MINUTES_3, received + MINUTES_3)).toBe(0);
+  it("holds the offset when a later header says less", async () => {
+    vi.setSystemTime(SERVER + MINUTES_3);
+    const host = freshHost();
+    serve(SERVER - 1000);
+    await syncServerClock(host);
+    const held = serverClockOffset();
+    serve(SERVER);
+    await syncServerClock(host);
+    expect(serverClockOffset()).toBe(held);
   });
-});
 
-describe("syncServerClock", () => {
+  it("narrows the offset by every header from the host", async () => {
+    // The server is a second ahead.
+    vi.setSystemTime(SERVER - 1000);
+    const host = freshHost();
+    const read = async (at: number) => {
+      serve(at);
+      await syncServerClock(host);
+      return serverClockOffset();
+    };
+    expect(await read(SERVER - 1000)).toBe(0);
+    expect(await read(SERVER)).toBe(1600);
+    expect(await read(SERVER - 1000)).toBe(1600);
+  });
+
+  it("reads a new host's headers without the last host's", async () => {
+    vi.setSystemTime(SERVER - 1000);
+    serve(SERVER - 1000);
+    await syncServerClock(freshHost());
+    serve(SERVER);
+    await syncServerClock(freshHost());
+    expect(serverClockOffset()).toBe(2600);
+  });
+
+  it("starts again from a header that contradicts the earlier ones", async () => {
+    vi.setSystemTime(SERVER + MINUTES_3);
+    const host = freshHost();
+    serve(SERVER);
+    await syncServerClock(host);
+    // The client's clock is corrected.
+    vi.setSystemTime(SERVER);
+    await syncServerClock(host);
+    expect(serverClockOffset()).toBe(0);
+  });
+
   it("corrects serverNow and tells subscribers once", async () => {
     vi.setSystemTime(SERVER + MINUTES_3);
     serve(SERVER);
@@ -238,6 +280,40 @@ describe.each([
     const due = (ahead: number) => [{ scheduled_at: new Date(SERVER + ahead).toISOString() } as MessageSchedule];
     expect(schedulePollIntervalMs(due(10_000))).toBe(4_000);
     expect(schedulePollIntervalMs(due(120_000))).toBe(15_000);
+  });
+
+  it("counts account windows and queued schedules from the server's clock", () => {
+    const inAnHour = new Date(SERVER + 3_600_000).toISOString();
+    const bucket = {
+      account_label: "Max",
+      snapshot: { windows: [{ id: "w", label: "5h", used_percent: 10, resets_at: inAnHour }] },
+    } as UsageDashboardBucket;
+    expect(accountWindows(bucket)[0].resetsIn).toBe("1h");
+    expect(mostConstrainedWindow([bucket])?.resetsIn).toBe("1h");
+
+    const soon = new Date(SERVER + 600_000).toISOString();
+    expect(formatShortWhen(soon)).toBe("in 10m");
+    const schedule = { id: "s", status: "pending", scheduled_at: soon, cwd: "/", backend: "codex" } as ScheduledSession;
+    expect(summarizeScheduled([schedule], [], new Map()).items[0].whenLabel).toBe("in 10m");
+  });
+
+  it("ages a thread and a send time from the server's clock", () => {
+    const earlier = new Date(SERVER - 600_000).toISOString();
+    expect(formatThreadTime(earlier)).toBe(formatThreadTime(earlier, SERVER));
+    expect(relativeFromNow(new Date(SERVER + 600_000))).toBe("in 10 min");
+  });
+
+  it("takes today from the server's clock", async () => {
+    // A minute from midnight, on the side the client's own clock has not reached or has left.
+    const server = new Date(2026, 10, 28).getTime() - Math.sign(skew) * 60_000;
+    vi.setSystemTime(server + skew);
+    serve(server);
+    await syncServerClock(freshHost());
+    const written = new Date(server - 30_000);
+    const item = { updated_at: written.toISOString() } as InboxItem;
+    expect(updatedToday([item])).toEqual([item]);
+    expect(formatInboxTime(item.updated_at)).toMatch(/^Today at /);
+    expect(formatClock(written)).toBe(written.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" }));
   });
 
   it("previews a picked time by the server's clock and a delay by itself", () => {

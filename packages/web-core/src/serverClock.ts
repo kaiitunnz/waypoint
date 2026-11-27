@@ -9,6 +9,8 @@ const MAX_ROUND_TRIP_MS = 5_000;
 
 // The server's clock minus this client's, in ms.
 let offset = 0;
+// What the headers read from the host so far allow the offset to be.
+let bounds: { least: number; most: number } | null = null;
 let measured: string | null = null;
 const listeners = new Set<() => void>();
 const inFlight = new Map<string, Promise<void>>();
@@ -31,23 +33,32 @@ export function subscribeServerClock(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-// The offset one `Date` header shows, from a request sent and answered at these client
-// times; 0 where it cannot tell the clocks apart or has no readable date.
-export function estimateClockOffset(date: string | null, sentAt: number, receivedAt: number): number {
-  const header = date ? Date.parse(date) : Number.NaN;
-  // A server that does not expose its `Date` is taken to agree.
-  if (!Number.isFinite(header)) return 0;
-  const least = header - receivedAt;
-  const most = header + DATE_LAG_MS - sentAt;
-  if (least <= 0 && most >= 0) return 0;
-  // The later reading, so a time the server has just written never reads as the future.
-  return Math.round(header + DATE_LAG_MS - (sentAt + receivedAt) / 2);
-}
-
 function setOffset(next: number): void {
   if (next === offset) return;
   offset = next;
   for (const listener of listeners) listener();
+}
+
+// Takes in the `Date` header of a request sent and answered at these client times, and
+// gives the offset the headers so far show.
+function readDate(date: string | null, sentAt: number, receivedAt: number): number {
+  const header = date ? Date.parse(date) : Number.NaN;
+  // A server that does not expose its `Date` is taken to agree.
+  if (!Number.isFinite(header)) {
+    bounds = null;
+    return 0;
+  }
+  let least = header - receivedAt;
+  let most = header + DATE_LAG_MS - sentAt;
+  // Headers narrow one another while they overlap; one that does not means a clock moved.
+  if (bounds && least <= bounds.most && most >= bounds.least) {
+    least = Math.max(least, bounds.least);
+    most = Math.min(most, bounds.most);
+  }
+  bounds = { least, most };
+  if (least <= 0 && most >= 0) return 0;
+  // The latest the server can be, so a time it has just written never reads as the future.
+  return most;
 }
 
 async function measure(host: string): Promise<void> {
@@ -67,12 +78,13 @@ async function measure(host: string): Promise<void> {
   if (receivedAt - sentAt > MAX_ROUND_TRIP_MS) return;
   // Another host was connected to meanwhile.
   if (measured !== host) return;
-  setOffset(estimateClockOffset(date, sentAt, receivedAt));
+  setOffset(readDate(date, sentAt, receivedAt));
 }
 
 export function syncServerClock(host: string): Promise<void> {
   if (measured !== host) {
     measured = host;
+    bounds = null;
     setOffset(0);
   }
   const running = inFlight.get(host);

@@ -7,9 +7,11 @@ import pytest
 
 from claude_tty_transcripts import FIXTURES
 from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
+from waypoint.backends.claude_code.turn_boundaries import ExpectedInterrupt
 from waypoint.backends.claude_tty import transport as transport_mod
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
+from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.transports import InputBlockedError
 
 RULE = "─" * 100
@@ -85,19 +87,40 @@ async def test_drawn_composer_takes_the_message() -> None:
     assert tmux.type_input.await_count + tmux.send_input.await_count == 1
 
 
+def _resumable(holds_input: bool) -> tuple[ClaudeTtyTransport, MagicMock, MagicMock]:
+    ready = (FIXTURES / "ready.txt").read_text()
+    # The prompt is followed by a no-break space.
+    typed = ready.replace('❯\xa0Try "fix typecheck errors"', "❯\xa0msg")
+    assert typed != ready
+    return _transport(typed if holds_input else ready)
+
+
+def _expect_interrupt(transport: ClaudeTtyTransport) -> ExpectedInterrupt:
+    expected = ExpectedInterrupt()
+    expected.arm()
+    transport._plugin.expected_interrupt = MagicMock(return_value=expected)  # type: ignore[method-assign]
+    return expected
+
+
 @pytest.mark.parametrize("holds_input", [True, False])
 async def test_resume_supersedes_an_interrupt_only_when_it_submits(
     holds_input: bool,
 ) -> None:
-    ready = (FIXTURES / "ready.txt").read_text()
-    # The prompt is followed by a no-break space.
-    typed = ready.replace('❯\xa0Try "fix typecheck errors"', "❯\xa0msg")
-    transport, _tmux, session = _transport(typed if holds_input else ready)
-    expected = MagicMock()
-    transport._plugin.expected_interrupt = MagicMock(return_value=expected)  # type: ignore[method-assign]
+    transport, _tmux, session = _resumable(holds_input)
+    expected = _expect_interrupt(transport)
 
     assert await transport.resume(session) is holds_input
-    assert expected.supersede.call_count == int(holds_input)
+    assert expected.unanswered is not holds_input
+
+
+async def test_a_failed_resume_leaves_the_interrupt_expected() -> None:
+    transport, tmux, session = _resumable(True)
+    tmux.resume.side_effect = TmuxError("pane gone")
+    expected = _expect_interrupt(transport)
+
+    with pytest.raises(TmuxError):
+        await transport.resume(session)
+    assert expected.unanswered
 
 
 async def test_the_submit_budget_outlasts_image_ingestion() -> None:

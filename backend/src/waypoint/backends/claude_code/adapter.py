@@ -696,17 +696,17 @@ class ClaudeCliAdapter:
             raise ClaudeCliError(
                 self._format_dead_process_error(state, state.process.returncode)
             )
-        state.expected_interrupt.supersede()
         envelope = {
             "type": "user",
             "message": {"role": "user", "content": _user_content(text, attachments)},
         }
         line = (json.dumps(envelope) + "\n").encode("utf-8")
-        state.process.stdin.write(line)
-        try:
-            await state.process.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError) as exc:
-            raise ClaudeCliError(f"claude stdin write failed: {exc}") from exc
+        with state.expected_interrupt.superseding():
+            state.process.stdin.write(line)
+            try:
+                await state.process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError) as exc:
+                raise ClaudeCliError(f"claude stdin write failed: {exc}") from exc
 
     async def interrupt(self, session_id: str) -> None:
         state = self._require_session(session_id)

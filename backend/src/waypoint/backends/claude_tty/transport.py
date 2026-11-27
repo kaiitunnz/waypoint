@@ -17,6 +17,7 @@ Thin subclass of ``TmuxTransport`` that overrides:
 
 import asyncio
 import logging
+from contextlib import AbstractContextManager, nullcontext
 from typing import TYPE_CHECKING
 
 from waypoint.attachments import ResolvedAttachment
@@ -77,8 +78,8 @@ class ClaudeTtyTransport(TmuxTransport):
     ) -> None:
         # Before the send, which waits long enough for the tailer to read an
         # earlier interrupt's marker.
-        self._supersede_interrupt(session)
-        await super().send_input(session, text, attachments)
+        with self._superseding_interrupt(session):
+            await super().send_input(session, text, attachments)
         if text.split(maxsplit=1)[:1] != [_CLEAR_COMMAND]:
             return
         if await self._plugin.follow_clear(self._runtime, session.id):
@@ -146,9 +147,10 @@ class ClaudeTtyTransport(TmuxTransport):
                 snapshot
             ) or not pane_dialog.composer_drawn(snapshot):
                 raise InputBlockedError()
-            if submits := pane_dialog.composer_holds_input(snapshot):
-                self._supersede_interrupt(session)
-            await self.adapter.resume(target)
+            submits = pane_dialog.composer_holds_input(snapshot)
+            # Only an Enter that submits input moves past an interrupt.
+            with self._superseding_interrupt(session) if submits else nullcontext():
+                await self.adapter.resume(target)
         return submits
 
     async def interrupt(self, session: SessionRecord) -> None:
@@ -171,9 +173,11 @@ class ClaudeTtyTransport(TmuxTransport):
         # outlived its card.
         await self._ensure_dialog_dismissed(target)
 
-    def _supersede_interrupt(self, session: SessionRecord) -> None:
-        if expected := self._plugin.expected_interrupt(session.id):
-            expected.supersede()
+    def _superseding_interrupt(
+        self, session: SessionRecord
+    ) -> AbstractContextManager[None]:
+        expected = self._plugin.expected_interrupt(session.id)
+        return expected.superseding() if expected else nullcontext()
 
     async def _ensure_dialog_dismissed(self, target: str) -> None:
         for _ in range(_INTERRUPT_ESC_RETRIES):

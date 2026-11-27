@@ -36,12 +36,14 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     LaunchSettingsUpdateRequest,
+    SessionInputRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
 )
 from waypoint.settings import Settings
 from waypoint.storage import Storage
+from waypoint.transports import InputBlockedError
 
 FIXTURES = Path(__file__).parent / "fixtures" / "claude_status"
 INTERRUPTED = "Interrupted"
@@ -226,10 +228,28 @@ def test_the_stopped_turns_own_prompt_keeps_the_interrupt_expected() -> None:
     ]
 
 
+def send_past(expected: turn_boundaries.ExpectedInterrupt) -> None:
+    """A send that goes through."""
+    with expected.superseding():
+        pass
+
+
+def test_a_failed_send_keeps_an_interrupt_armed_during_it() -> None:
+    expected = turn_boundaries.ExpectedInterrupt()
+    expected.arm()
+    send_past(expected)
+    with pytest.raises(InputBlockedError), expected.superseding():
+        # A Stop while the send waits.
+        expected.arm()
+        raise InputBlockedError()
+
+    assert expected.unanswered
+
+
 def test_a_superseded_interrupt_moves_nothing() -> None:
     norm = TranscriptNormalizer()
     norm.expected_interrupt.arm()
-    norm.expected_interrupt.supersede()
+    send_past(norm.expected_interrupt)
 
     assert feed(norm, [marker()]) == []
     assert notes(feed(norm, [marker()])) == [(INTERRUPTED, SessionStatus.IDLE)]
@@ -238,7 +258,7 @@ def test_a_superseded_interrupt_moves_nothing() -> None:
 def test_an_interrupt_that_wrote_no_marker_is_forgotten_at_the_next_prompt() -> None:
     norm = TranscriptNormalizer()
     norm.expected_interrupt.arm()
-    norm.expected_interrupt.supersede()
+    send_past(norm.expected_interrupt)
     events = feed(norm, [human_prompt("again"), marker()])
 
     assert notes(events) == [(INTERRUPTED, SessionStatus.IDLE)]
@@ -267,7 +287,7 @@ def test_a_send_after_stop_lets_the_next_record_start_a_turn(
 ) -> None:
     norm = TranscriptNormalizer()
     norm.expected_interrupt.arm()
-    norm.expected_interrupt.supersede()
+    send_past(norm.expected_interrupt)
 
     assert feed(norm, [turn_start])[-1].status is SessionStatus.RUNNING
 
@@ -290,7 +310,7 @@ def test_a_queued_prompt_written_ahead_of_the_marker(
     if stopped:
         norm.expected_interrupt.arm()
     if sent_since:
-        norm.expected_interrupt.supersede()
+        send_past(norm.expected_interrupt)
     events = feed(
         norm, [human_prompt("next", "queued"), rejection("a"), marker(TOOL_MARKER)]
     )
@@ -540,6 +560,28 @@ async def test_a_send_after_stop_keeps_the_new_turn_running(
 
     assert status_of(tty.runtime) is SessionStatus.RUNNING
     assert note_texts(tty.runtime) == ["Sent interrupt"]
+
+
+async def test_a_failed_send_leaves_the_stopped_turn_interrupted(
+    tty: _Tty, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = records("tty_interrupt_tool")
+    await tty.read(rows[:3])
+    await tty.runtime.interrupt("s1")
+    # A dialog opens while the send waits for the composer.
+    monkeypatch.setattr(
+        tty.transport, "_await_pane_ready", AsyncMock(side_effect=InputBlockedError())
+    )
+    with pytest.raises(InputBlockedError):
+        await tty.runtime.handle_input("s1", SessionInputRequest(text="next"))
+    # The tailer reads the cut turn's records only now.
+    await tty.read(rows[3:])
+
+    assert status_of(tty.runtime) is SessionStatus.INTERRUPTED
+    assert note_texts(tty.runtime) == [
+        "Sent interrupt",
+        "Message not delivered: a dialog opened first",
+    ]
 
 
 async def test_a_late_notification_leaves_an_idle_session_idle(tty: _Tty) -> None:

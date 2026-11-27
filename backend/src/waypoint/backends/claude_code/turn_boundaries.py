@@ -4,6 +4,8 @@ Shared by the structured adapter, the claude_tty normalizer and history import.
 """
 
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any
@@ -137,9 +139,20 @@ class ExpectedInterrupt:
         self._deadline = time.monotonic() + _EXPECTED_INTERRUPT_SECONDS
         self._superseded = False
 
-    def supersede(self) -> None:
-        """Waypoint is sending input past the interrupt."""
+    @contextmanager
+    def superseding(self) -> Iterator[None]:
+        """Wraps Waypoint sending input past the interrupt. A send that raises
+        takes the supersede back, as its input started no turn.
+        """
+        deadline, superseded = self._deadline, self._superseded
         self._superseded = True
+        try:
+            yield
+        except Exception:
+            # An interrupt armed during the send keeps its own state.
+            if self._deadline == deadline:
+                self._superseded = superseded
+            raise
 
     def forget_superseded(self) -> None:
         """A prompt was typed. A superseded interrupt's marker precedes it, so one

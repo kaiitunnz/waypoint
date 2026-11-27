@@ -30,9 +30,17 @@ _FILE_HEADINGS: dict[str, frozenset[str]] = {
     "Read file": frozenset({"Read"}),
 }
 _NEW_FILE_HEADINGS = frozenset({"Create file", "Write file"})
+# How a notebook dialog words each ``edit_mode``.
+_NOTEBOOK_CHANGES = {
+    "replace": "Replace cell contents",
+    "insert": "Insert new cell",
+    "delete": "Delete cell",
+}
 _NUMBERED_RE = re.compile(r"^ *(\d+)(?: (.*))?$")
 _DIFF_LINE_RE = re.compile(r"^ *(\d+) ([-+ ])(.*)$")
 _HUNK_BREAKS = frozenset({"...", "…", "⋮"})
+# The diff row noting that a file does not end in a newline.
+_NO_NEWLINE = "\\ No newline"
 # Unchanged lines a diff shows around a change, unless the file ends sooner.
 _DIFF_CONTEXT = 3
 _ARGUMENT_RE = re.compile(r"^\s*([\w-]+):(?:\s(.*))?$")
@@ -193,11 +201,31 @@ def _file_matches(dialog: ApprovalDialog, heading: str, call: PendingCall) -> bo
             edits = call.input.get("edits")
             return isinstance(edits, list) and _edits_match(body, edits)
         case "NotebookEdit":
-            # The diff is of the cell, numbered from its first line.
-            source = call.input.get("new_source")
-            return isinstance(source, str) and _overwrite_matches(body, source)
+            return _notebook_matches(dialog, call)
         case _:
             return True
+
+
+def _notebook_matches(dialog: ApprovalDialog, call: PendingCall) -> bool:
+    mode = str(call.input.get("edit_mode") or "replace")
+    if mode not in _NOTEBOOK_CHANGES:
+        return False
+    change = f"{_NOTEBOOK_CHANGES[mode]} for cell {call.input.get('cell_id')}"
+    typed = f"{change} ({call.input.get('cell_type')})"
+    if not any(line.strip() in (change, typed) for line in dialog.header):
+        return False
+    if mode == "delete":
+        return True
+    source = call.input.get("new_source")
+    if not isinstance(source, str):
+        return False
+    body = dialog.body or []
+    if mode == "insert":
+        return _new_file_matches(body, source)
+    # A replacement is drawn as a diff of the cell. Without an added line it may
+    # be plain numbered code, whose lines can start with "-" themselves.
+    added = any(marker == "+" for _, marker, _ in _diff_entries(body))
+    return added and _overwrite_matches(body, source)
 
 
 def _path_matches(shown: str, path: str, call: PendingCall) -> bool:
@@ -244,7 +272,7 @@ def _diff_entries(body: list[str]) -> list[tuple[int, str, list[str]]]:
     # Where the markers stand, the same on every line of one diff.
     column = 0
     for line in body:
-        if line.strip() in _HUNK_BREAKS:
+        if line.strip() in _HUNK_BREAKS or line.strip().startswith(_NO_NEWLINE):
             continue
         match = _DIFF_LINE_RE.match(line.rstrip())
         if match and column in (0, match.start(2)):

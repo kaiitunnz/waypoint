@@ -291,6 +291,84 @@ def test_diff_dialogs_as_claude_draws_them(
     assert match_call(dialog, [call]) is not None
 
 
+def _notebook(**tool_input: Any) -> PendingCall:
+    return _call("NotebookEdit", {"notebook_path": f"{CWD}/nb.ipynb", **tool_input})
+
+
+BULLETS = {
+    "cell_id": "c1",
+    "edit_mode": "insert",
+    "cell_type": "markdown",
+    "new_source": "- list the buckets\n- done",
+}
+
+
+@pytest.mark.parametrize(
+    ("fixture", "tool_input", "matches"),
+    [
+        ("approval_notebook_insert.txt", BULLETS, True),
+        # Numbered code, so a line's leading "-" is the cell's own.
+        (
+            "approval_notebook_insert.txt",
+            {**BULLETS, "new_source": "- delete the bucket\n- done"},
+            False,
+        ),
+        ("approval_notebook_insert.txt", {**BULLETS, "cell_id": "c9"}, False),
+        ("approval_notebook_insert.txt", {**BULLETS, "edit_mode": "replace"}, False),
+        (
+            "approval_notebook_delete.txt",
+            {"cell_id": "c2", "edit_mode": "delete", "new_source": ""},
+            True,
+        ),
+        (
+            "approval_notebook_delete.txt",
+            {"cell_id": "c1", "edit_mode": "delete", "new_source": ""},
+            False,
+        ),
+        (
+            "approval_notebook_delete.txt",
+            {"cell_id": "c2", "new_source": "print('bye')"},
+            False,
+        ),
+    ],
+)
+def test_notebook_dialog_names_the_change_it_words(
+    fixture: str, tool_input: dict[str, Any], matches: bool
+) -> None:
+    match = match_call(_dialog(fixture), [_notebook(**tool_input)])
+    assert (match is not None) is matches
+
+
+@pytest.mark.parametrize(
+    ("middle", "matches"), [("- delete the bucket", True), ("- list it", False)]
+)
+def test_a_bulleted_line_of_a_new_cell_is_not_a_removed_line(
+    middle: str, matches: bool
+) -> None:
+    dialog = _dialog(
+        "approval_notebook_insert.txt",
+        (
+            "  1 - list the buckets\n  2 - done",
+            "  1 a\n  2 - delete the bucket\n  3 c",
+        ),
+    )
+    call = _notebook(**{**BULLETS, "new_source": f"a\n{middle}\nc"})
+    assert (match_call(dialog, [call]) is not None) is matches
+
+
+def test_the_no_newline_row_is_not_part_of_the_diff() -> None:
+    dialog = _dialog(
+        "approval_edit.txt",
+        (" 4  gamma\n", " 4  gamma\n    \\ No newline at end of file\n"),
+    )
+    tool_input = {
+        "file_path": f"{CWD}/notes.txt",
+        "old_string": "beta",
+        "new_string": "BETA",
+    }
+    assert match_call(dialog, [_call("Edit", tool_input)]) is not None
+
+
 def test_wrapped_diff_lines_still_have_to_agree() -> None:
     tool_input = {
         "file_path": f"{CWD}/wrap.py",

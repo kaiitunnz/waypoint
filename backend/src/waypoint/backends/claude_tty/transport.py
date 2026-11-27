@@ -214,11 +214,12 @@ class ClaudeTtyTransport(TmuxTransport):
             async with self._input_lock(session):
                 # A key pressed on a dialog that has moved on would answer a
                 # request the human never saw.
-                if not await self._plugin.still_shows(session.id, pending):
+                shows = await self._plugin.still_shows(session.id, pending)
+                if self._plugin._pending_approvals.get(session.id) is not pending:
+                    return False  # interrupted or replaced meanwhile
+                if not shows:
                     await self._refuse_reply(session)
                     return False
-                if self._plugin._pending_approvals.get(session.id) is not pending:
-                    return False  # interrupted meanwhile
                 await self._press(session, pending, approve)
         except Exception:
             # Nothing reached the dialog: keep it answerable.

@@ -4,6 +4,7 @@ Captured panes against fake transcripts on disk, through the tailer that raises
 the ask and the transport that replies to it.
 """
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -304,6 +305,29 @@ async def test_reply_is_refused_when_the_pane_moves_during_its_reads(
 
     assert await pane.reply() is False
     pane.assert_no_keys()
+
+
+async def test_refusal_leaves_a_card_raised_during_the_reply_alone(
+    tmp_path: Path,
+) -> None:
+    pane = Pane(tmp_path, "approval_bash_boxed.txt")
+    append(pane.main, use("first", "Bash", BASH))
+    await pane.poll()
+    reads = pane.tailer._calls
+    candidates = reads.candidates
+    newer = replace(pane.plugin._pending_approvals["s1"], approval_id="newer")
+
+    def replaced(agent: str | None) -> list[PendingCall]:
+        pane.plugin._pending_approvals["s1"] = newer
+        pane.screen = _screen("ready.txt")
+        return candidates(agent)
+
+    reads.candidates = replaced  # type: ignore[method-assign]
+
+    assert await pane.reply() is False
+    pane.assert_no_keys()
+    assert pane.notes == []
+    assert pane.plugin._pending_approvals["s1"] is newer
 
 
 async def test_reply_in_flight_leaves_the_card_alone(tmp_path: Path) -> None:

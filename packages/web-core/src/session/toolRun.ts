@@ -253,7 +253,7 @@ export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
   });
 
   const read = (counts.get("read") ?? 0) + (counts.get("search") ?? 0);
-  const chips: RunGlyph[] = [
+  const glyphs: RunGlyph[] = [
     { glyph: "▤", label: "Reads and searches", count: read, family: familyOf("read") },
     { glyph: "✎", label: "Edited files", count: edits, family: familyOf("edit") },
     { glyph: "›_", label: "Commands", count: counts.get("bash") ?? 0, family: familyOf("bash") },
@@ -263,8 +263,7 @@ export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
     { glyph: "◉", label: "Watched tasks", count: counts.get("monitor") ?? 0, family: familyOf("monitor") },
     // Web calls count here with every other tool, so the chip has no one family.
     { glyph: "ƒ", label: "Other tools", count: (counts.get("web") ?? 0) + (counts.get("other") ?? 0), family: null },
-  ];
-  const glyphs = chips.filter((entry) => entry.count > 0);
+  ].filter((entry) => entry.count > 0);
 
   return { phrase: sentence(parts), glyphs, additions, deletions };
 }
@@ -349,7 +348,7 @@ function argumentLines(
     case "skill":
     case "monitor":
     case "followup":
-    case "other":
+    case "other": {
       // An argument the heading already says is left out; a command never is. A summary
       // is one line, so the argument is compared as one.
       const said = (value: unknown) =>
@@ -360,6 +359,7 @@ function argumentLines(
           .map(([name, value]) => `${name}: ${text(value)}`)
           .join("\n") || null
       );
+    }
     default:
       return null;
   }
@@ -430,21 +430,20 @@ export function pendingCallOf(items: readonly LeafItem[]): LeafItem | undefined 
   return items.findLast((child) => (child.kind === "pair" ? !child.pair.result : child.event.kind === "tool_call"));
 }
 
-// A command's first line, marked when more follow.
 function oneLine(command: string | null): string | null {
   const { text, hidden } = foldLines(command?.trim() ?? "", 1);
   if (!text) return null;
   return hidden > 0 ? `${text.trimEnd()} …` : text;
 }
 
-// Only a Bash call's command is marked as a shell command, the same in an open row
-// and on the live line; Monitor and PowerShell rows read as `name: value` arguments.
+// Only a Bash call counts: Monitor and PowerShell calls read as `name: value` arguments.
 const isShellTool = (tool: string | null): boolean => categoryOf(tool) === "bash";
 
 export interface LiveCall {
   step: Step | null;
-  // The agent's description of the call, and the command it runs on one line.
+  // The agent's description of the call.
   summary: string | null;
+  // What the call runs, on one line.
   command: string | null;
   // The command is a shell command.
   shell: boolean;

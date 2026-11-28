@@ -27,7 +27,7 @@ export function ShellPrompt({ className }: { className?: string }) {
   );
 }
 
-// A command clipped to one line, under a heading. `shell` marks a shell command.
+// A command clipped to one line.
 export function CommandLine({ text, shell }: { text: string; shell: boolean }) {
   return (
     <span className={styles.line}>
@@ -48,15 +48,15 @@ export function CommandText({ text, whole }: { text: string; whole?: boolean }) 
       <Lines text={foldLines(text, Infinity).text} />
     </div>
   ) : (
-    <FoldedCommand text={text} className={styles.mono} />
+    <FoldedCommand text={text} />
   );
 }
 
-function FoldedCommand({ text, className }: { text: string; className: string }) {
+function FoldedCommand({ text }: { text: string }) {
   const { open, toggle, shown, total, content, chip } = useFold<HTMLDivElement>(text);
   return (
     <>
-      <div className={cx(className, !open && clamp.clamp)}>
+      <div className={cx(styles.mono, !open && clamp.clamp)}>
         <div ref={content}>
           <Lines text={shown} />
         </div>

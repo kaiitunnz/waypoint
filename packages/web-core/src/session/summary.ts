@@ -12,7 +12,7 @@ export function summaryParts(summary: string): SummaryPart[] {
   return pieces.map((text, index) => ({ text, code: index % 2 === 1 })).filter((part) => part.text !== "");
 }
 
-// The summary as a label that takes no markup reads it.
+// For labels that take no markup.
 export const plainSummary = (summary: string): string => summaryParts(summary).map((part) => part.text).join("");
 
 // A title as a surface shows it: the agent's summary, whose backticks mark machine

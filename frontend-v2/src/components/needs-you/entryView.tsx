@@ -4,7 +4,6 @@ import { gateHeadline, gateView } from "@waypoint/web-core/board";
 import { inboxBlockChips } from "@waypoint/web-core/inbox";
 import { askRow, rowLine, type QueueEntry } from "@waypoint/web-core/needsYou";
 import { askTitle } from "@waypoint/web-core/pendingAskActions";
-import { plainTitle } from "@waypoint/web-core/session/summary";
 import type { AskSession } from "@waypoint/web-core/session/wholeRequest";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
@@ -22,8 +21,6 @@ export interface EntryView {
   name: string;
   kind: string;
   headline: ReactNode;
-  // The headline for a control's accessible label.
-  label: string;
   detail: ReactNode;
   // Waiting on the human, or an inbox item not yet read.
   strong: boolean;
@@ -52,7 +49,6 @@ export function entryView(
       name: ask.session_title,
       kind: agentName(ask.session_backend),
       headline: <TitleText title={title} />,
-      label: plainTitle(title),
       detail: request.path ? (
         <PathLabel {...splitPath(request.path)} full={request.path} />
       ) : line !== null ? (
@@ -73,7 +69,6 @@ export function entryView(
       name: item.from_label ?? "unknown",
       kind: "Inbox",
       headline: item.subject,
-      label: item.subject,
       detail:
         chips.length > 0 ? (
           <span className={styles.chips}>
@@ -94,7 +89,6 @@ export function entryView(
     name: "Board",
     kind: gateView(gate.ticket).gate,
     headline: gateHeadline(gate.ticket),
-    label: gateHeadline(gate.ticket),
     detail: (
       <span className={styles.gate}>
         {answered ? <span className={styles.answered}>Answered</span> : null}

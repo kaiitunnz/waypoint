@@ -25,7 +25,7 @@ export interface QueueItemProps {
   onDelete: (id: string) => void;
 }
 
-interface QueueItemShellProps extends Omit<QueueItemProps, "time"> {
+interface QueueItemShellProps extends Omit<QueueItemProps, "time" | "view"> {
   // The surface's own classes for each layer.
   classes: { item: string; target: string; slide?: string; behind?: string; trash: string };
   link?: Pick<ComponentProps<typeof Link>, "replace" | "scroll" | "aria-current">;
@@ -38,7 +38,6 @@ interface QueueItemShellProps extends Omit<QueueItemProps, "time"> {
 // takes a checkbox in select mode.
 export function QueueItemShell({
   entry,
-  view,
   selecting,
   checked,
   onToggle,
@@ -95,7 +94,7 @@ export function QueueItemShell({
       </div>
       {pointer && deletable && !selecting ? (
         <IconButton
-          label={`Delete ${view.label}`}
+          label={`Delete ${entry.item.subject}`}
           size="sm"
           className={cx(styles.trash, classes.trash)}
           onClick={() => onDelete(entry.key)}

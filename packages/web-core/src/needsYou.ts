@@ -193,8 +193,8 @@ export function askRow(ask: PendingAsk, { cwd, fromScreen }: AskSession): AskRow
   return { ...line, path: null, answers: false };
 }
 
-// The line a row shows under its headline: none where it only repeats the ask's own title.
-// An agent's summary never stands in for it, since it can read like a command it is not.
+// The line a row shows under its headline, dropped where it repeats the ask's own
+// title. It stays under a summary, which can read like a command it is not.
 export const rowLine = (row: AskRow, headline: ShownTitle): string | null =>
   row.text && (headline.marked || row.text !== headline.text) ? row.text : null;
 

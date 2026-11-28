@@ -5,8 +5,7 @@ import { useEffect } from "react";
 
 const ON_FOCUS_KEY = "waypoint.tool-colours-on-focus";
 
-// Whether tool glyphs take their colour only while their holder is hovered,
-// focused or open, instead of always.
+// Whether a tool glyph is coloured only while its holder is hovered, focused or open.
 export function useToolColoursOnFocus(): [boolean, (next: boolean) => void] {
   return useStoredFlag(ON_FOCUS_KEY, false);
 }

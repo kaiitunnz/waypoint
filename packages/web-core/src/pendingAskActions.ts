@@ -1,7 +1,7 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
 import { toggleSelection } from "./session/askQuestion";
-import { approvalPrompt } from "./session/approvals";
+import { subagentTaskTitle } from "./session/approvals";
 import { subagentKind } from "./session/toolPresentation";
 import type { ShownTitle } from "./session/summary";
 import {
@@ -134,21 +134,21 @@ const askSummaryTitle = (ask: PendingAsk, cwd: string): string | null =>
 
 export interface AskTitle extends ShownTitle {
   // The kind of subagent a summary-titled task asks for.
-  subagent: string | null;
+  agentType: string | null;
 }
 
-const askedSubagent = ({ tool_name, tool_input }: PendingApprovalAsk["approval"]): string | null => {
+// A subagent task approval's kind of subagent, or null for any other tool.
+const askedTask = ({ tool_name, tool_input }: PendingApprovalAsk["approval"]): { agentType: string | null } | null => {
   const tool = normalizeToolName(tool_name);
-  return tool === "Task" || tool === "Agent" ? subagentKind(tool_input) : null;
+  return tool === "Task" || tool === "Agent" ? { agentType: subagentKind(tool_input) } : null;
 };
 
-// The title every list and detail gives an ask. `cwd` is its session's. A detail passes
-// its request: the ask's strings are cut, so only the whole request shows every reason
-// not to take the summary.
+// The title every list and detail gives an ask. A detail passes its request: the ask's
+// strings are cut, so only the whole request shows every reason not to take the summary.
 export function askTitle(ask: PendingAsk, cwd: string, request?: ApprovalRequest): AskTitle {
   const summary = ask.kind === "approval" && request?.status === "ready" ? request.summary : askSummaryTitle(ask, cwd);
-  if (ask.kind !== "approval" || summary === null) return { text: ask.title, marked: false, subagent: null };
-  return { text: summary, marked: true, subagent: askedSubagent(ask.approval) };
+  if (ask.kind !== "approval" || summary === null) return { text: ask.title, marked: false, agentType: null };
+  return { text: summary, marked: true, agentType: askedTask(ask.approval)?.agentType ?? null };
 }
 
 export type ApprovalPreview = { kind: "command"; text: string } | { kind: "path"; path: string } | null;
@@ -169,16 +169,12 @@ export function askPreview(ask: PendingApprovalAsk | PendingPlanAsk, cwd: string
   return typeof command === "string" && command ? { kind: "command", text: command } : null;
 }
 
-// The line a summary-titled subagent approval shows, where its body would repeat the title.
-function subagentLine(ask: PendingAsk, cwd: string): string | null {
-  if (ask.kind !== "approval" || askSummaryTitle(ask, cwd) === null) return null;
-  const tool = normalizeToolName(ask.approval.tool_name);
-  if (tool !== "Task" && tool !== "Agent") return null;
-  return approvalPrompt({ kind: "task", prompt: "", description: "", subagent: subagentKind(ask.approval.tool_input) ?? "" });
+// An ask's body as a row or card words it: a summary-titled subagent task's own body
+// would repeat the title.
+export function askBodyLine(ask: PendingAsk, cwd: string): string | null {
+  const task = ask.kind === "approval" && askSummaryTitle(ask, cwd) !== null ? askedTask(ask.approval) : null;
+  return task ? subagentTaskTitle("", task.agentType) : ask.body;
 }
-
-// What a row or card says of an ask that has no command or path to show.
-export const askBodyLine = (ask: PendingAsk, cwd: string): string | null => subagentLine(ask, cwd) ?? ask.body;
 
 // The first lines of a plan with the markdown marks off, for a card.
 export function planPreview(text: string, maxLines = 3): string {

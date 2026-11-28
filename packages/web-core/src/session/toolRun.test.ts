@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { ev } from "../test-helpers";
-import { TASK_NOTIFICATION_FAMILIES } from "./taskNotificationView";
 import { buildTranscriptItems, type TranscriptItem } from "./transcript";
 import {
   describeCall,
@@ -668,7 +667,7 @@ describe("a call's summary", () => {
     const input = { description: "Find callers", prompt: "List them", subagent_type: "Explore" };
     const [item] = run([summarized(1, "a", "Agent", input, "Find callers")]);
     expect(describeCall(item)).toMatchObject({ summary: "Find callers", label: "", name: null, agentType: "Explore", prompt: "List them" });
-    // A call stored before summaries keeps its label from the input.
+    // Without a summary the label comes from the input.
     const [stored] = run([summarized(1, "a", "Agent", input)]);
     expect(describeCall(stored)).toMatchObject({ summary: null, label: "Find callers", name: null });
   });
@@ -769,14 +768,7 @@ describe("toolFamilyOf", () => {
     expect(toolFamilyOf(tool)).toBe(family);
   });
 
-  it("matches the families of the run line's chips and of notification cards", () => {
-    expect(TASK_NOTIFICATION_FAMILIES).toEqual({
-      agent: toolFamilyOf("Agent"),
-      monitor: toolFamilyOf("Monitor"),
-      background_command: toolFamilyOf("Bash"),
-      message: null,
-      unknown: null,
-    });
+  it("gives the other-tools chip no family", () => {
     const items = run([call(1, "a", "WebSearch", { query: "x" }), call(2, "b", "Bash", { command: "ls" })]);
     expect(summarizeToolRun(items).glyphs.map((entry) => [entry.glyph, entry.family])).toEqual([
       ["›_", "bash"],

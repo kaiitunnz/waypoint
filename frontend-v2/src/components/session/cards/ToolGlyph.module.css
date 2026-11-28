@@ -1,5 +1,4 @@
-/* In its family's colour at rest, unless the device asks for it on focus: then it is
-   faint until a holder sets --lit to 1. */
+/* A holder sets --lit to 1 to colour the glyph where --tool-lit-at-rest is 0. */
 .glyph {
   color: color-mix(in srgb, var(--family, var(--faint)) calc(var(--lit, var(--tool-lit-at-rest)) * 100%), var(--faint));
   transition: color 120ms ease;

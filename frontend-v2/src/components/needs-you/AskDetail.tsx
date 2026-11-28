@@ -124,7 +124,7 @@ function RequestDetail({ ask, session, agent }: RequestDetailProps) {
     <SessionContextProvider value={context}>
       <DecisionCard
         roomy
-        title={<TitleText title={heading} aside={heading.subagent} />}
+        title={<TitleText title={heading} aside={heading.agentType} />}
         copyText={copyText}
         copyLabel={ask.kind === "plan_approval" && !shown?.unverified ? "Copy plan" : "Copy request"}
         // Nothing is decided on part of a request.

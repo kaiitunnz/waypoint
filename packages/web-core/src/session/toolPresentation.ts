@@ -140,7 +140,7 @@ export function delegationForEvent(event: EventRecord): Delegation | null {
 export const subagentKind = (input: Record<string, unknown> | null | undefined): string | null =>
   filledText(input?.subagent_type) ?? filledText(input?.agent);
 
-// A subagent call's description. Events stored before summaries hold it only in the input.
+// A subagent call's description. A stored event may hold it only in the input.
 export function subagentDescription(event: EventRecord): string | null {
   const described = readSummary(event) ?? toolInputForEvent(event)?.description;
   return typeof described === "string" ? described : null;

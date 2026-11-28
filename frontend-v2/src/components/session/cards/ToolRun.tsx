@@ -31,7 +31,7 @@ export function ToolRun({ items, working }: ToolRunProps) {
   return (
     <RunLine
       phrase={heading ?? step ?? summary.phrase}
-      caption={under ?? undefined}
+      detail={under}
       stats={
         summary.additions > 0 || summary.deletions > 0 ? (
           <DiffStat additions={summary.additions} deletions={summary.deletions} />

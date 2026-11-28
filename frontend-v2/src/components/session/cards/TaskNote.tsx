@@ -6,7 +6,6 @@ import type { TaskNotificationView } from "@waypoint/web-core/events";
 import { useReportPreview } from "@waypoint/web-core/hooks/useReportPreview";
 import {
   TASK_NOTIFICATION_BADGES,
-  TASK_NOTIFICATION_FAMILIES,
   taskNoteTitle,
   taskStatusLamp,
 } from "@waypoint/web-core/session/taskNotificationView";
@@ -61,7 +60,7 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
       <ToolGlyph
         className={styles.glyph}
         glyph={badge.glyph}
-        family={TASK_NOTIFICATION_FAMILIES[view.kind]}
+        family={badge.family}
         // Without a summary the title already says the kind.
         {...(view.summary ? { role: "img", "aria-label": badge.label } : { "aria-hidden": true })}
       />

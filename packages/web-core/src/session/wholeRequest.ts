@@ -126,10 +126,9 @@ function requestWarnings(metadata: Record<string, unknown> | undefined, cwd: str
 
 // ─── Title ───
 
-// The summary that titles a request in place of its plain title, or null: the agent's own
-// words stand only for a verified call that asks for nothing beyond itself and holds no
-// text that reads other than it is. `metadata` is the request event's, or what a pending
-// ask carries of it.
+// The summary, where it may title the request: a verified call that asks for nothing
+// beyond itself and holds no text that reads other than it is. `metadata` is the
+// request event's, or a pending ask's approval.
 export function titlingSummary(metadata: Record<string, unknown> | undefined, cwd: string): string | null {
   const summary = metadata?.summary;
   if (typeof summary !== "string" || !summary || metadata?.call_verified === false) return null;
@@ -139,8 +138,8 @@ export function titlingSummary(metadata: Record<string, unknown> | undefined, cw
 // A pending approval as the session's dock shows it.
 export interface ApprovalCardView {
   title: ShownTitle;
-  // The kind of subagent a summary-titled task asks for, which the plain title names.
-  subagent: string | null;
+  // The kind of subagent a summary-titled task asks for.
+  agentType: string | null;
   body: ApprovalBody;
 }
 
@@ -152,12 +151,12 @@ export function approvalCard(event: EventRecord, cwd: string): ApprovalCardView 
   const summary = titlingSummary(event.metadata, cwd);
   if (summary !== null) {
     const body = requestedBody(event, true);
-    const subagent = body.kind === "task" ? subagentKind(asRecord(event.metadata?.tool_input)) : null;
-    return { title: { text: summary, marked: true }, subagent, body };
+    const agentType = body.kind === "task" ? subagentKind(asRecord(event.metadata?.tool_input)) : null;
+    return { title: { text: summary, marked: true }, agentType, body };
   }
   const body = approvalBody(event);
   const title = approvalPrompt(undescribed(body)) ?? "Approve this request";
-  return { title: { text: title, marked: false }, subagent: null, body };
+  return { title: { text: title, marked: false }, agentType: null, body };
 }
 
 // ─── Whole or locked ───

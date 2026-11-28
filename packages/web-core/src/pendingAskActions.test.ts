@@ -275,7 +275,7 @@ describe("deciding outside the detail", () => {
       ask.approval.summary = "List the files";
       return askTitle(ask, session.cwd);
     };
-    expect(titled({})).toEqual({ text: "List the files", marked: true, subagent: null });
+    expect(titled({})).toEqual({ text: "List the files", marked: true, agentType: null });
     for (const extra of [{ dangerouslyDisableSandbox: true }, { workdir: "/etc" }, { command: "ls \u202e" }]) {
       expect([extra, titled(extra).marked]).toEqual([extra, false]);
     }

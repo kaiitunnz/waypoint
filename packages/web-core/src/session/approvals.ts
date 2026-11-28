@@ -77,6 +77,10 @@ export function approvalBody(event: EventRecord): ApprovalBody {
   return { kind: "raw", text: event.text };
 }
 
+// The plain title of a subagent task.
+export const subagentTaskTitle = (description: string, agentType: string | null): string =>
+  `Approve subagent task${description ? `: ${description}` : ""}${agentType ? ` (via ${agentType})` : ""}`;
+
 export function approvalPrompt(body: ApprovalBody): string | null {
   switch (body.kind) {
     case "diff":
@@ -84,7 +88,7 @@ export function approvalPrompt(body: ApprovalBody): string | null {
     case "plan":
       return "Approve plan and exit plan mode";
     case "task":
-      return `Approve subagent task${body.description ? `: ${body.description}` : ""}${body.subagent ? ` (via ${body.subagent})` : ""}`;
+      return subagentTaskTitle(body.description, body.subagent);
     case "command":
       return `Approve Bash command${body.description ? `: ${body.description}` : ""}`;
     case "workflow":

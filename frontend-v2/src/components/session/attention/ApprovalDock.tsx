@@ -29,14 +29,14 @@ export function ApprovalDock({ approvals, decisions, supportsNote }: ApprovalDoc
   const [openKey, setOpenKey] = useState<string | null>(null);
   const { count, page, current } = pageOfKey(approvals, openKey, keyOf);
   if (!current) return null;
-  const { title, subagent, body } = approvalCard(current, cwd);
+  const { title, agentType, body } = approvalCard(current, cwd);
   const id = approvalId(current);
 
   return (
     <DecisionCard
       // Each approval starts unlocked and without a note.
       key={keyOf(current)}
-      title={<TitleText title={title} aside={subagent} />}
+      title={<TitleText title={title} aside={agentType} />}
       pager={
         count > 1
           ? (locked) => (

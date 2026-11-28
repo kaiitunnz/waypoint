@@ -244,14 +244,14 @@ describe("an approval titled by the call's summary", () => {
 
   it("takes the summary and keeps the command in the row", () => {
     const ask = watch("Search `modes`");
-    expect(askTitle(ask, "/srv/app")).toEqual({ text: "Search `modes`", marked: true, subagent: null });
+    expect(askTitle(ask, "/srv/app")).toEqual({ text: "Search `modes`", marked: true, agentType: null });
     expect(askPreview(ask, "/srv/app")).toEqual({ kind: "command", text: "rg -n modes src" });
     expect(askRow(ask, NATIVE)).toEqual({ text: "rg -n modes src", mono: true, path: null, answers: false });
   });
 
   it("keeps its own title, with no extra line, when the summary can't stand", () => {
     for (const ask of [watch(null), watch("Search \u202emodes"), watch("Search `modes`", { additionalPermissions: { network: true } })]) {
-      expect(askTitle(ask, "/srv/app")).toEqual({ text: ask.title, marked: false, subagent: null });
+      expect(askTitle(ask, "/srv/app")).toEqual({ text: ask.title, marked: false, agentType: null });
       expect(askPreview(ask, "/srv/app")).toBeNull();
     }
     // A session not loaded yet has no directory to check the call's against.
@@ -268,12 +268,16 @@ describe("an approval titled by the call's summary", () => {
     expect(askTitle(ask, "/srv/app").marked).toBe(false);
   });
 
-  it("shows a subagent's kind where its body would repeat the title", () => {
-    const ask = approval(1, { description: "Find callers", prompt: "List them", subagent_type: "Explore" });
-    ask.body = "Approve subagent task: Find callers (via Explore)";
-    ask.approval.tool_name = "Agent";
+  it.each([
+    ["Agent", "subagent_type", "Explore"],
+    ["task", "agent", "general"],
+  ])("names a %s approval's kind where its body would repeat the title", (tool, key, kind) => {
+    const ask = approval(1, { description: "Find callers", prompt: "List them", [key]: kind });
+    ask.body = `Approve subagent task: Find callers (via ${kind})`;
+    ask.approval.tool_name = tool;
     ask.approval.summary = "Find callers";
-    expect(askRow(ask, NATIVE)).toMatchObject({ text: "Approve subagent task (via Explore)", mono: false, answers: false });
+    expect(askTitle(ask, "/srv/app")).toEqual({ text: "Find callers", marked: true, agentType: kind });
+    expect(askRow(ask, NATIVE)).toMatchObject({ text: `Approve subagent task (via ${kind})`, mono: false, answers: false });
     ask.approval.summary = null;
     expect(askRow(ask, NATIVE).text).toBe(ask.body);
   });
@@ -292,13 +296,5 @@ describe("an approval titled by the call's summary", () => {
     expect(rowLine(row, askTitle(ask, "/srv/app"))).toBe(command);
     // The ask's own title is not said twice.
     expect(rowLine({ ...row, text: ask.title }, { text: ask.title, marked: false })).toBeNull();
-  });
-
-  it("names a subagent's kind from whichever key holds it", () => {
-    const ask = approval(1, { description: "Find callers", prompt: "List them", agent: "general" });
-    ask.approval.tool_name = "task";
-    ask.approval.summary = "Find callers";
-    expect(askRow(ask, NATIVE).text).toBe("Approve subagent task (via general)");
-    expect(askTitle(ask, "/srv/app")).toEqual({ text: "Find callers", marked: true, subagent: "general" });
   });
 });

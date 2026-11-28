@@ -23,11 +23,11 @@ interface RunLineProps {
   // Right-aligned text where the glyphs go, such as a time.
   trailing?: ReactNode;
   // A second line under the phrase.
-  caption?: ReactNode;
+  detail?: ReactNode;
   children: ReactNode;
 }
 
-export function RunLine({ phrase, glyphs = [], defaultOpen = false, live, asked, stats, trailing, caption, children }: RunLineProps) {
+export function RunLine({ phrase, glyphs = [], defaultOpen = false, live, asked, stats, trailing, detail, children }: RunLineProps) {
   const [choice, setChoice] = useState<boolean | null>(null);
   const open = choice ?? defaultOpen;
   const pointer = usePointerUI();
@@ -37,15 +37,15 @@ export function RunLine({ phrase, glyphs = [], defaultOpen = false, live, asked,
     live && styles.live,
     asked && styles.asked,
     Boolean(stats) && styles.hasStats,
-    Boolean(caption) && styles.twoLine,
+    Boolean(detail) && styles.twoLine,
   );
   const inner = (
     <>
       <span className={styles.sum}>
-        {caption ? (
+        {detail ? (
           <>
             <span>{phrase}</span>
-            <span className={styles.caption}>{caption}</span>
+            <span className={styles.detail}>{detail}</span>
           </>
         ) : (
           phrase

@@ -657,8 +657,6 @@ export interface PendingAskApproval {
   supports_note: boolean;
   // Whether the request names the call it answers; null when its transport's always do.
   call_verified?: boolean | null;
-  // The type or name of the Claude subagent asking, when it is one.
-  subagent?: string | null;
   // The agent's description of the call.
   summary?: string | null;
 }

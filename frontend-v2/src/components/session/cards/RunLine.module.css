@@ -54,7 +54,7 @@
   white-space: nowrap;
 }
 
-/* A phrase with a caption: the marker, counts and chevron stay on the first line. */
+/* A phrase with a line under it: the marker, counts and chevron stay on the first line. */
 .line.twoLine {
   align-items: flex-start;
   height: auto;
@@ -89,7 +89,7 @@
   height: 18px;
 }
 
-.caption {
+.detail {
   color: var(--muted);
 }
 

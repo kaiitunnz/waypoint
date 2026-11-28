@@ -4,22 +4,13 @@ import type { ToolBadge } from "./toolPresentation";
 import type { RunGlyph, ToolFamily } from "./toolRun";
 
 // A task lifecycle card: subagent/Agent completion, Monitor events and terminal
-// state, or background-command completion.
-export const TASK_NOTIFICATION_BADGES: Record<TaskNotificationView["kind"], ToolBadge> = {
-  agent: { glyph: "◇", variant: "task", label: "Agent" },
-  monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
-  background_command: { glyph: "›_", variant: "bash", label: "Command" },
-  message: { glyph: "↘", variant: "default", label: "Message" },
-  unknown: { glyph: "⁂", variant: "default", label: "Task" },
-};
-
-// A card's glyph takes the colour of the tool family it reports on.
-export const TASK_NOTIFICATION_FAMILIES: Record<TaskNotificationView["kind"], ToolFamily | null> = {
-  agent: "agent",
-  monitor: "bash",
-  background_command: "bash",
-  message: null,
-  unknown: null,
+// state, or background-command completion. `family` is the tool family it reports on.
+export const TASK_NOTIFICATION_BADGES: Record<TaskNotificationView["kind"], ToolBadge & { family: ToolFamily | null }> = {
+  agent: { glyph: "◇", variant: "task", label: "Agent", family: "agent" },
+  monitor: { glyph: "◉", variant: "monitor", label: "Monitor", family: "bash" },
+  background_command: { glyph: "›_", variant: "bash", label: "Command", family: "bash" },
+  message: { glyph: "↘", variant: "default", label: "Message", family: null },
+  unknown: { glyph: "⁂", variant: "default", label: "Task", family: null },
 };
 
 export type TaskStatusTone = "ok" | "danger" | "warn" | "off" | "info";
@@ -81,7 +72,7 @@ export function taskNoteHeadline(view: TaskNotificationView): string {
   return view.summary || view.event || "Task notification";
 }
 
-// A card's line where its output stays folded: what happened, or the kind of task.
+// A card's headline, which never quotes the task's output.
 export function taskNoteTitle(view: TaskNotificationView): string {
   return view.summary || TASK_NOTIFICATION_BADGES[view.kind].label;
 }
@@ -118,7 +109,7 @@ export function summarizeNotificationRun(kinds: readonly TaskNotificationView["k
         glyph: TASK_NOTIFICATION_BADGES[kind].glyph,
         label: many.charAt(0).toUpperCase() + many.slice(1),
         count: counts.get(kind) ?? 0,
-        family: TASK_NOTIFICATION_FAMILIES[kind],
+        family: TASK_NOTIFICATION_BADGES[kind].family,
       };
     }),
   };

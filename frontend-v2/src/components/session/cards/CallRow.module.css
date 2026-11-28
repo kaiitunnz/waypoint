@@ -34,7 +34,6 @@
   min-width: 0;
 }
 
-/* The agent's description of the call, over what it ran. */
 .heading {
   composes: heading from "../../ui/SummaryText.module.css";
   width: 100%;

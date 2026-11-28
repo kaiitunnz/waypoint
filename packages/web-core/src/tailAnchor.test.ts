@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { caretToEnd, showEnd, type TailField } from "./tailAnchor";
+import { caretToEnd, followsEnd, showEnd, type TailField } from "./tailAnchor";
 
 function field(overrides: Partial<TailField> = {}): TailField {
   const state: TailField = {
@@ -39,5 +39,20 @@ describe("caretToEnd", () => {
     caretToEnd(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, 44]);
     expect(input.scrollLeft).toBe(340);
+  });
+});
+
+describe("followsEnd", () => {
+  it("follows the end of a field that is not focused", () => {
+    expect(followsEnd(field({ selectionStart: 3, selectionEnd: 3 }), false)).toBe(true);
+  });
+
+  it("follows the end of a focused field whose caret is at the end", () => {
+    expect(followsEnd(field({ selectionStart: 44, selectionEnd: 44 }), true)).toBe(true);
+  });
+
+  it("leaves a focused field alone while the caret is elsewhere or a range is selected", () => {
+    expect(followsEnd(field({ selectionStart: 3, selectionEnd: 3 }), true)).toBe(false);
+    expect(followsEnd(field({ selectionStart: 0, selectionEnd: 44 }), true)).toBe(false);
   });
 });

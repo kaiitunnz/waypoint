@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.29.0](https://github.com/kaiitunnz/waypoint/compare/v0.28.0...v0.29.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* support OpenCode v2 ([#627](https://github.com/kaiitunnz/waypoint/issues/627))
+
+### Features
+
+* adapt the v2 layout to input and width separately ([#618](https://github.com/kaiitunnz/waypoint/issues/618)) ([4a54e5e](https://github.com/kaiitunnz/waypoint/commit/4a54e5e21c0d26387f249211b5b6b78b4da28462))
+* add a v2 settings page with a conversation previews switch ([#628](https://github.com/kaiitunnz/waypoint/issues/628)) ([5f6e369](https://github.com/kaiitunnz/waypoint/commit/5f6e369c58034c3fe803483f71b8b75d02a29c41))
+* add the v2 composer ([#624](https://github.com/kaiitunnz/waypoint/issues/624)) ([cdcd560](https://github.com/kaiitunnz/waypoint/commit/cdcd560b3034c0abe08cc91352dbaecc1fb01ee9))
+* add the v2 design system and app shell ([#612](https://github.com/kaiitunnz/waypoint/issues/612)) ([d6ffd6e](https://github.com/kaiitunnz/waypoint/commit/d6ffd6e710b66f0c9ca8f9e9d82ab971634d73f8))
+* add the v2 needs-you queue ([#634](https://github.com/kaiitunnz/waypoint/issues/634)) ([052c441](https://github.com/kaiitunnz/waypoint/commit/052c4415d30409ff17d7861e95862aaed0549893))
+* add the v2 sessions home and switcher ([#613](https://github.com/kaiitunnz/waypoint/issues/613)) ([04c2610](https://github.com/kaiitunnz/waypoint/commit/04c2610658ccb6c3db11e3cabb07f175e88b47eb))
+* add the v2 terminal view ([#630](https://github.com/kaiitunnz/waypoint/issues/630)) ([302a06a](https://github.com/kaiitunnz/waypoint/commit/302a06a6b933aabadf5e5ea66282895462b08288))
+* add v2 approvals, questions and session docks ([#631](https://github.com/kaiitunnz/waypoint/issues/631)) ([b62e0b9](https://github.com/kaiitunnz/waypoint/commit/b62e0b9470812eb81a971b71b1be1c8c7784719f))
+* badge the v2 app icons as a preview ([#615](https://github.com/kaiitunnz/waypoint/issues/615)) ([1928fae](https://github.com/kaiitunnz/waypoint/commit/1928fae5ed6664ebb59110c9630f9ae93250c19e))
+* clarify v2 session status and add rail session actions ([#644](https://github.com/kaiitunnz/waypoint/issues/644)) ([b3c3577](https://github.com/kaiitunnz/waypoint/commit/b3c357755675b08e4bf7f34be9338c79bf5edc93))
+* expose pending asks across sessions ([#600](https://github.com/kaiitunnz/waypoint/issues/600)) ([d52d900](https://github.com/kaiitunnz/waypoint/commit/d52d900d2db5642cbf6deda06d50b87682aab43d))
+* expose the frontend preview port through the Tailscale sidecar ([#611](https://github.com/kaiitunnz/waypoint/issues/611)) ([e3eb0ad](https://github.com/kaiitunnz/waypoint/commit/e3eb0ad325d7f68987f2802548b489e2c06a6691))
+* hide conversation previews in v2 session lists by default ([#641](https://github.com/kaiitunnz/waypoint/issues/641)) ([3302494](https://github.com/kaiitunnz/waypoint/commit/330249496f3a60f46754a88a36ed474e7ea009a5))
+* launch sessions from v2 ([#632](https://github.com/kaiitunnz/waypoint/issues/632)) ([4830363](https://github.com/kaiitunnz/waypoint/commit/4830363be45f7955226746a0f5dd17e2c20202d2))
+* render v2 session transcripts ([#614](https://github.com/kaiitunnz/waypoint/issues/614)) ([5248071](https://github.com/kaiitunnz/waypoint/commit/52480711153c730c32365a5a38a8ae9a93483200))
+* select and preview a v2 frontend from an npm workspace ([#599](https://github.com/kaiitunnz/waypoint/issues/599)) ([6249a3a](https://github.com/kaiitunnz/waypoint/commit/6249a3aa09ec90df1ef21fce39906d26e4cdd839))
+* send scheduled messages now and add the v2 scheduled sheet ([#633](https://github.com/kaiitunnz/waypoint/issues/633)) ([b1cd410](https://github.com/kaiitunnz/waypoint/commit/b1cd4100da3bb2b796cfd430cfa194dc3e6add79))
+* show tool-call descriptions and colour tool glyphs in v2 ([#663](https://github.com/kaiitunnz/waypoint/issues/663)) ([928e15b](https://github.com/kaiitunnz/waypoint/commit/928e15b7f9e33edf77d78148a7ce16b0a4ace27b))
+* support OpenCode v2 ([#627](https://github.com/kaiitunnz/waypoint/issues/627)) ([c46ebfa](https://github.com/kaiitunnz/waypoint/commit/c46ebfaecb2650f79c17b4866e9807d8f6f212fc))
+* tighten v2 session lists and fix switcher search ([#654](https://github.com/kaiitunnz/waypoint/issues/654)) ([adf4d0e](https://github.com/kaiitunnz/waypoint/commit/adf4d0e303f16f0cf4a10a48fe89070c256d552a))
+
+
+### Bug Fixes
+
+* change a Claude session's status only at turn boundaries ([#660](https://github.com/kaiitunnz/waypoint/issues/660)) ([84f0826](https://github.com/kaiitunnz/waypoint/commit/84f082690420c92e199ea5ae6e30ee3b795c6ff0))
+* fill the screen on touch in v2's full-screen layouts ([#655](https://github.com/kaiitunnz/waypoint/issues/655)) ([22524a7](https://github.com/kaiitunnz/waypoint/commit/22524a7c31c3dafef71543dad9750b503f0fea5c))
+* fold long system notes in the v2 transcript ([#617](https://github.com/kaiitunnz/waypoint/issues/617)) ([3917441](https://github.com/kaiitunnz/waypoint/commit/3917441ed8d68387a41692a78370da42e326e6e1))
+* keep a cut path's parts level in Safari ([#640](https://github.com/kaiitunnz/waypoint/issues/640)) ([3d40b85](https://github.com/kaiitunnz/waypoint/commit/3d40b85c59bbb82b4e8b596a173df68b11df221c))
+* keep Load older next to the first message ([#629](https://github.com/kaiitunnz/waypoint/issues/629)) ([73cc2ea](https://github.com/kaiitunnz/waypoint/commit/73cc2ea81f40f35957705544dd81d65f59dc8d7f))
+* keep tailing a claude_tty transcript after EnterWorktree moves it ([#638](https://github.com/kaiitunnz/waypoint/issues/638)) ([94e924e](https://github.com/kaiitunnz/waypoint/commit/94e924e2905480c7629145255ff91485060b27d4))
+* keep the v2 view switch in place when the view changes ([#651](https://github.com/kaiitunnz/waypoint/issues/651)) ([f75f73f](https://github.com/kaiitunnz/waypoint/commit/f75f73f40070775c57a3d26911c01c2e24d79f7e))
+* keep v1 composer buttons clickable ([#625](https://github.com/kaiitunnz/waypoint/issues/625)) ([742408b](https://github.com/kaiitunnz/waypoint/commit/742408b87eb991bba0a98b7ca40bef0cfbe10c8d))
+* keep v2 segmented controls steady when the selection moves ([#652](https://github.com/kaiitunnz/waypoint/issues/652)) ([e2691e1](https://github.com/kaiitunnz/waypoint/commit/e2691e125d6e4d48afbfd12ff184cdcf87debb95))
+* keep v2 sheets above the touch keyboard and show path ends ([#667](https://github.com/kaiitunnz/waypoint/issues/667)) ([92224b4](https://github.com/kaiitunnz/waypoint/commit/92224b441878dd37a2cb49bd605bc9c2c34e97a3))
+* mark a recommended answer by its label alone in v2 ([#648](https://github.com/kaiitunnz/waypoint/issues/648)) ([98e95fc](https://github.com/kaiitunnz/waypoint/commit/98e95fc03d435a5adf934fd5aabe71930cb86e31))
+* mark failed OpenCode tool results as errors ([#616](https://github.com/kaiitunnz/waypoint/issues/616)) ([878c680](https://github.com/kaiitunnz/waypoint/commit/878c6801cbdabb51887eedcc2af3f4200053e540))
+* name every v2 tool call and show a subagent's prompt ([#658](https://github.com/kaiitunnz/waypoint/issues/658)) ([5952682](https://github.com/kaiitunnz/waypoint/commit/5952682d206e78309a6131730df7dd69d1dcaaa0))
+* name the call each claude_tty approval answers ([#647](https://github.com/kaiitunnz/waypoint/issues/647)) ([97ade3e](https://github.com/kaiitunnz/waypoint/commit/97ade3ebb78de88bd52393ecd4082d4585630b24))
+* open v2 dock popovers at the strip's right edge ([#664](https://github.com/kaiitunnz/waypoint/issues/664)) ([799f0d5](https://github.com/kaiitunnz/waypoint/commit/799f0d5919666ccaf08f359b4cb6b09744ce91a7))
+* polish the v2 transcript from the first UI audit ([#626](https://github.com/kaiitunnz/waypoint/issues/626)) ([b3d8c35](https://github.com/kaiitunnz/waypoint/commit/b3d8c3536ee63450c95bf3f51b57b366d8d89a5f))
+* show the start of folded command output in v2 ([#649](https://github.com/kaiitunnz/waypoint/issues/649)) ([850c199](https://github.com/kaiitunnz/waypoint/commit/850c1995e853beae7de9447780c7ed398cdc017a))
+* show the whole question in v2's transcript question card ([#670](https://github.com/kaiitunnz/waypoint/issues/670)) ([ece539b](https://github.com/kaiitunnz/waypoint/commit/ece539b2971f7f61fdb62dfba91659e69611eb63))
+* size the v2 terminal font to the rest of the UI ([#650](https://github.com/kaiitunnz/waypoint/issues/650)) ([e98b422](https://github.com/kaiitunnz/waypoint/commit/e98b4221f3f84289d47c334e49ceb1931800f9b0))
+* start the backend without waiting on any agent plugin ([#623](https://github.com/kaiitunnz/waypoint/issues/623)) ([6108932](https://github.com/kaiitunnz/waypoint/commit/6108932451610c30b17d9b540ecb707f39e939de))
+* stop a recommended answer looking selected in v2 ([#642](https://github.com/kaiitunnz/waypoint/issues/642)) ([617e555](https://github.com/kaiitunnz/waypoint/commit/617e555b9c7c9386be25bbb6549d0d093a4c10ca))
+
 ## [0.28.0](https://github.com/kaiitunnz/waypoint/compare/v0.27.0...v0.28.0) (2026-11-24)
 
 

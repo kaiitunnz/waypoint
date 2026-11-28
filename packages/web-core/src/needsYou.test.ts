@@ -237,34 +237,25 @@ describe("asks", () => {
 });
 
 describe("an approval titled by the call's summary", () => {
-  const codex = (summary: string | null, request: Record<string, unknown> = {}): PendingApprovalAsk => {
-    const ask = approval(1, {});
-    return {
-      ...ask,
-      title: "Approve command: rg -n modes src",
-      approval: {
-        ...ask.approval,
-        tool_name: null,
-        tool_input: null,
-        summary,
-        request: { command: "rg -n modes src", cwd: "/srv/app", ...request },
-      },
-    };
+  const watch = (summary: string | null, input: Record<string, unknown> = {}): PendingApprovalAsk => {
+    const ask = approval(1, { command: "rg -n modes src", ...input });
+    return { ...ask, title: "Approve Monitor", approval: { ...ask.approval, tool_name: "Monitor", summary } };
   };
 
   it("takes the summary and keeps the command in the row", () => {
-    const ask = codex("Search `modes`");
+    const ask = watch("Search `modes`");
     expect(askTitle(ask, "/srv/app")).toEqual({ text: "Search `modes`", marked: true, subagent: null });
+    expect(askPreview(ask, "/srv/app")).toEqual({ kind: "command", text: "rg -n modes src" });
     expect(askRow(ask, NATIVE)).toEqual({ text: "rg -n modes src", mono: true, path: null, answers: false });
   });
 
   it("keeps its own title, with no extra line, when the summary can't stand", () => {
-    for (const ask of [codex(null), codex("Search ‮modes"), codex("Search `modes`", { permissions: { network: true } })]) {
+    for (const ask of [watch(null), watch("Search \u202emodes"), watch("Search `modes`", { additionalPermissions: { network: true } })]) {
       expect(askTitle(ask, "/srv/app")).toEqual({ text: ask.title, marked: false, subagent: null });
       expect(askPreview(ask, "/srv/app")).toBeNull();
     }
-    // A session not loaded yet has no directory to check the request's against.
-    expect(askTitle(codex("Search `modes`"), "").marked).toBe(false);
+    // A session not loaded yet has no directory to check the call's against.
+    expect(askTitle(watch("Search `modes`", { workdir: "/srv/app" }), "").marked).toBe(false);
   });
 
   it("titles a described shell call that the row still decides", () => {
@@ -288,7 +279,7 @@ describe("an approval titled by the call's summary", () => {
   });
 
   it("answers to its summary, as shown, in a search", () => {
-    const queue = buildQueue({ asks: [codex("Search `modes`")], items: [], gates: [], status: "all", source: "all", q: "search modes" });
+    const queue = buildQueue({ asks: [watch("Search `modes`")], items: [], gates: [], status: "all", source: "all", q: "search modes" });
     expect(queue).toHaveLength(1);
   });
 
@@ -301,13 +292,6 @@ describe("an approval titled by the call's summary", () => {
     expect(rowLine(row, askTitle(ask, "/srv/app"))).toBe(command);
     // The ask's own title is not said twice.
     expect(rowLine({ ...row, text: ask.title }, { text: ask.title, marked: false })).toBeNull();
-  });
-
-  it("shows a watched command under its summary", () => {
-    const ask = approval(1, { command: "tail -f build.log", description: "Watch the build" });
-    ask.approval.tool_name = "Monitor";
-    ask.approval.summary = "Watch the build";
-    expect(askPreview(ask, "/srv/app")).toEqual({ kind: "command", text: "tail -f build.log" });
   });
 
   it("names a subagent's kind from whichever key holds it", () => {

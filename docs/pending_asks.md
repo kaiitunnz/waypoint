@@ -50,15 +50,13 @@ with "(Recommended)", ignoring case and surrounding whitespace. Answer with
 `POST /api/sessions/{id}/answer-question` (`tool_use_id`, `answer`, `answers`) or
 decline with `.../cancel-question`.
 
-**`approval`** — `{approval_id, tool_name, tool_input, tool_input_truncated, decisions, supports_note, call_verified, tool_use_id, subagent, summary, request}`.
+**`approval`** — `{approval_id, tool_name, tool_input, tool_input_truncated, decisions, supports_note, call_verified, tool_use_id, subagent, summary}`.
 `decisions` is the agent's approval vocabulary and `supports_note` says whether
 a note may accompany the decision. Answer with
 `POST /api/sessions/{id}/approve` (`decision`, `text`, `approval_id`).
 `call_verified`, `tool_use_id` and `subagent` are
 [call verification](#call-verification). `summary` is the agent's
-[description of the call](coding_agent_plugins.md#call-summaries), and
-`request` is what the request carries beside `tool_input`, such as a command and
-the access it asks for; both are null when there is none.
+[description of the call](coding_agent_plugins.md#call-summaries), or null.
 
 **`plan`** (on `plan_approval` items) — `{plan_id, text, decisions, supports_note, resolve_via, call_verified, tool_use_id}`.
 `resolve_via` names the endpoint: `approve` answers through
@@ -97,9 +95,9 @@ For `claude_tty`
 
 Each string in an `approval`'s `tool_input` longer than 2,000 characters is cut
 to 2,000 characters plus `…`, and `tool_input_truncated` is true. Its
-`summary`, the strings in its `request`, and an item's `title` and `body` are
-cut to the same length without setting that flag. The full input stays in the
-session transcript. Plan text and question prompts are never cut.
+`summary`, and an item's `title` and `body`, are cut to the same length without
+setting that flag. The full input stays in the session transcript. Plan text and
+question prompts are never cut.
 
 ## What stays listed
 

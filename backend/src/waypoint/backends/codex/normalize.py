@@ -42,9 +42,10 @@ def error_text(payload: dict[str, Any]) -> str:
 
 
 def command_summary(command: Any, actions: Any) -> str | None:
-    """Names a command by the action Codex parsed from it, or ``None`` unless that
-    one read, search or listing is all the command does. Codex leaves other
-    commands out of its parsed actions, so the command line is read too."""
+    """Names a command by the action Codex parsed from it, or ``None`` unless the
+    parsed command is all the line runs, besides trimming its output: Codex leaves
+    other commands out of its actions. The action's type is Codex's reading of the
+    program's name, which the program can outrun."""
     match command, actions:
         case str(), [{"command": str(parsed)} as action] if runs_only(command, parsed):
             return _action_phrase(action)
@@ -275,25 +276,6 @@ def map_turn_status(value: Any) -> SessionStatus:
     if value == "failed":
         return SessionStatus.ERROR
     return SessionStatus.RUNNING
-
-
-# Whether a command approval is titled by Codex's parse, as its call is headed.
-# Codex types a command by its program's name, so one it parses as a read can run
-# others, and the title of a decision does not rest on that.
-SUMMARIZE_APPROVALS = False
-
-
-def approval_summary(method: str, params: dict[str, Any]) -> str | None:
-    """A command approval's summary: none unless ``SUMMARIZE_APPROVALS``, and none
-    for a request that gives a ``reason``, which can ask for more than its command,
-    such as running outside the sandbox, with nothing else saying so."""
-    if (
-        not SUMMARIZE_APPROVALS
-        or method != "item/commandExecution/requestApproval"
-        or params.get("reason")
-    ):
-        return None
-    return command_summary(params.get("command"), params.get("commandActions"))
 
 
 def format_approval_text(method: str, params: dict[str, Any]) -> str:

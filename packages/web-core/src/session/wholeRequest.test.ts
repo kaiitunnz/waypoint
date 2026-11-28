@@ -264,7 +264,7 @@ describe("what holds the content", () => {
 const described = (tool: string, input: Record<string, unknown>, summary: string, extra: Record<string, unknown> = {}) =>
   approve(tool, input, { summary, ...extra });
 
-// A Codex command approval: no tool or input, its command and parsed action in `request`.
+// A Codex command approval: no tool or input, its command in `request`.
 const codex = (extra: Record<string, unknown> = {}, summary = "Read `SKILL.md`") =>
   ev(9, "approval_request", "Approve command: sed -n 1,5p SKILL.md", {
     method: "item/commandExecution/requestApproval",
@@ -320,15 +320,10 @@ describe("the summary that titles an approval", () => {
     expect(shownRequest(request, ownInput).warnings.length).toBeGreaterThan(0);
   });
 
-  it("shows a summary-titled Codex command as the block under the title", () => {
-    expect(approvalCard(codex(), "/w")).toEqual({
-      title: { text: "Read `SKILL.md`", marked: true },
-      subagent: null,
-      body: { kind: "command", description: "", command: "sed -n 1,5p SKILL.md" },
-    });
-    expect(shownRequest(codex(), ownInput)).toMatchObject({ body: { kind: "command" }, whole: true, warnings: [] });
-    // Without a summary the dock keeps its text.
-    expect(approvalCard(codex({}, ""), "/w").body).toMatchObject({ kind: "raw" });
+  it("leaves a request that carries its command beside its title as it is", () => {
+    const request = codex({}, "");
+    expect(approvalCard(request, "/w")).toMatchObject({ title: { text: "Approve this request" }, body: { kind: "raw" } });
+    expect(shownRequest(request, ownInput)).toMatchObject({ body: { kind: "command" }, whole: true, warnings: [] });
   });
 
   it("shows the command of a summary-titled call without a view of its own", () => {

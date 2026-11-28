@@ -12,10 +12,9 @@ from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeSessio
 from waypoint.backends.claude_code.history import convert_transcript_records
 from waypoint.backends.claude_code.normalize import call_summary
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
-from waypoint.backends.codex import normalize as codex_normalize
 from waypoint.backends.codex.event_registry import render_item_started
 from waypoint.backends.codex.history import turns_to_events
-from waypoint.backends.codex.normalize import approval_summary, command_summary
+from waypoint.backends.codex.normalize import command_summary
 from waypoint.backends.events import set_summary
 from waypoint.backends.opencode import normalize as opencode
 from waypoint.backends.opencode.sessions import Permission
@@ -449,37 +448,9 @@ PROGRAM_NAMED = [
 
 
 @pytest.mark.parametrize(("command", "action", "heading"), PROGRAM_NAMED)
-def test_codex_heads_a_call_by_its_parse_and_never_its_approval(
+def test_codex_heads_a_call_by_its_parse(
     command: str, action: dict[str, str], heading: str
 ) -> None:
     actions = [{**action, "command": shlex.split(command)[2]}]
-    params = {"command": command, "commandActions": actions}
 
     assert command_summary(command, actions) == heading
-    assert approval_summary("item/commandExecution/requestApproval", params) is None
-
-
-def test_codex_approval_takes_no_summary() -> None:
-    params = {"command": "cat SKILL.md", "commandActions": [_read("SKILL.md")]}
-
-    assert approval_summary("item/commandExecution/requestApproval", params) is None
-
-
-def test_codex_approval_summaries_switched_on_keep_the_reason_rule(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(codex_normalize, "SUMMARIZE_APPROVALS", True)
-    method = "item/commandExecution/requestApproval"
-    params: dict[str, Any] = {
-        "command": "cat SKILL.md",
-        "reason": None,
-        "commandActions": [_read("SKILL.md")],
-    }
-
-    assert approval_summary(method, params) == "Read `SKILL.md`"
-    assert approval_summary(method, {**params, "commandActions": [UNKNOWN]}) is None
-    assert approval_summary(method, {**params, "commandActions": None}) is None
-    assert approval_summary(method, {**params, "command": None}) is None
-    assert approval_summary("item/fileChange/requestApproval", params) is None
-    # A reason is the only trace of an ask beyond the command.
-    assert approval_summary(method, {**params, "reason": "Run unsandboxed"}) is None

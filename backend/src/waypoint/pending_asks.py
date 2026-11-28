@@ -158,7 +158,6 @@ def _approval_ask(
     tool_name = _text(event.metadata.get("tool_name"))
     raw_input = event.metadata.get("tool_input")
     tool_input = _cut_strings(raw_input) if isinstance(raw_input, dict) else None
-    raw_request = event.metadata.get("request")
     summary = _text(event.metadata.get(SUMMARY_METADATA_KEY))
     title = _cut(
         _text(interaction.get("title"))
@@ -179,9 +178,6 @@ def _approval_ask(
             supports_note=capabilities.supports_approval_note,
             subagent=_text(event.metadata.get("subagent")),
             summary=_cut(summary) if summary else None,
-            request=(
-                _cut_strings(raw_request) if isinstance(raw_request, dict) else None
-            ),
             **_call_identity(event),
         ),
     )

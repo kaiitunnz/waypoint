@@ -731,6 +731,16 @@ _READ_NOTES = {
         _command_approval(_READ_NOTES),
         # An escalated read: only its reason says it leaves the sandbox.
         _command_approval(_READ_NOTES, reason="Check the notes outside the sandbox"),
+        # Codex parses each of these as a read or search though it runs or reads more.
+        *(
+            _command_approval(_READ_NOTES, command=command)
+            for command in (
+                '/bin/bash -lc "awk \'BEGIN{system(\\"echo ran\\")}\' README.md"',
+                "/bin/bash -lc \"sed -n -e 1p -e 'e echo ran' README.md\"",
+                "/bin/bash -lc 'rg --pre=cat hello .'",
+                "/bin/bash -lc 'head -n 2 README.md notes.txt'",
+            )
+        ),
     ],
 )
 async def test_command_approval_event_takes_no_summary(

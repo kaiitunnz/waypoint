@@ -661,8 +661,6 @@ export interface PendingAskApproval {
   subagent?: string | null;
   // The agent's description of the call.
   summary?: string | null;
-  // What the request carries beside its tool input, long strings cut like its input's.
-  request?: Record<string, unknown> | null;
 }
 
 // `approve` answers through /approve with approval_id = plan_id; `approve_plan`

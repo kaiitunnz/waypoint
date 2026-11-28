@@ -5,7 +5,6 @@ import { approvalPrompt } from "./session/approvals";
 import { subagentKind } from "./session/toolPresentation";
 import type { ShownTitle } from "./session/summary";
 import {
-  namedCommand,
   shownPlan,
   shownRequest,
   titlingSummary,
@@ -166,8 +165,8 @@ export function askPreview(ask: PendingApprovalAsk | PendingPlanAsk, cwd: string
   const path = tool && FILE_EDIT_TOOLS.has(tool) ? toolFilePath(input) : null;
   if (path) return { kind: "path", path };
   // A summary takes the title, so the command it replaces stays in view here.
-  const command = askSummaryTitle(ask, cwd) === null ? null : namedCommand(input, approval.request);
-  return command === null ? null : { kind: "command", text: command };
+  const command = askSummaryTitle(ask, cwd) === null ? null : input?.command;
+  return typeof command === "string" && command ? { kind: "command", text: command } : null;
 }
 
 // The line a summary-titled subagent approval shows, where its body would repeat the title.

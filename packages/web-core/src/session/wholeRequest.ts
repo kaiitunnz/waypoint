@@ -60,20 +60,14 @@ const HIDDEN_WARNING = "Hidden or direction-changing characters";
 
 // ─── The view ───
 
-// The command a request names, in its call's input or beside it.
-export function namedCommand(input: unknown, request: unknown): string | null {
-  const command = asRecord(input)?.command ?? asRecord(request)?.command;
-  return typeof command === "string" && command ? command : null;
-}
-
 // A request that carries its command beside its title shows the command. So does one
 // titled by its summary, whose title and text then don't hold the command.
 function requestedBody(event: EventRecord, summarized: boolean): ApprovalBody {
   const body = approvalBody(event);
   const input = asRecord(event.metadata?.tool_input);
   if (body.kind !== "raw" || (input && !summarized)) return body;
-  const command = namedCommand(input, event.metadata?.request);
-  return command === null ? body : { kind: "command", description: "", command };
+  const command = input?.command ?? asRecord(event.metadata?.request)?.command;
+  return typeof command === "string" && command ? { kind: "command", description: "", command } : body;
 }
 
 // Metadata that routes or draws a request without being part of it.

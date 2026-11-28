@@ -590,8 +590,6 @@ reads only the backend-neutral parts:
   `body`; one with an empty body is listed as a plain approval.
 - `metadata["tool_name"]` / `metadata["tool_input"]`, both optional.
 - `metadata["summary"]`, optional: the call's [summary](#call-summaries).
-- `metadata["request"]`, optional: what the request carries beside its tool
-  input, as a Codex approval does with its `command` and the access it asks for.
 - `metadata["call_verified"]`, `metadata["tool_use_id"]` and
   `metadata["subagent"]`, set by a transport that reads dialogs off a screen
   ([call verification](pending_asks.md#call-verification)). Its replies must
@@ -985,12 +983,12 @@ a redirection, a substitution or a subshell.
 A transport that reads dialogs off a screen sets it only for a call it matched.
 Clients show it as untrusted agent text. It titles an approval only where
 [`session/wholeRequest`](../packages/web-core/src/session/wholeRequest.ts) finds
-the call verified, no hidden or direction-changing characters anywhere in the
-request, and nothing asked beyond the call, which it reads from the
-`tool_input` and `request` keys its warnings name. A list or card that judges a
-[pending ask](pending_asks.md#bounded-payloads) sees only what the ask carries
-of a long string. A backend whose request can
-ask for more in a way those keys don't show gives that approval no summary.
+the call verified, no hidden or direction-changing characters in what it reads,
+and nothing asked beyond the call, which it reads from the keys its warnings name
+in `tool_input`. A list or card judges a
+[pending ask](pending_asks.md#bounded-payloads), which carries the input with its
+long strings cut. A backend whose request can ask for more anywhere but those keys
+gives that approval no summary.
 
 ### Capture seams
 

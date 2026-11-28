@@ -264,7 +264,8 @@ describe("what holds the content", () => {
 const described = (tool: string, input: Record<string, unknown>, summary: string, extra: Record<string, unknown> = {}) =>
   approve(tool, input, { summary, ...extra });
 
-// A Codex command approval: no tool or input, its command in `request`.
+// A Codex command approval: no tool or input, its command in `request`. No backend gives
+// one a summary; the one here exercises the title rule on what `request` asks for.
 const codex = (extra: Record<string, unknown> = {}, summary = "Read `SKILL.md`") =>
   ev(9, "approval_request", "Approve command: sed -n 1,5p SKILL.md", {
     method: "item/commandExecution/requestApproval",

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from openai_codex.generated.v2_all import Turn
 
+from codex_command_lines import PROGRAM_NAMED, parsed_action
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeSessionState
 from waypoint.backends.claude_code.history import convert_transcript_records
 from waypoint.backends.claude_code.normalize import call_summary
@@ -421,36 +422,8 @@ def test_codex_live_and_imported_commands(
     assert "summary" not in result.metadata
 
 
-# Command lines Codex parses as one read or search although their program runs more,
-# or reads more than the file it names. Captured from live sessions.
-PROGRAM_NAMED = [
-    (
-        '/bin/bash -lc "awk \'BEGIN{system(\\"echo ran\\")}\' README.md"',
-        {"type": "read", "name": "README.md"},
-        "Read `README.md`",
-    ),
-    (
-        "/bin/bash -lc \"sed -n -e 1p -e 'e echo ran' README.md\"",
-        {"type": "read", "name": "README.md"},
-        "Read `README.md`",
-    ),
-    (
-        "/bin/bash -lc 'rg --pre=cat hello .'",
-        {"type": "search", "query": "hello"},
-        "Search `hello`",
-    ),
-    (
-        "/bin/bash -lc 'head -n 2 README.md notes.txt'",
-        {"type": "read", "name": "README.md"},
-        "Read `README.md`",
-    ),
-]
-
-
 @pytest.mark.parametrize(("command", "action", "heading"), PROGRAM_NAMED)
 def test_codex_heads_a_call_by_its_parse(
     command: str, action: dict[str, str], heading: str
 ) -> None:
-    actions = [{**action, "command": shlex.split(command)[2]}]
-
-    assert command_summary(command, actions) == heading
+    assert command_summary(command, [parsed_action(command, action)]) == heading

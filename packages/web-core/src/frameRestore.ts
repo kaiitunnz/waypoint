@@ -1,13 +1,14 @@
 // iOS leaves the frame short of the screen in a home-screen app, at launch and after the keyboard
 // has been up, and restores it once the document is taller than the screen. The restorer makes
-// the document that tall until the frame is back. It tries once per shortfall: the shortfall has
-// to clear before it tries again.
+// the document that tall until the frame is back. It starts at once, so the frame grows with the
+// keyboard's closing instead of after it, and tries again once if iOS ignored that first lift. A
+// shortfall has to clear before the restorer tries for it again.
 
 // Under this the gap between the frame and the screen is rounding.
 const TOLERANCE = 8;
 
-// Lets the keyboard finish closing before the frame is judged.
-const SETTLE_MS = 200;
+// Delay before each attempt; the retry lets a close animation that ignored the first lift finish.
+const ATTEMPT_DELAYS_MS = [0, 250];
 const POLL_MS = 50;
 const POLLS = 20;
 
@@ -41,33 +42,34 @@ export function createFrameRestore(env: FrameRestoreEnv): FrameRestore {
     release?.();
     release = null;
   };
-  const poll = (left: number) => {
+  const clear = () => {
+    stop();
+    tried = false;
+  };
+  const poll = (attempt: number, left: number) => {
     timer = env.setTimeout(() => {
       timer = null;
-      if (left > 0 && env.isShort()) {
-        poll(left - 1);
-        return;
-      }
+      if (!env.isShort()) return clear();
+      if (left > 0) return poll(attempt, left - 1);
       stop();
-      if (!env.isShort()) tried = false;
+      if (attempt + 1 < ATTEMPT_DELAYS_MS.length) schedule(attempt + 1);
     }, POLL_MS);
+  };
+  const schedule = (attempt: number) => {
+    timer = env.setTimeout(() => {
+      timer = null;
+      if (!env.isShort()) return clear();
+      release = env.lift();
+      poll(attempt, POLLS);
+    }, ATTEMPT_DELAYS_MS[attempt]);
   };
 
   return {
     check() {
-      if (!env.isShort()) {
-        stop();
-        tried = false;
-        return;
-      }
+      if (!env.isShort()) return clear();
       if (tried) return;
       tried = true;
-      timer = env.setTimeout(() => {
-        timer = null;
-        if (!env.isShort()) return;
-        release = env.lift();
-        poll(POLLS);
-      }, SETTLE_MS);
+      schedule(0);
     },
     dispose: stop,
   };

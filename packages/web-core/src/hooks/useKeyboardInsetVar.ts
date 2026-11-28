@@ -47,8 +47,15 @@ export function useKeyboardInsetVar() {
       restore.check();
       if (open) requestAnimationFrame(() => revealFocusedField(document, window));
     });
-    window.addEventListener("resize", restore.check);
-    window.visualViewport?.addEventListener("resize", restore.check);
+    // The watcher reads the keyboard in a frame; checking in the frame after it keeps a keyboard that
+    // is still opening from reading as a short frame.
+    let checkFrame = 0;
+    const scheduleCheck = () => {
+      cancelAnimationFrame(checkFrame);
+      checkFrame = requestAnimationFrame(restore.check);
+    };
+    window.addEventListener("resize", scheduleCheck);
+    window.visualViewport?.addEventListener("resize", scheduleCheck);
     // Moving between fields while the keyboard stays up.
     const onFocusIn = () => {
       if (open) revealFocusedField(document, window);
@@ -57,8 +64,9 @@ export function useKeyboardInsetVar() {
     return () => {
       stop();
       restore.dispose();
-      window.removeEventListener("resize", restore.check);
-      window.visualViewport?.removeEventListener("resize", restore.check);
+      cancelAnimationFrame(checkFrame);
+      window.removeEventListener("resize", scheduleCheck);
+      window.visualViewport?.removeEventListener("resize", scheduleCheck);
       frame.remove();
       screen.remove();
       document.removeEventListener("focusin", onFocusIn);

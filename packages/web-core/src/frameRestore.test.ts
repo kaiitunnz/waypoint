@@ -58,12 +58,11 @@ describe("createFrameRestore", () => {
     expect(state.lifted).toBe(0);
   });
 
-  it("waits for the keyboard to settle, then lifts the document", () => {
+  it("lifts the document at once", () => {
     const { state, advance, restore } = setup();
     restore.check();
-    advance(100);
     expect(state.lifted).toBe(0);
-    advance(150);
+    advance(0);
     expect(state.lifted).toBe(1);
     expect(state.released).toBe(0);
   });
@@ -71,31 +70,27 @@ describe("createFrameRestore", () => {
   it("lets go as soon as the frame is back", () => {
     const { state, advance, restore } = setup();
     restore.check();
-    advance(250);
+    advance(0);
     state.short = false;
     advance(60);
     expect(state.released).toBe(1);
+    advance(5000);
+    expect(state.lifted).toBe(1);
   });
 
-  it("lets go after a bounded wait when the frame never comes back", () => {
+  it("tries a second time when the first lift never brings the frame back, then gives up", () => {
     const { state, advance, restore, pending } = setup();
     restore.check();
     advance(5000);
-    expect(state.lifted).toBe(1);
-    expect(state.released).toBe(1);
+    expect(state.lifted).toBe(2);
+    expect(state.released).toBe(2);
     expect(pending()).toBe(0);
   });
 
-  it("tries once per shortfall, and again after the shortfall has cleared", () => {
+  it("does not try a third time", () => {
     const { state, advance, restore } = setup();
     restore.check();
     advance(5000);
-    restore.check();
-    advance(5000);
-    expect(state.lifted).toBe(1);
-    state.short = false;
-    restore.check();
-    state.short = true;
     restore.check();
     advance(5000);
     expect(state.lifted).toBe(2);
@@ -104,48 +99,59 @@ describe("createFrameRestore", () => {
   it("does not lift again, nor lose its poll, when checked while lifted and still short", () => {
     const { state, advance, restore, pending } = setup();
     restore.check();
-    advance(250);
+    advance(0);
     restore.check();
     advance(5000);
-    expect(state.lifted).toBe(1);
-    expect(state.released).toBe(1);
+    expect(state.lifted).toBe(2);
+    expect(state.released).toBe(2);
     expect(pending()).toBe(0);
+  });
+
+  it("tries again for a new shortfall once the old one has cleared", () => {
+    const { state, advance, restore } = setup();
+    restore.check();
+    advance(5000);
+    state.short = false;
+    restore.check();
+    state.short = true;
+    restore.check();
+    advance(0);
+    expect(state.lifted).toBe(3);
   });
 
   it("tries again for a later shortfall that no check saw clear", () => {
     const { state, advance, restore } = setup();
     restore.check();
-    advance(250);
+    advance(0);
     state.short = false;
     advance(60);
     state.short = true;
     restore.check();
-    advance(250);
+    advance(0);
     expect(state.lifted).toBe(2);
   });
 
-  it("drops a pending try when the shortfall clears while settling", () => {
+  it("drops a pending try when the shortfall clears before it runs", () => {
     const { state, advance, restore } = setup();
     restore.check();
-    advance(100);
     state.short = false;
     restore.check();
     advance(5000);
     expect(state.lifted).toBe(0);
   });
 
-  it("does not lift when the frame is back by the time it settles", () => {
+  it("does not lift when the frame is back by the time the try runs", () => {
     const { state, advance, restore } = setup();
     restore.check();
     state.short = false;
-    advance(250);
+    advance(0);
     expect(state.lifted).toBe(0);
   });
 
   it("releases and stops on dispose", () => {
     const { state, advance, restore, pending } = setup();
     restore.check();
-    advance(250);
+    advance(0);
     restore.dispose();
     expect(state.released).toBe(1);
     expect(pending()).toBe(0);

@@ -427,13 +427,26 @@ export function pendingCallOf(items: readonly LeafItem[]): LeafItem | undefined 
   return items.findLast((child) => (child.kind === "pair" ? !child.pair.result : child.event.kind === "tool_call"));
 }
 
-// What the live run line says of the call in progress: its step, and the agent's
-// description of it.
-export function liveCall(items: readonly LeafItem[], working: boolean): { step: Step | null; summary: string | null } | null {
+// A command's first line, marked when more follow.
+function oneLine(command: string | null): string | null {
+  const [first, ...rest] = command?.trim().split("\n") ?? [];
+  if (!first) return null;
+  return rest.length > 0 ? `${first.trimEnd()} …` : first;
+}
+
+export interface LiveCall {
+  step: Step | null;
+  // The agent's description of the call, and the command it runs on one line.
+  summary: string | null;
+  command: string | null;
+}
+
+// What the live run line says of the call in progress.
+export function liveCall(items: readonly LeafItem[], working: boolean): LiveCall | null {
   const pending = working ? pendingCallOf(items) : undefined;
   if (!pending) return null;
   const event = primaryEvent(pending);
-  return { step: describeStep(event), summary: readSummary(event) };
+  return { step: describeStep(event), summary: readSummary(event), command: oneLine(commandForEvent(event)) };
 }
 
 export function describeCall(child: LeafItem, cwd?: string | null): CallView | null {

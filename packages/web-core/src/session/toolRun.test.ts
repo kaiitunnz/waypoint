@@ -689,15 +689,31 @@ describe("a call's summary", () => {
     expect(describeCall(item)?.label).toBe("cursor: null\nlimit: 10");
   });
 
-  it("captions the live run line with the call in progress", () => {
+  it("heads the live run line of the call in progress, over its command", () => {
     const items = run([
       summarized(1, "a", "Bash", { command: "ls" }, "List the files"),
       result(2, "a", ""),
       summarized(3, "b", "Bash", bash, "Check for changes"),
     ]);
-    expect(liveCall(items, true)).toEqual({ step: { verb: "Running", subject: "git status --short" }, summary: "Check for changes" });
+    expect(liveCall(items, true)).toEqual({
+      step: { verb: "Running", subject: "git status --short" },
+      summary: "Check for changes",
+      command: "git status --short",
+    });
     expect(liveCall(items, false)).toBeNull();
     expect(liveCall(run([summarized(1, "a", "Bash", { command: "ls" })]), true)).toMatchObject({ summary: null });
+  });
+
+  it("keeps a live command to its first line, and says when more follow", () => {
+    const command = (text: string) => liveCall(run([summarized(1, "a", "Bash", { command: text })]), true)?.command;
+    expect(command("cd src\r\nls -a\n")).toBe("cd src …");
+    expect(command("\n  ls -a\n\n")).toBe("ls -a");
+    expect(command(`echo ${"x".repeat(200)}`)).toBe(`echo ${"x".repeat(200)}`);
+  });
+
+  it("names no command for a live call that runs none", () => {
+    const items = run([summarized(1, "a", "Agent", { prompt: "List them" }, "Find callers")]);
+    expect(liveCall(items, true)).toEqual({ step: { verb: "Running a subagent", subject: null }, summary: "Find callers", command: null });
   });
 });
 

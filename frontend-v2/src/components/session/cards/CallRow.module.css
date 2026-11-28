@@ -33,9 +33,9 @@
 
 /* The agent's description of the call, over what it ran. */
 .heading {
+  composes: heading from "../../ui/SummaryText.module.css";
   width: 100%;
   min-width: 0;
-  color: var(--text-strong);
   overflow-wrap: anywhere;
 }
 

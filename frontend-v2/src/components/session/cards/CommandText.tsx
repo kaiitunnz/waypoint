@@ -18,6 +18,11 @@ export function Lines({ text }: { text: string }) {
   ));
 }
 
+// A command under a heading, clipped to one line.
+export function CommandLine({ text }: { text: string }) {
+  return <span className={styles.line}>{text}</span>;
+}
+
 // A command or script in mono, folded at eight lines unless `whole`. `quiet` sets it
 // under a heading that names the call.
 export function CommandText({ text, whole, quiet }: { text: string; whole?: boolean; quiet?: boolean }) {

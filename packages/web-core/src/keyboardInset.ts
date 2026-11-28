@@ -44,7 +44,6 @@ export function keyboardState({ layoutHeight, visualHeight, visualOffsetTop, sca
   return { inset: Math.max(0, Math.round(lost - visualOffsetTop)), visibleHeight: Math.round(visualHeight) };
 }
 
-// Input types that take no typed text, so no keyboard rises for them.
 const NO_KEYBOARD = new Set(["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"]);
 
 export interface FocusTarget {
@@ -53,7 +52,6 @@ export interface FocusTarget {
   isContentEditable?: boolean;
 }
 
-// A field the keyboard rises for.
 export function isTextEntry(element: FocusTarget | null): boolean {
   if (!element) return false;
   const tag = element.tagName.toLowerCase();
@@ -88,8 +86,6 @@ export function currentKeyboardState(win: KeyboardWindow, doc: KeyboardDocument)
   );
 }
 
-// Calls `onChange` with the state now and again whenever it changes, at most once a frame; returns
-// the unsubscribe. A browser without a visual viewport reports closed once and never again.
 export function watchKeyboard(win: KeyboardWindow, doc: KeyboardDocument, onChange: (state: KeyboardState) => void): () => void {
   let last = currentKeyboardState(win, doc);
   onChange(last);

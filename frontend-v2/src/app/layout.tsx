@@ -35,14 +35,13 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Waypoint" },
 };
 
-// viewport-fit=cover lets the page run under the status bar and home indicator. The on-screen
-// keyboard shrinks only the visual viewport, as it does on iOS, so --keyboard-inset covers it
-// the same way everywhere. The theme-color meta is created by the inline script below, so it
-// is not declared here.
+// viewport-fit=cover lets the page run under the status bar and home indicator.
+// The theme-color meta is created by the inline script below, so it is not declared here.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // The keyboard shrinks only the visual viewport, as on iOS, so --keyboard-inset reads it alike.
   interactiveWidget: "resizes-visual",
 };
 

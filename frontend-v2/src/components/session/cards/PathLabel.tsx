@@ -40,7 +40,7 @@ function CutPath({ dir, base, full, className }: Omit<PathLabelProps, "whole">) 
       {open ? (
         full
       ) : (
-        <>
+        <bdi dir="ltr">
           {dir ? (
             <span className={styles.dir}>
               <bdi dir="ltr">{dir}</bdi>
@@ -48,7 +48,7 @@ function CutPath({ dir, base, full, className }: Omit<PathLabelProps, "whole">) 
           ) : null}
           {name.head ? <span className={styles.head}>{name.head}</span> : null}
           <span className={styles.tail}>{name.tail}</span>
-        </>
+        </bdi>
       )}
     </span>
   );

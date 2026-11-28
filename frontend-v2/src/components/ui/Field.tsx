@@ -2,6 +2,8 @@
 
 import { useState, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes } from "react";
 
+import { useTailAnchor } from "@waypoint/web-core/hooks/useTailAnchor";
+
 import { cx } from "@/lib/cx";
 
 import { Icon } from "./Icon";
@@ -35,6 +37,12 @@ const MACHINE = { spellCheck: false, autoCapitalize: "none", autoCorrect: "off" 
 
 export function TextInput({ mono, className, ref, ...rest }: TextInputProps) {
   return <input {...(mono ? MACHINE : null)} {...rest} ref={ref} className={cx(styles.input, mono && styles.mono, className)} />;
+}
+
+// A path or command: it shows its end while it is not being edited.
+export function TailInput({ ref, ...props }: TextInputProps) {
+  const anchor = useTailAnchor(ref, props);
+  return <TextInput {...props} {...anchor} />;
 }
 
 export function TextArea({ mono, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "className"> & { mono?: boolean }) {

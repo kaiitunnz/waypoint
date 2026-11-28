@@ -4,6 +4,7 @@ import { attachmentUrl } from "@waypoint/web-core/api";
 import { formatFileSize } from "@waypoint/web-core/attachments";
 import type { AttachmentSpec } from "@waypoint/web-core/types";
 
+import { FileName } from "@/components/ui/FileName";
 import { FileThumb } from "@/components/ui/FileThumb";
 
 import { useSessionContext } from "../SessionContext";
@@ -14,7 +15,7 @@ function AttachmentCard({ spec, url }: { spec: AttachmentSpec; url: string }) {
     <a href={url} target="_blank" rel="noreferrer" className={styles.card} title={spec.filename}>
       <FileThumb className={styles.thumb} src={spec.kind === "image" ? url : null} alt={spec.filename} mark="▤" />
       <span className={styles.text}>
-        <span className={styles.name}>{spec.filename}</span>
+        <FileName name={spec.filename} className={styles.name} />
         <span className={styles.size}>{formatFileSize(spec.size)}</span>
       </span>
     </a>

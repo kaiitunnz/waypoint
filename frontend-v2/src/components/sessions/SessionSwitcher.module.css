@@ -6,7 +6,7 @@
   margin: 0;
   padding: 0 0 8px;
   list-style: none;
-  max-height: min(56dvh, 480px);
+  max-height: min(calc(var(--visible-height) * 0.56), 480px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }

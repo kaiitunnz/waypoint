@@ -8,11 +8,12 @@
 }
 
 /* An iOS home-screen app can measure dvh short of the screen by the status bar,
-   which leaves a band under the screen; touch fills the layout viewport instead. */
+   which leaves a band under the screen; touch fills the layout viewport instead, down to
+   the tab bar, or to the keyboard while it is up. */
 @media not all and (hover: hover) and (pointer: fine) {
   .screen {
     position: fixed;
-    inset: 0 0 var(--tabbar-inset, 0px);
+    inset: 0 0 calc(var(--tabbar-inset, 0px) + var(--keyboard-inset));
     height: auto;
   }
 }

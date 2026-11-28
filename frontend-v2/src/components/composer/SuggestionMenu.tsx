@@ -15,10 +15,11 @@ import {
 } from "@waypoint/web-core/composer-completions";
 import type { FileMentionRow } from "@waypoint/web-core/hooks/use-file-mentions";
 
+import { FileName } from "@/components/ui/FileName";
 import { FileThumb } from "@/components/ui/FileThumb";
+import { HighlightedText } from "@/components/ui/HighlightedText";
 import { cx } from "@/lib/cx";
 
-import { HighlightedText } from "./HighlightedText";
 import styles from "./SuggestionMenu.module.css";
 
 // The field points at the highlighted row by this id.
@@ -114,9 +115,7 @@ export function MentionMenu({ host, token, sessionId, mentions, ...menu }: Menti
               src={file.kind === "image" ? attachmentUrl(host, token, sessionId, file.id) : null}
             />
             <span className={styles.fileText}>
-              <span className={styles.name}>
-                <HighlightedText text={file.filename} positions={positions} />
-              </span>
+              <FileName name={file.filename} positions={positions} className={styles.name} />
               <span className={styles.description}>
                 <span>{typeTag(file.filename, file.kind === "image")}</span>
                 <span>{formatFileSize(file.size)}</span>

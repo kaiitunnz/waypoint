@@ -6,7 +6,7 @@
   /* Above the chrome; when room runs out, the toasts stay below the top edge and overlap the chrome. */
   top: calc(var(--safe-top) + 8px);
   bottom: min(
-    calc(var(--safe-bottom) + var(--dock-height, 0px) + var(--attention-height, 0px) + var(--composer-height, 0px) + 12px),
+    calc(var(--safe-bottom) + max(var(--dock-height, 0px), var(--keyboard-inset)) + var(--attention-height, 0px) + var(--composer-height, 0px) + 12px),
     calc(100dvh - var(--safe-top) - 64px)
   );
   display: flex;

@@ -10,6 +10,7 @@ from typing import Any
 
 from openai_codex.models import UnknownNotification
 
+from waypoint.backends.codex.command_line import runs_only
 from waypoint.backends.diff_preview import (
     DiffPreviewPayload,
     build_preview,
@@ -40,24 +41,18 @@ def error_text(payload: dict[str, Any]) -> str:
     return f"{message} — {details}"
 
 
-def command_summary(actions: Any) -> str | None:
-    """Names a command by the actions Codex parsed from it, or ``None`` unless
-    every one reads, searches or lists: a summary must not name a command by a
-    part of it."""
-    if not isinstance(actions, list) or not actions:
-        return None
-    phrases: dict[str, None] = {}
-    for action in actions:
-        if (phrase := _action_phrase(action)) is None:
+def command_summary(command: Any, actions: Any) -> str | None:
+    """Names a command by the action Codex parsed from it, or ``None`` unless that
+    one read, search or listing is all the command does. Codex leaves other
+    commands out of its parsed actions, so the command line is read too."""
+    match command, actions:
+        case str(), [{"command": str(parsed)} as action] if runs_only(command, parsed):
+            return _action_phrase(action)
+        case _:
             return None
-        phrases[phrase] = None
-    first, *rest = phrases
-    return ", ".join([first, *(phrase[0].lower() + phrase[1:] for phrase in rest)])
 
 
-def _action_phrase(action: Any) -> str | None:
-    if not isinstance(action, dict):
-        return None
+def _action_phrase(action: dict[str, Any]) -> str | None:
     fields: tuple[str, ...]
     bare: str | None
     match action.get("type"):
@@ -286,13 +281,9 @@ def approval_summary(method: str, params: dict[str, Any]) -> str | None:
     """A command approval's summary. A request that gives a ``reason`` has none:
     it can ask for more than its command, such as running outside the sandbox,
     and nothing else in it says so."""
-    if (
-        method != "item/commandExecution/requestApproval"
-        or not params.get("command")
-        or params.get("reason")
-    ):
+    if method != "item/commandExecution/requestApproval" or params.get("reason"):
         return None
-    return command_summary(params.get("commandActions"))
+    return command_summary(params.get("command"), params.get("commandActions"))
 
 
 def format_approval_text(method: str, params: dict[str, Any]) -> str:

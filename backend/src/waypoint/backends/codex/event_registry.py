@@ -157,7 +157,8 @@ def _format_collab_agent_tool(item: dict[str, Any], *, completed: bool) -> str:
 
 
 def _command_started(item: dict[str, Any]) -> Rendered:
-    metadata = set_summary({}, command_summary(item.get("commandActions")))
+    summary = command_summary(item.get("command"), item.get("commandActions"))
+    metadata = set_summary({}, summary)
     return _tool_call(f"$ {item.get('command', '')}", metadata)
 
 

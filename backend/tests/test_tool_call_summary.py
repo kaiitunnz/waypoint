@@ -2,6 +2,7 @@
 from the field each agent writes for that purpose and absent otherwise."""
 
 import asyncio
+import shlex
 from typing import Any
 
 import pytest
@@ -68,6 +69,9 @@ def test_claude_without_a_description_gives_none(tool_input: Any) -> None:
 
 def test_summary_is_trimmed_and_absent_when_blank() -> None:
     assert set_summary({}, "  Run tests \n") == {"summary": "Run tests"}
+    assert set_summary({}, "Run the tests\r\n\n  rm -rf a") == {
+        "summary": "Run the tests rm -rf a"
+    }
     assert set_summary({}, "   ") == {}
     assert set_summary({}, None) == {}
 
@@ -271,27 +275,108 @@ SEARCH = {
 UNKNOWN = {"type": "unknown", "command": "git status --short"}
 
 
+def _wrapped(script: str) -> str:
+    return shlex.join(["/bin/bash", "-lc", script])
+
+
 @pytest.mark.parametrize(
-    ("actions", "expected"),
+    ("action", "expected"),
     [
-        ([_read("SKILL.md")], "Read `SKILL.md`"),
-        ([SEARCH], "Search `permission mode`"),
-        ([{**SEARCH, "query": None}], "Search `src`"),
-        ([{"type": "search", "command": "rg x"}], "Search files"),
-        ([{"type": "listFiles", "command": "ls src", "path": "src"}], "List `src`"),
-        ([{"type": "listFiles", "command": "ls"}], "List files"),
-        ([_read("a.py"), SEARCH], "Read `a.py`, search `permission mode`"),
-        ([_read("a.py"), _read("a.py")], "Read `a.py`"),
-        ([UNKNOWN], None),
-        ([_read("a.py"), UNKNOWN], None),
-        ([_read("a`b")], None),
-        ([{"type": "write", "command": "tee a"}], None),
-        ([], None),
-        (None, None),
+        (_read("SKILL.md"), "Read `SKILL.md`"),
+        (SEARCH, "Search `permission mode`"),
+        ({**SEARCH, "query": None}, "Search `src`"),
+        ({"type": "search", "command": "rg x"}, "Search files"),
+        ({"type": "listFiles", "command": "ls src", "path": "src"}, "List `src`"),
+        ({"type": "listFiles", "command": "ls"}, "List files"),
+        (UNKNOWN, None),
+        # A name that would break the backticks marking it.
+        ({"type": "read", "command": "cat 'a`b'", "name": "a`b"}, None),
+        ({"type": "write", "command": "tee a"}, None),
     ],
 )
-def test_codex_command_summary(actions: Any, expected: str | None) -> None:
-    assert command_summary(actions) == expected
+def test_codex_command_summary_names_the_action(
+    action: dict[str, Any], expected: str | None
+) -> None:
+    assert command_summary(_wrapped(action["command"]), [action]) == expected
+    # A command line Codex did not wrap in a shell reads the same.
+    assert command_summary(action["command"], [action]) == expected
+
+
+@pytest.mark.parametrize("actions", [[], None, [_read("a"), _read("b")]])
+def test_codex_command_summary_needs_one_action(actions: Any) -> None:
+    assert command_summary(_wrapped("cat a"), actions) is None
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "cat README.md",
+        "cat README.md | wc -l",
+        "cat README.md | head -n 50",
+        "cat README.md | head -50",
+        "cat README.md|tail -n +2|nl -ba",
+        "cat README.md | head --lines=5 | wc -lw",
+    ],
+)
+def test_codex_command_summary_allows_trimmed_output(script: str) -> None:
+    summary = command_summary(_wrapped(script), [_read("README.md")])
+
+    assert summary == "Read `README.md`"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        # Codex reports only the read for each of these.
+        "cat README.md | tee /dev/null",
+        "cat README.md && printf ok",
+        "cat README.md | xargs echo found",
+        "cat README.md | tr a-z A-Z",
+        "cat README.md | sort",
+        "cat README.md || true",
+        "cat README.md; printf ok",
+        "cat README.md\nprintf ok",
+        "cat README.md &",
+        "cat README.md |& head",
+        "cat README.md |",
+        "cat README.md | head > out",
+        "cat README.md > out",
+        "cat README.md 2>/dev/null",
+        "cat < README.md",
+        "cat README.md | head -n 5 b",
+        "cat README.md | head b",
+        "cat README.md | wc -l 5",
+        "cat README.md | wc --files0-from=names",
+        "cat README.md | head -n",
+        "cat README.md $(printf b)",
+        "cat README.md `printf b`",
+        "(cat README.md)",
+        'cat README.md "$HOME"',
+        "cat README.md # note",
+        "cat README.md *",
+        "cat README.md 'unterminated",
+        "cat other.md",
+    ],
+)
+def test_codex_command_summary_needs_the_whole_command(script: str) -> None:
+    assert command_summary(_wrapped(script), [_read("README.md")]) is None
+
+
+@pytest.mark.parametrize(
+    ("script", "parsed", "covered"),
+    [
+        ("rg x | head -n 50", "rg x", True),
+        ("rg -l hello . | xargs echo found", "rg -l hello .", False),
+        ("rg -n 'a && b' src | head -n 5", "rg -n 'a && b' src", True),
+        ('rg -g "*.py" x', "rg -g '*.py' x", True),
+    ],
+)
+def test_codex_command_summary_reads_quoting(
+    script: str, parsed: str, covered: bool
+) -> None:
+    action = {"type": "search", "command": parsed, "query": "x"}
+
+    assert (command_summary(_wrapped(script), [action]) is not None) is covered
 
 
 def _command_item(actions: list[dict[str, Any]]) -> dict[str, Any]:

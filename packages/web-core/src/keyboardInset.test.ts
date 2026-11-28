@@ -35,9 +35,12 @@ describe("keyboardState", () => {
     expect(keyboardState({ ...PHONE, layoutHeight: 516, visualHeight: 516 }, true)).toEqual(KEYBOARD_CLOSED);
   });
 
-  it("reads each orientation from its own heights", () => {
-    expect(keyboardState({ layoutHeight: 393, visualHeight: 193, visualOffsetTop: 0, scale: 1 }, true).inset).toBe(200);
-    expect(keyboardState(PHONE, true)).toEqual(KEYBOARD_CLOSED);
+  it("reads a landscape screen from its own heights", () => {
+    expect(keyboardState({ layoutHeight: 393, visualHeight: 193, visualOffsetTop: 0, scale: 1 }, true)).toEqual({ inset: 200, visibleHeight: 193 });
+  });
+
+  it("never reads a negative inset when the page is panned past the keyboard", () => {
+    expect(keyboardState({ ...PHONE, visualHeight: 516, visualOffsetTop: 400 }, true)).toEqual({ inset: 0, visibleHeight: 516 });
   });
 
   it("is closed while pinch-zoomed", () => {
@@ -55,7 +58,7 @@ describe("keyboardState", () => {
 
   it("is closed for a viewport it cannot read", () => {
     expect(keyboardState({ ...PHONE, visualHeight: Number.NaN }, true)).toEqual(KEYBOARD_CLOSED);
-    expect(keyboardState({ ...PHONE, scale: Number.POSITIVE_INFINITY }, true)).toEqual(KEYBOARD_CLOSED);
+    expect(keyboardState({ ...PHONE, scale: Number.NaN }, true)).toEqual(KEYBOARD_CLOSED);
   });
 });
 
@@ -84,6 +87,7 @@ type Frames = (() => void)[];
 
 function fakes() {
   const frames: Frames = [];
+  const requested = { count: 0 };
   const viewport = Object.assign(new EventTarget(), { height: 852, offsetTop: 0, scale: 1 });
   const winTarget = new EventTarget();
   const win = {
@@ -91,7 +95,10 @@ function fakes() {
     visualViewport: viewport,
     addEventListener: (type: string, listener: () => void) => winTarget.addEventListener(type, listener),
     removeEventListener: (type: string, listener: () => void) => winTarget.removeEventListener(type, listener),
-    requestAnimationFrame: (callback: () => void) => frames.push(callback),
+    requestAnimationFrame: (callback: () => void) => {
+      requested.count += 1;
+      return frames.push(callback);
+    },
     cancelAnimationFrame: (handle: number) => {
       frames[handle - 1] = () => {};
     },
@@ -103,7 +110,7 @@ function fakes() {
     removeEventListener: (type: string, listener: () => void) => docTarget.removeEventListener(type, listener),
   };
   const flush = () => frames.splice(0).forEach((frame) => frame());
-  return { win: win as unknown as KeyboardWindow, doc: doc as unknown as KeyboardDocument & { activeElement: FocusTarget | null }, viewport, winTarget, docTarget, flush };
+  return { win: win as unknown as KeyboardWindow, doc: doc as unknown as KeyboardDocument & { activeElement: FocusTarget | null }, viewport, winTarget, docTarget, flush, requested };
 }
 
 const INPUT: FocusTarget = { tagName: "INPUT", type: "text" };
@@ -134,6 +141,16 @@ describe("watchKeyboard", () => {
     viewport.dispatchEvent(new Event("resize"));
     flush();
     expect(seen.at(-1)).toEqual(KEYBOARD_CLOSED);
+  });
+
+  it("reads once a frame however many events arrive", () => {
+    const { win, doc, viewport, docTarget, winTarget, requested } = fakes();
+    watchKeyboard(win, doc, vi.fn());
+    docTarget.dispatchEvent(new Event("focusin"));
+    viewport.dispatchEvent(new Event("resize"));
+    viewport.dispatchEvent(new Event("scroll"));
+    winTarget.dispatchEvent(new Event("resize"));
+    expect(requested.count).toBe(1);
   });
 
   it("stays open as focus moves from one field to the next", () => {
@@ -182,6 +199,18 @@ describe("watchKeyboard", () => {
     stop();
     viewport.height = 516;
     viewport.dispatchEvent(new Event("resize"));
+    flush();
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a read that was pending when it was unsubscribed", () => {
+    const { win, doc, viewport, flush } = fakes();
+    doc.activeElement = INPUT;
+    const onChange = vi.fn();
+    const stop = watchKeyboard(win, doc, onChange);
+    viewport.height = 516;
+    viewport.dispatchEvent(new Event("resize"));
+    stop();
     flush();
     expect(onChange).toHaveBeenCalledTimes(1);
   });

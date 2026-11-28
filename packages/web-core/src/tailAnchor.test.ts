@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { createTailAnchor, type TailField } from "./tailAnchor";
 
-const VALUE = "/home/noppanat/Workspace/Project/FlowMesh-v2";
+const VALUE = "/home/ada/Workspace/app-name";
 
 function field(overrides: Partial<TailField> = {}): TailField {
   const state: TailField = {

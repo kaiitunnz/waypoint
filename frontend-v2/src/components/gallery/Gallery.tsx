@@ -276,7 +276,7 @@ export function Gallery() {
           <TextInput id="g-host" mono defaultValue="10.0.4.12" />
         </Field>
         <Field label="Folder" htmlFor="g-folder">
-          <TailInput id="g-folder" mono defaultValue="/home/noppanat/Workspace/Project/FlowMesh-v2/docs/architecture" />
+          <TailInput id="g-folder" mono defaultValue="/home/ada/Workspace/app-name/docs/architecture" />
         </Field>
         <Field label="Password" htmlFor="g-pass">
           <PasswordInput id="g-pass" defaultValue="hunter2" />

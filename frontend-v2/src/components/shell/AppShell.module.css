@@ -9,8 +9,6 @@
   background: var(--plane);
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
-  /* Room to scroll the last field clear of the keyboard. */
-  padding-bottom: var(--keyboard-inset);
 }
 
 .withTabBar {
@@ -19,9 +17,11 @@
   padding-bottom: var(--tabbar-inset);
 }
 
-/* The bar is hidden while the keyboard is up, so what the screen reserves is the keyboard's. */
+/* The bar is hidden while the keyboard is up, so what the screen reserves is the keyboard's. A page
+   that scrolls the document needs no room of its own: iOS scrolls it down to the keyboard. */
 html[data-keyboard] .withTabBar {
   --tabbar-inset: var(--keyboard-inset);
+  padding-bottom: 0;
 }
 
 @media (hover: hover) and (pointer: fine) {

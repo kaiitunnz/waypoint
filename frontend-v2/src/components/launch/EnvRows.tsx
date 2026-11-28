@@ -3,6 +3,7 @@
 import {
   addEnvEntry,
   editEnvValue,
+  ENV_MASK,
   envRowState,
   envValueDisplay,
   isSecretEnvKey,
@@ -24,6 +25,9 @@ interface EnvRowsProps {
   entries: EnvEntry[];
   onChange: (entries: EnvEntry[]) => void;
   disabled?: boolean;
+  // The values are not known, as for a running session's variables: an untouched row shows
+  // a mask, and every value typed is masked, whatever its key.
+  valuesHidden?: boolean;
 }
 
 // A password field invites the browser's saved sign-in, but this one holds an agent's secret.
@@ -31,7 +35,7 @@ const SECRET_INPUT = { type: "password", autoComplete: "new-password", "data-1p-
 
 // Replacing or removing a value is staged on the row until undone. A secret is
 // replaced from empty and typed masked, so its value never shows.
-export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
+export function EnvRows({ entries, onChange, disabled, valuesHidden }: EnvRowsProps) {
   return (
     <div className={styles.editor}>
       {entries.length > 0 ? (
@@ -39,7 +43,7 @@ export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
           {entries.map((entry) => {
             const state = envRowState(entry);
             const label = entry.key || "variable";
-            const secret = isSecretEnvKey(entry.key);
+            const secret = valuesHidden || isSecretEnvKey(entry.key);
             return (
               <li key={entry.id} className={cx(styles.row, state === "add" && styles.added)}>
                 {state === "add" ? (
@@ -61,8 +65,8 @@ export function EnvRows({ entries, onChange, disabled }: EnvRowsProps) {
                 {state === "remove" ? (
                   <span className={styles.removed}>Removed on apply</span>
                 ) : state === "keep" ? (
-                  <span className={styles.value} title={entry.value ? undefined : "Empty"}>
-                    {envValueDisplay(entry.key, entry.value)}
+                  <span className={styles.value} title={valuesHidden || entry.value ? undefined : "Empty"}>
+                    {valuesHidden ? ENV_MASK : envValueDisplay(entry.key, entry.value)}
                   </span>
                 ) : (
                   <TextInput

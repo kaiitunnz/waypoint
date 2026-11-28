@@ -81,7 +81,7 @@ export function envRowState(entry: EnvEntry): EnvRowState {
 }
 
 const SECRET_KEY = /TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTH|CREDENTIAL|PRIVATE|_KEY$|^KEY$/i;
-const MASK = "••••••••";
+export const ENV_MASK = "••••••••";
 const SHORT_LIMIT = 28;
 
 export function isSecretEnvKey(key: string): boolean {
@@ -94,7 +94,7 @@ export function envValueDisplay(key: string, value: string): string {
   if (!value) return "";
   if (isSecretEnvKey(key)) {
     const prefix = /^[A-Za-z]{2,5}[_-]/.exec(value)?.[0] ?? "";
-    return `${prefix}${MASK}`;
+    return `${prefix}${ENV_MASK}`;
   }
   return value.length > SHORT_LIMIT ? `${value.slice(0, SHORT_LIMIT - 1)}…` : value;
 }

@@ -2,29 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { cancelHeldMessages, releaseHeldMessages } from "@waypoint/web-core/api";
 import { approvalDecisionsFor, supportsApprovalNote, type BackendCatalog } from "@waypoint/web-core/backends";
 import type { PlanViewModel } from "@waypoint/web-core/events";
-import { buildMessageQueue, sendNowOutcome, type QueueAction, type QueueItem } from "@waypoint/web-core/session/messageQueue";
+import { buildMessageQueue } from "@waypoint/web-core/session/messageQueue";
 import type { SideQuestionState } from "@waypoint/web-core/session/sideQuestions";
-import type {
-  EventRecord,
-  HeldMessage,
-  MessageSchedule,
-  PendingQuestionsSnapshot,
-  SessionRecord,
-} from "@waypoint/web-core/types";
+import type { EventRecord, HeldMessage, PendingQuestionsSnapshot, SessionRecord } from "@waypoint/web-core/types";
 
-import { useToast } from "@/components/ui/Toast";
-import { useFailureToast } from "@/lib/useFailureToast";
-
-import { useSessionContext } from "../SessionContext";
 import { ApprovalDock } from "./ApprovalDock";
 import styles from "./AttentionStack.module.css";
 import { PlanApprovalDock } from "./PlanApprovalDock";
 import { QuestionDock } from "./QuestionDock";
 import { QueueDock } from "./QueueDock";
 import { SideQuestionDock } from "./SideQuestionDock";
+import { useQueueHandlers, type ScheduledMessages } from "./useQueueHandlers";
 
 interface AttentionStackProps {
   session: SessionRecord;
@@ -34,12 +24,7 @@ interface AttentionStackProps {
   plan: PlanViewModel | null;
   pendingQuestions: PendingQuestionsSnapshot | null;
   heldMessages: HeldMessage[];
-  scheduled: {
-    messages: MessageSchedule[];
-    cancel: (id: string) => Promise<void>;
-    // Resolves to whether the session held the message.
-    sendNow: (id: string) => Promise<boolean>;
-  };
+  scheduled: ScheduledMessages;
   sideQuestions: SideQuestionState;
   sideQuestionArrivals: number;
   onSession: (session: SessionRecord) => void;
@@ -62,9 +47,7 @@ export function AttentionStack({
   onSession,
   onRevealQuestion,
 }: AttentionStackProps) {
-  const { host, token, sessionId } = useSessionContext();
-  const report = useFailureToast();
-  const { toast } = useToast();
+  const queueHandlers = useQueueHandlers(scheduled);
   const root = useRef<HTMLDivElement>(null);
   // Held here, where it survives the side-question strip mounting with its first aside:
   // a live aside's arrival opens the panel, leaving the focus where the human is typing.
@@ -91,26 +74,6 @@ export function AttentionStack({
     };
   }, []);
 
-  const run = async (request: () => Promise<void>, fallback: string) => {
-    try {
-      await request();
-    } catch (error) {
-      report(error, fallback);
-    }
-  };
-  const onAction = async (item: QueueItem, action: QueueAction) => {
-    if (item.kind === "scheduled") {
-      if (action === "cancel") await run(() => scheduled.cancel(item.id), "Could not cancel the message");
-      if (action === "sendNow") {
-        await run(async () => toast({ message: sendNowOutcome(await scheduled.sendNow(item.id)) }), "Could not send the message");
-      }
-      return;
-    }
-    const target = { heldId: item.id };
-    if (action === "release") await run(() => releaseHeldMessages(host, token, target), "Could not release the message");
-    if (action === "cancel") await run(() => cancelHeldMessages(host, token, target), "Could not cancel the message");
-  };
-
   const decision =
     approvals.length > 0 ? (
       <ApprovalDock
@@ -130,13 +93,7 @@ export function AttentionStack({
       {decision}
       {strips ? (
         <div className={styles.strips}>
-          <QueueDock
-            items={queue}
-            focus={Boolean(session.focus)}
-            onAction={onAction}
-            onReleaseAll={() => run(() => releaseHeldMessages(host, token, { sessionId }), "Could not release the messages")}
-            onCancelAll={() => run(() => cancelHeldMessages(host, token, { sessionId }), "Could not cancel the messages")}
-          />
+          <QueueDock items={queue} focus={Boolean(session.focus)} {...queueHandlers} />
           <SideQuestionDock
             questions={sideQuestions.items.values()}
             open={asides !== "closed"}

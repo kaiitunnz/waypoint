@@ -2,18 +2,16 @@
 
 import { useRef, useState } from "react";
 
-import { refreshSessionRateLimitUsage } from "@waypoint/web-core/api";
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import { USAGE_POPOVER_SIZE_KEY, usagePanelModel } from "@waypoint/web-core/session/usagePanel";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { Flyout } from "@/components/ui/Flyout";
 import { cx } from "@/lib/cx";
-import { useShellData } from "@/lib/shell-data";
-import { useFailureToast } from "@/lib/useFailureToast";
 
 import styles from "./Usage.module.css";
 import { UsagePanel } from "./UsagePanel";
+import { useUsageRefresh } from "./useUsageRefresh";
 
 const RADIUS = 7;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
@@ -26,24 +24,10 @@ interface UsageControlProps {
 
 // A session without usage data has no ring.
 export function UsageControl({ session, catalog, onSession }: UsageControlProps) {
-  const { host, token } = useShellData();
-  const reportFailure = useFailureToast();
   const [open, setOpen] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const model = usagePanelModel(session, catalog);
-
-  async function refresh() {
-    if (!session || refreshing) return;
-    setRefreshing(true);
-    try {
-      onSession(await refreshSessionRateLimitUsage(host, token, session.id));
-    } catch (error) {
-      reportFailure(error, "failed to refresh rate-limit usage");
-    } finally {
-      setRefreshing(false);
-    }
-  }
+  const { refresh, refreshing } = useUsageRefresh(session, onSession);
 
   if (!model.hasUsage) return null;
   const { contextPercent: percent, tone } = model;

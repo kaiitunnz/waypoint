@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import { cx } from "@/lib/cx";
 
@@ -29,12 +29,17 @@ interface SettingsRowProps {
   // The detail is a machine string, such as a path.
   mono?: boolean;
   disabled?: boolean;
+  // The row's value is changed and not yet applied.
+  staged?: boolean;
+  // The button of a pressable row, for a popover that anchors to it.
+  buttonRef?: Ref<HTMLButtonElement>;
 }
 
-export function SettingsRow({ label, detail, control, href, onNavigate, onPress, mono, disabled }: SettingsRowProps) {
+export function SettingsRow({ label, detail, control, href, onNavigate, onPress, mono, disabled, staged, buttonRef }: SettingsRowProps) {
   const content = (
     <>
       <span className={styles.label}>{label}</span>
+      {staged ? <i className={styles.staged} role="img" aria-label="Changed" /> : null}
       {detail ? <span className={cx(styles.detail, mono && styles.mono)}>{detail}</span> : null}
       {control}
       {href || onPress ? (
@@ -46,7 +51,7 @@ export function SettingsRow({ label, detail, control, href, onNavigate, onPress,
   );
   if (onPress) {
     return (
-      <button type="button" className={cx(styles.row, styles.pressable, styles.button)} onClick={onPress} disabled={disabled}>
+      <button ref={buttonRef} type="button" className={cx(styles.row, styles.pressable, styles.button)} onClick={onPress} disabled={disabled}>
         {content}
       </button>
     );

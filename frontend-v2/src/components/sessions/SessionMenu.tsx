@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 
+import { sessionEndAction } from "@waypoint/web-core/session/inspectorActions";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { MenuButton, type MenuButtonItem, type MenuButtonProps } from "@/components/ui/MenuButton";
@@ -52,7 +53,7 @@ export function SessionMenu({ session, subtitle, onAction, header, extra = [], o
   const act = (action: SessionAction): ScreenAction["run"] => () => onAction(action, session);
   const pin: SessionAction = session.pinned_at ? "unpin" : "pin";
   const end: ScreenAction =
-    session.status === "exited"
+    sessionEndAction(session) === "delete"
       ? { id: "delete", label: "Delete", tone: "danger", run: act("delete") }
       : { id: "terminate", label: "Terminate", tone: "danger", run: act("terminate") };
   return (

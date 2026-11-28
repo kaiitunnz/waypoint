@@ -28,6 +28,15 @@
   min-width: 0;
 }
 
+.staged {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: -4px;
+  border-radius: var(--r-pill);
+  background: var(--working);
+}
+
 .detail {
   min-width: 0;
   max-width: 62%;

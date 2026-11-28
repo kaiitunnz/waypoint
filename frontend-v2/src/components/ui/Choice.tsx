@@ -1,13 +1,15 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 
 import { cx } from "@/lib/cx";
 import { usePointerUI } from "@/lib/layout";
 
 import { Sheet } from "./Dialog";
 import { Field } from "./Field";
+import { Flyout } from "./Flyout";
 import { Icon } from "./Icon";
+import { Menu, MenuItem } from "./Popover";
 import { Select } from "./Select";
 import { SettingsRow } from "./Settings";
 import styles from "./Choice.module.css";
@@ -67,6 +69,57 @@ export function ChoiceField({ label, value, options, onChange, disabled, hint }:
           onChange(next);
         }}
       />
+    </>
+  );
+}
+
+interface ChoiceRowProps {
+  label: string;
+  value: string;
+  options: ChoiceOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  // The value is changed and not yet applied.
+  staged?: boolean;
+  // The picker's subtitle on touch.
+  hint?: ReactNode;
+}
+
+// One choice from a short list, as a row showing the current value: a menu from the row
+// on a pointer client, and on touch a sheet of the options. Where the form is a column of
+// rows on every client, such as an editor beside the conversation.
+export function ChoiceRow({ label, value, options, onChange, disabled, staged, hint }: ChoiceRowProps) {
+  const pointer = usePointerUI();
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const current = options.find((option) => option.value === value);
+  const choose = (next: string) => {
+    setOpen(false);
+    onChange(next);
+  };
+  return (
+    <>
+      <SettingsRow
+        label={label}
+        detail={current?.label ?? value}
+        disabled={disabled}
+        staged={staged}
+        buttonRef={trigger}
+        onPress={() => setOpen((shown) => !shown)}
+      />
+      {pointer ? (
+        <Flyout open={open} onClose={() => setOpen(false)} triggerRef={trigger} title={label} width={260} align="right" flush>
+          <Menu label={label}>
+            {options.map((option) => (
+              <MenuItem key={option.value} selected={option.value === value} disabled={option.disabled} onSelect={() => choose(option.value)}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </Menu>
+        </Flyout>
+      ) : (
+        <ChoiceSheet open={open} title={label} subtitle={hint} value={value} options={options} onClose={() => setOpen(false)} onChange={choose} />
+      )}
     </>
   );
 }

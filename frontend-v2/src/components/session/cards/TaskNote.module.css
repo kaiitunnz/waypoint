@@ -103,15 +103,3 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* A focused, hovered or open note lights its glyph, as a run line does. */
-.tap:focus-visible,
-.tap[aria-expanded="true"] {
-  --lit: 1;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .tap:hover {
-    --lit: 1;
-  }
-}

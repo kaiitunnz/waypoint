@@ -50,8 +50,6 @@
   --tool-bash: #91d681;
   --tool-agent: #a987e0;
   --tool-skill: #fca8c7;
-  /* 1: a tool glyph has its family's colour at rest. */
-  --tool-lit-at-rest: 1;
 
   /* Type. */
   --serif: var(--font-serif), "Source Serif 4", Georgia, serif;
@@ -161,11 +159,6 @@
   --z-bar: 20;
   --z-overlay: 40;
   --z-toast: 60;
-}
-
-/* The "Tool colours: On focus" device choice. */
-html[data-tool-colours="focus"] {
-  --tool-lit-at-rest: 0;
 }
 
 html[data-theme="light"] {

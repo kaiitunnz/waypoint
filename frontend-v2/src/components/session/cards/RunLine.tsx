@@ -69,12 +69,16 @@ export function RunLine({ phrase, glyphs = [], defaultOpen = false, live, asked,
   );
   return (
     <div className={styles.run}>
-      <button type="button" className={classes} aria-expanded={open} onClick={() => setChoice(!open)}>
+      <button type="button" className={classes} aria-expanded={open} data-lights-glyphs="focus" onClick={() => setChoice(!open)}>
         {inner}
       </button>
       {/* Touch has no hover to name the glyphs, so an open run spells its counts out. */}
       {open && !pointer && glyphs.length > 0 ? <p className={styles.counts}>{glyphs.map(counted).join(" · ")}</p> : null}
-      {open ? <div className={styles.body}>{children}</div> : null}
+      {open ? (
+        <div className={styles.body} data-lights-glyphs="always">
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 }

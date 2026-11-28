@@ -10,7 +10,7 @@ export function useToolColoursOnFocus(): [boolean, (next: boolean) => void] {
   return useStoredFlag(ON_FOCUS_KEY, false);
 }
 
-// Mirrors the choice onto <html>, where tokens.css reads it.
+// Mirrors the choice onto <html>, where ToolGlyph.module.css reads it.
 export function useToolColoursAttribute() {
   const [onFocus] = useToolColoursOnFocus();
   useEffect(() => {

@@ -136,13 +136,6 @@
   padding: 0 0 4px 20px;
 }
 
-/* A focused or hovered line and an open run light their glyphs, which shows under
-   "Tool colours: On focus". */
-.line:focus-visible,
-.body {
-  --lit: 1;
-}
-
 @container (max-width: 440px) {
   .hasStats .glyphs {
     display: none;
@@ -157,9 +150,5 @@
 @media (hover: hover) and (pointer: fine) {
   .line {
     height: 26px;
-  }
-
-  .line:hover {
-    --lit: 1;
   }
 }

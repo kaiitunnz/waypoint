@@ -73,7 +73,13 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
   return (
     <div className={styles.note}>
       {hasBody ? (
-        <button type="button" className={cx(styles.head, styles.tap)} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <button
+          type="button"
+          className={cx(styles.head, styles.tap)}
+          aria-expanded={open}
+          data-lights-glyphs={open ? "always" : "focus"}
+          onClick={() => setOpen(!open)}
+        >
           {header}
           <Icon name={open ? "chevron-up" : "chevron-right"} size={14} strokeWidth={2} />
         </button>

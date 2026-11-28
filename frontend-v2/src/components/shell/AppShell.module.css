@@ -12,13 +12,14 @@
 }
 
 .withTabBar {
+  /* The page keeps the bar's room while the keyboard hides the bar, so its height does not change as
+     the keyboard opens and closes. */
+  --tabbar-room: calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px));
   /* For a screen that sizes itself to the space above the bar. */
-  --tabbar-inset: calc(var(--tabbar-height) + var(--safe-bottom));
-  padding-bottom: var(--tabbar-inset);
+  --tabbar-inset: var(--tabbar-room);
+  padding-bottom: var(--tabbar-room);
 }
 
-/* The bar is hidden while the keyboard is up. A page that scrolls the document needs no room of its
-   own then: iOS scrolls it down to the keyboard. */
 html[data-keyboard] .withTabBar {
   --tabbar-inset: 0px;
 }

@@ -987,10 +987,10 @@ Clients treat it as untrusted agent text: it titles an approval only where
 [`session/wholeRequest`](../packages/web-core/src/session/wholeRequest.ts) finds
 the call verified, no hidden or direction-changing characters in the request, and
 nothing asked beyond the call. A list or card checks the
-[pending ask](pending_asks.md#bounded-payloads), whose long strings are cut.
-`session/wholeRequest` looks for an ask beyond the call under known keys of
-`tool_input` and `request`; a backend whose request can ask for more anywhere
-else gives that approval no summary.
+[pending ask](pending_asks.md#bounded-payloads), which carries `tool_input` with
+its long strings cut and no `request`. A backend whose request can ask for more
+anywhere but the `tool_input` keys `session/wholeRequest` knows gives that
+approval no summary.
 
 ### Capture seams
 

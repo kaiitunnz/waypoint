@@ -62,8 +62,8 @@ export function QuestionEditor({ questions, headed, draft, onDraft, disabled, lo
           </span>
         </div>
       ) : null}
-      {/* A lone question is the card's headline already. */}
-      {paginated && !headed ? (
+      {/* A headed form's headline shows the question; the transcript card's run line cuts it to one line. */}
+      {!headed ? (
         <p className={styles.question}>
           {entry.header ? <span className={styles.header}>{entry.header}</span> : null}
           {entry.question}

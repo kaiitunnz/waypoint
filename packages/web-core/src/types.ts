@@ -177,6 +177,31 @@ export interface UsageProviderOption {
   status: ProviderUsageStatus;
 }
 
+// An existing backend-native thread the assistant can adopt.
+export interface AssistantThreadOption {
+  id: string;
+  title: string;
+  // ISO timestamp of last activity: the assistant's own threads share the
+  // "Personal Assistant" title, so a picker leans on this to tell them apart.
+  updatedAt: string | null;
+  // First-message snippet when the backend provides one; another distinguisher.
+  preview: string | null;
+}
+
+// What the session settings need of the owner of the Personal Assistant: the agents it
+// can run on, and the lifecycle actions the Assistant section stages. The assistant
+// page supplies it; no other session has one.
+export interface AssistantSettingsSource {
+  backends: BackendDescriptor[];
+  accountProfilesFor: (backend: Backend) => AccountProfile[];
+  // Rebuild the assistant on the chosen agent and transport. Changing either
+  // starts a fresh thread, since the transport is fixed at launch.
+  onSwitchBackend: (backend: Backend, transport: SessionTransport, accountProfileId: string | null) => Promise<void> | void;
+  onAttachThread: (backend: Backend, threadId: string, accountProfileId: string | null) => Promise<void> | void;
+  // Lists importable threads for a backend; the caller surfaces discovery failures.
+  listThreads: (backend: Backend, accountProfileId: string | null) => Promise<AssistantThreadOption[]>;
+}
+
 export interface SessionRecord {
   id: string;
   backend: Backend;

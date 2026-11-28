@@ -56,6 +56,20 @@ export type SettingsPlanKind =
   | "restart-resume"
   | "assistant-replace";
 
+// Which fields the human has changed from the session's own, for the editor to mark.
+export interface SettingsChanged {
+  title: boolean;
+  transport: boolean;
+  profile: boolean;
+  permission: boolean;
+  model: boolean;
+  effort: boolean;
+  usage: boolean;
+  args: boolean;
+  config: boolean;
+  env: boolean;
+}
+
 export interface SettingsPlan {
   kind: SettingsPlanKind;
   // How many process restarts the plan will cause across the batched launch
@@ -132,6 +146,7 @@ export interface SessionSettingsController {
 
   // Derived gates.
   dirty: boolean;
+  changed: SettingsChanged;
   plan: SettingsPlan;
   applyDisabled: boolean;
   launchFieldsAvailable: boolean;
@@ -154,6 +169,8 @@ export interface SessionSettingsController {
   setConfigOverridesText: (value: string) => void;
   setExistingEnvOp: (key: string, op: EnvKeyOp) => void;
   setExistingEnvValue: (key: string, value: string) => void;
+  // Replaces every existing key's edit at once, for an editor that works on whole rows.
+  setExistingEnv: (entries: ExistingEnvEntry[]) => void;
   setNewEnv: (entries: NewEnvEntry[]) => void;
   setTransport: (value: string) => void;
   setAssistantBackend: (backend: Backend) => void;
@@ -608,6 +625,18 @@ export function useSessionSettings(
   ]);
 
   const applyDisabled = loading || applying || !dirty;
+  const changed: SettingsChanged = {
+    title: titleChanged,
+    transport: transportChanged,
+    profile: profileChanged,
+    permission: permissionChanged,
+    model: modelChanged,
+    effort: effortChanged,
+    usage: usageLimitSourceChanged,
+    args: argsChanged,
+    config: configChanged,
+    env: envChanged,
+  };
 
   // ── apply ─────────────────────────────────────────────────────────────────
   const apply = useCallback(async (): Promise<boolean> => {
@@ -797,6 +826,7 @@ export function useSessionSettings(
     assistantThreadId,
     assistantReplacementStaged,
     dirty,
+    changed,
     plan,
     applyDisabled,
     launchFieldsAvailable,
@@ -815,6 +845,7 @@ export function useSessionSettings(
     setConfigOverridesText,
     setExistingEnvOp,
     setExistingEnvValue,
+    setExistingEnv,
     setNewEnv,
     setTransport,
     setAssistantBackend,

@@ -162,9 +162,9 @@ import {
 } from "@waypoint/web-core/modelDisplay";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
-  AccountProfile,
+  AssistantSettingsSource,
+  AssistantThreadOption,
   Backend,
-  BackendDescriptor,
   BackendModelOption,
   BackendPermissionMode,
   EventRecord,
@@ -220,47 +220,16 @@ function SessionCwdCopy({ cwd }: { cwd: string }) {
   );
 }
 
-// An existing backend-native thread the assistant can adopt.
-export interface AssistantThreadOption {
-  id: string;
-  title: string;
-  // ISO timestamp of last activity — the assistant's own threads share the
-  // "Personal Assistant" title, so the picker leans on this to tell them apart.
-  updatedAt: string;
-  // First-message snippet when the backend provides one; another distinguisher.
-  preview: string | null;
-}
-
 // Assistant-only lifecycle actions surfaced inside the composer settings
 // popover (backend switch + attach existing thread + clear context +
 // terminate/reattach). The owning page wires these to /api/assistant/* and
 // refreshes itself afterwards; when absent, the composer renders no assistant
 // controls.
-export interface AssistantControls {
-  backends: BackendDescriptor[];
-  accountProfilesFor: (backend: Backend) => AccountProfile[];
+export interface AssistantControls extends AssistantSettingsSource {
   supportsReattach: boolean;
-  // Rebuild the assistant on the chosen agent and transport. Changing either
-  // starts a fresh thread, since the transport is fixed at launch.
-  onSwitchBackend: (
-    backend: Backend,
-    transport: SessionTransport,
-    accountProfileId: string | null,
-  ) => Promise<void> | void;
-  onAttachThread: (
-    backend: Backend,
-    threadId: string,
-    accountProfileId: string | null,
-  ) => Promise<void> | void;
   onClearContext: () => Promise<void> | void;
   onTerminate: () => Promise<void> | void;
   onReattach: () => Promise<void> | void;
-  // Lists importable threads for a backend; the caller surfaces discovery
-  // failures in the composer settings popover.
-  listThreads: (
-    backend: Backend,
-    accountProfileId: string | null,
-  ) => Promise<AssistantThreadOption[]>;
 }
 
 interface SessionDetailProps {

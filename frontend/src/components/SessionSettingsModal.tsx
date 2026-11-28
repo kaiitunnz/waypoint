@@ -16,18 +16,12 @@ import {
   useBackendCatalog,
 } from "@waypoint/web-core/backends";
 import { trapTabFocus } from "@waypoint/web-core/keyboard";
-import type { Backend, SessionRecord, SessionTransport } from "@waypoint/web-core/types";
+import type { AssistantThreadOption, Backend, SessionRecord, SessionTransport } from "@waypoint/web-core/types";
+import { applyErrorMessage, settingsFieldGates } from "@waypoint/web-core/session/settingsFields";
 import {
   useSessionSettings,
   type AssistantSettingsControls,
 } from "@waypoint/web-core/hooks/useSessionSettings";
-
-export interface AssistantThreadOption {
-  id: string;
-  title: string;
-  updatedAt: string | null;
-  preview: string | null;
-}
 
 interface SessionSettingsModalProps {
   host: string;
@@ -233,62 +227,40 @@ export function SessionSettingsModal({
   // ── derived option lists ────────────────────────────────────────────────
   const backend = current?.backend ?? session.backend;
   const permissionModes = permissionModesFor(backend, catalog);
-  const effortOptions = useMemo(() => {
-    const selectedModel = models.find((m) => m.id === (model ?? ""));
-    if (selectedModel) {
-      // null/undefined efforts → unknown: offer the agent's full vocabulary.
-      return selectedModel.supported_efforts == null
-        ? effortLevels
-        : selectedModel.supported_efforts;
-    }
-    return Array.from(
-      new Set(models.flatMap((m) => m.supported_efforts ?? [])),
-    );
-  }, [models, model, effortLevels]);
-  const accountProfiles = launchSettings?.account_profiles ?? [];
-
-  // The transport option describing the current-or-staged interface; drives the
-  // restart-scoped gates so a staged switch reflects the target pair.
-  const activeTransportOption = transportOptions.find(
-    (option) => option.id === (transport ?? current?.transport ?? session.transport),
-  );
-
-  // Tuning controls are gated on the composed (current-or-staged) transport's
-  // inline capability — hidden, not merely disabled, when the transport can't
-  // apply them (e.g. a tmux-wrapped/terminal-only pair) — and suppressed while
-  // an interface switch is staged (it can't ride the same restart).
-  const showPermission =
-    !transportChanged &&
-    Boolean(
-      caps?.supports_set_permission_mode_inline ||
-        caps?.supports_set_permission_mode_with_restart,
-    ) &&
-    permissionModes.length > 0;
-  const showModel =
-    !transportChanged &&
-    Boolean(
-      caps?.supports_set_model_inline || caps?.supports_set_model_with_restart,
-    ) &&
-    (models.length > 0 || model !== null);
+  const {
+    showPermission,
+    showModel,
+    showEffort,
+    showAccountProfile,
+    usageSourceVisible,
+    advancedVisible,
+    effortOptions,
+    accountProfiles,
+  } = settingsFieldGates({
+    caps,
+    launchSettings,
+    transportOptions,
+    transport,
+    transportChanged,
+    models,
+    effortLevels,
+    model,
+    effort,
+    usageProviderOptions,
+    usageSelection,
+    launchFieldsAvailable,
+    launchFieldsDisabledReason,
+    session: current,
+    openedTransport: session.transport,
+    permissionModes,
+    isAssistant: Boolean(isAssistant),
+  });
   // Mirror the launch panel's ModelPicker: surface a pre-existing custom model
   // (from an older session/schedule) that isn't in the discovered list.
   const modelEntries =
     model && !models.some((m) => m.id === model)
       ? [{ id: model, label: `Custom · ${model}` }, ...models]
       : models;
-  const showEffort =
-    !transportChanged &&
-    Boolean(
-      caps?.supports_set_effort_inline || caps?.supports_set_effort_with_restart,
-    ) &&
-    (effortOptions.length > 0 || effort !== null);
-  const showAccountProfile =
-    accountProfiles.length > 0 &&
-    Boolean(
-      transportChanged
-        ? activeTransportOption?.supports_account_profile_with_restart
-        : launchSettings?.supports_account_profile_with_restart,
-    );
 
   const assistantAgents = isAssistant
     ? launchableAgents(assistant?.backends.map((b) => b.id) ?? [], catalog)
@@ -327,22 +299,6 @@ export function SessionSettingsModal({
     const ok = await apply();
     if (ok) onClose();
   }, [apply, onClose]);
-
-  // Usage limit source is a display/refresh setting (no restart), so it shows
-  // whenever a provider is configured or the session already selects one — even
-  // for sessions with no editable launch fields.
-  const usageSourceVisible =
-    !isAssistant &&
-    (usageProviderOptions.length > 0 ||
-      usageSelection.source === "usage_provider");
-
-  const advancedVisible =
-    !isAssistant &&
-    (launchSettings?.supports_custom_args ||
-      launchSettings?.supports_config_overrides ||
-      launchFieldsAvailable ||
-      launchFieldsDisabledReason !== null ||
-      usageSourceVisible);
 
   // Existing env keys the user can act on (profile-owned/runtime-owned keys are
   // hidden and stay server-managed).
@@ -805,10 +761,7 @@ export function SessionSettingsModal({
         {applyError ? (
           <div className="settings-modal-plan settings-modal-plan-error">
             <p>
-              {partialSuccess
-                ? "Some changes were applied before this failed: "
-                : ""}
-              {applyError}
+              {applyErrorMessage(applyError, partialSuccess)}
             </p>
           </div>
         ) : null}

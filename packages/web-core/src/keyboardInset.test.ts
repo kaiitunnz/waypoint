@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  frameIsShort,
   isTextEntry,
   KEYBOARD_CLOSED,
   keyboardState,
@@ -256,6 +257,17 @@ describe("watchKeyboard", () => {
     const onChange = vi.fn();
     watch(onChange)();
     expect(onChange).toHaveBeenCalledExactlyOnceWith(KEYBOARD_CLOSED);
+  });
+});
+
+describe("frameIsShort", () => {
+  it("is false for a frame that fills the screen, to the rounding", () => {
+    expect(frameIsShort(852, 852)).toBe(false);
+    expect(frameIsShort(852, 846)).toBe(false);
+  });
+
+  it("is true for the status bar's height left over, as an iOS home-screen app can leave it", () => {
+    expect(frameIsShort(852, 793)).toBe(true);
   });
 });
 

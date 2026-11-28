@@ -119,6 +119,12 @@ export function watchKeyboard(
   };
 }
 
+// An iOS home-screen app can leave the frame the full-screen layouts fill shorter than the screen,
+// a dead band that nothing paints into. Under the tolerance the gap is rounding.
+export function frameIsShort(screenHeight: number, frameHeight: number): boolean {
+  return screenHeight - frameHeight >= TOLERANCE;
+}
+
 export interface KeyboardRoot {
   style: { setProperty(name: string, value: string): void; removeProperty(name: string): unknown };
   dataset: Record<string, string | undefined>;

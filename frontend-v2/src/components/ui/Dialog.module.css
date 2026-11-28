@@ -8,15 +8,15 @@
 .rootSheet {
   align-items: flex-end;
   justify-content: center;
-  /* Above the keyboard: the panel's heights are percentages of what is left, and never more than
-     what is in view when iOS has panned the page. */
+  /* The panel's max-height is a percentage of this box, so it ends above the keyboard;
+     `--visible-height` bounds it when iOS pans the page. */
   padding-bottom: var(--keyboard-inset);
 }
 
 .rootModal {
   align-items: center;
   justify-content: center;
-  padding: 16px 16px calc(16px + var(--keyboard-inset));
+  padding: 16px;
 }
 
 .scrim {
@@ -50,7 +50,7 @@
 .modal {
   width: 100%;
   max-width: 400px;
-  max-height: min(100%, var(--visible-height));
+  max-height: calc(100dvh - 32px);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-modal);
   box-shadow: var(--shadow-modal);
@@ -64,7 +64,7 @@
 /* A fixed height, so switching what the body shows does not resize the dialog. */
 .modalXl {
   max-width: 980px;
-  height: min(880px, 100%, var(--visible-height));
+  height: min(880px, calc(100dvh - 32px));
 }
 
 .handle {

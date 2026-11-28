@@ -7,8 +7,8 @@
   font-size: var(--f-code);
   letter-spacing: -0.01em;
   white-space: pre;
-  /* The line starts at its right edge, so what the parts' widths below fail to make fit is
-     cut from the left and the end of the path always stays. */
+  /* Right-to-left starts the line at its right edge, so overflow is clipped from the left and the
+     end of the path stays. */
   direction: rtl;
   text-align: left;
 }
@@ -45,7 +45,6 @@
 
 .open {
   direction: ltr;
-  text-align: start;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }

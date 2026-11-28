@@ -34,6 +34,7 @@
   left: calc(50% + 6px);
 }
 
+/* Under the keyboard, or floating over the field above it when iOS pans the page. */
 html[data-keyboard] .bar {
   display: none;
 }

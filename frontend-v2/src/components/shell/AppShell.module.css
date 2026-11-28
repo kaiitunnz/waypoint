@@ -16,12 +16,12 @@
 .withTabBar {
   /* For a screen that sizes itself to the space above the bar. */
   --tabbar-inset: calc(var(--tabbar-height) + var(--safe-bottom));
-  padding-bottom: max(var(--tabbar-inset), var(--keyboard-inset));
+  padding-bottom: var(--tabbar-inset);
 }
 
-/* The tab bar is under the keyboard, or floats over the field above it. */
+/* The bar is hidden while the keyboard is up, so what the screen reserves is the keyboard's. */
 html[data-keyboard] .withTabBar {
-  --tabbar-inset: 0px;
+  --tabbar-inset: var(--keyboard-inset);
 }
 
 @media (hover: hover) and (pointer: fine) {

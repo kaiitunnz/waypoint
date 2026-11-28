@@ -69,7 +69,7 @@
   --r-sheet: 18px;
   --r-pill: 999px;
 
-  /* The on-screen keyboard. useKeyboardInsetVar writes these on <html> with data-keyboard while it
+  /* The on-screen keyboard, written on <html> with `data-keyboard` by useKeyboardInsetVar while it
      is up on touch: how far it covers the bottom of the layout viewport, and the height in view. */
   --keyboard-inset: 0px;
   --visible-height: 100dvh;

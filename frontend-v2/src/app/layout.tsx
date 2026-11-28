@@ -41,7 +41,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  // The keyboard shrinks only the visual viewport, as on iOS, so --keyboard-inset reads it alike.
+  // Android Chrome shrinks only the visual viewport for the keyboard, as iOS does.
   interactiveWidget: "resizes-visual",
 };
 

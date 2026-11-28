@@ -83,12 +83,14 @@ interface ChoiceRowProps {
   staged?: boolean;
   // The picker's subtitle on touch.
   hint?: ReactNode;
+  // The picker opens, for options loaded on demand.
+  onOpen?: () => void;
 }
 
 // One choice from a short list, as a row showing the current value: a menu from the row
 // on a pointer client, and on touch a sheet of the options. Where the form is a column of
 // rows on every client, such as an editor beside the conversation.
-export function ChoiceRow({ label, value, options, onChange, disabled, staged, hint }: ChoiceRowProps) {
+export function ChoiceRow({ label, value, options, onChange, disabled, staged, hint, onOpen }: ChoiceRowProps) {
   const pointer = usePointerUI();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -105,7 +107,10 @@ export function ChoiceRow({ label, value, options, onChange, disabled, staged, h
         disabled={disabled}
         staged={staged}
         buttonRef={trigger}
-        onPress={() => setOpen((shown) => !shown)}
+        onPress={() => {
+          if (!open) onOpen?.();
+          setOpen((shown) => !shown);
+        }}
       />
       {pointer ? (
         <Flyout open={open} onClose={() => setOpen(false)} triggerRef={trigger} title={label} width={260} align="right" flush>

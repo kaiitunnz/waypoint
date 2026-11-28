@@ -132,3 +132,13 @@
   color: var(--muted);
   pointer-events: none;
 }
+
+.staged {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: var(--r-pill);
+  background: var(--working);
+  vertical-align: middle;
+}

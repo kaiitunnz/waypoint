@@ -3,17 +3,19 @@
 import type { SessionActions } from "@waypoint/web-core/hooks/useSessionActions";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
+import { SessionSettingsDialog } from "@/components/session/settings/SessionSettingsDialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 import { RenameDialog } from "./RenameDialog";
 
 export type HomeDialog =
   | { kind: "rename"; session: SessionRecord }
+  | { kind: "settings"; session: SessionRecord }
   | { kind: "terminate"; session: SessionRecord }
   | { kind: "delete"; session: SessionRecord }
   | { kind: "deleteExited" };
 
-function confirmation(dialog: Exclude<HomeDialog, { kind: "rename" }>, actions: SessionActions) {
+function confirmation(dialog: Exclude<HomeDialog, { kind: "rename" | "settings" }>, actions: SessionActions) {
   switch (dialog.kind) {
     case "terminate":
       return {
@@ -55,6 +57,9 @@ export function SessionDialogs({ dialog, actions, onClose }: SessionDialogsProps
         onClose={onClose}
       />
     );
+  }
+  if (dialog.kind === "settings") {
+    return <SessionSettingsDialog session={dialog.session} onApplied={actions.recordUpdate} onClose={onClose} />;
   }
   const { run, ...text } = confirmation(dialog, actions);
   return <ConfirmDialog open {...text} onConfirm={run} onClose={onClose} />;

@@ -14,13 +14,16 @@ interface FieldProps {
   htmlFor: string;
   children: ReactNode;
   className?: string;
+  // The value is changed and not yet applied.
+  staged?: boolean;
 }
 
-export function Field({ label, htmlFor, children, className }: FieldProps) {
+export function Field({ label, htmlFor, children, className, staged }: FieldProps) {
   return (
     <div className={cx(styles.field, className)}>
       <label className={styles.label} htmlFor={htmlFor}>
         {label}
+        {staged ? <i className={styles.staged} role="img" aria-label="Changed" /> : null}
       </label>
       {children}
     </div>

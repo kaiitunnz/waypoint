@@ -1,0 +1,6 @@
+.session {
+  font-family: var(--serif);
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text);
+}

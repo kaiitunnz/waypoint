@@ -1,0 +1,54 @@
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.heading {
+  padding: 14px 0 4px;
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Rows divided by hairlines; a field that is not a row keeps its own space. */
+.rows > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.advanced {
+  border-top: 1px solid var(--line);
+}
+
+.note {
+  padding: 8px 0;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.env {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.envLabel {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: var(--r-pill);
+  background: var(--working);
+  vertical-align: middle;
+}

@@ -17,6 +17,8 @@ interface SessionMenuActions {
   onAction: (action: SessionAction, session: SessionRecord) => void;
   openDialog: (dialog: HomeDialog) => void;
   reattach: (sessionId: string) => Promise<void>;
+  // Records a session another change returned, such as applied settings.
+  recordUpdate: (session: SessionRecord) => void;
   // Render once, beside the menus.
   dialogs: ReactNode;
 }
@@ -42,6 +44,10 @@ export function useSessionMenuActions({ onRemoved, onUpdated }: SessionMenuOptio
       setPinned: (sessionId: string, pinned: boolean) => actions.setPinned(sessionId, pinned, onUpdated),
       rename: (session: SessionRecord, title: string) => actions.rename(session, title, onUpdated),
       remove: (sessionId: string) => actions.remove(sessionId, () => onRemoved?.(sessionId)),
+      recordUpdate: (session: SessionRecord) => {
+        actions.recordUpdate(session);
+        onUpdated?.(session);
+      },
     }),
     [actions, onRemoved, onUpdated],
   );
@@ -54,6 +60,7 @@ export function useSessionMenuActions({ onRemoved, onUpdated }: SessionMenuOptio
     onAction,
     openDialog: setDialog,
     reattach: actions.reattach,
+    recordUpdate: confirmed.recordUpdate,
     dialogs: <SessionDialogs dialog={dialog} actions={confirmed} onClose={() => setDialog(null)} />,
   };
 }

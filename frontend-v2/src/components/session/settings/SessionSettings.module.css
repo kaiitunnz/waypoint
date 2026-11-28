@@ -1,0 +1,10 @@
+.note,
+.error {
+  padding: 12px 0;
+  font-size: var(--f-body);
+  color: var(--muted);
+}
+
+.error {
+  color: var(--error);
+}

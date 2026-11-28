@@ -28,6 +28,9 @@ export interface SessionActions {
   // `onRemoved` runs once the server has deleted the session.
   remove: (sessionId: string, onRemoved?: () => void) => Promise<void>;
   removeExited: () => Promise<void>;
+  // Puts a session record another change returned, such as applied settings, in the live
+  // list and the history cache.
+  recordUpdate: (session: SessionRecord) => void;
 }
 
 type FeedMutations = Pick<SessionsFeed, "upsertSession" | "removeSessions" | "patchSession">;
@@ -57,6 +60,10 @@ export function useSessionActions(
       }
     }
     return {
+      recordUpdate: (updated) => {
+        upsertSession(updated);
+        applySessionState(host, updated);
+      },
       setPinned: (sessionId, pinned, onUpdated) =>
         attempt(async () => {
           const updated = await setSessionPinned(host, token, sessionId, pinned);

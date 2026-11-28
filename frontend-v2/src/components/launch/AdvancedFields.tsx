@@ -36,11 +36,11 @@ export function Disclosure({ title, summary, children }: DisclosureProps) {
 }
 
 // On touch a row showing the current value, whose editor opens in a sheet.
-function EditorRow({ label, summary, children }: { label: string; summary: string; children: ReactNode }) {
+function EditorRow({ label, summary, staged, children }: { label: string; summary: string; staged?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <SettingsRow label={label} detail={summary || "None"} mono={Boolean(summary)} onPress={() => setOpen(true)} />
+      <SettingsRow label={label} detail={summary || "None"} mono={Boolean(summary)} staged={staged} onPress={() => setOpen(true)} />
       <Sheet
         open={open}
         onClose={() => setOpen(false)}
@@ -88,10 +88,12 @@ interface LinesFieldProps {
   value: string;
   onChange: (value: string) => void;
   disabled: boolean;
+  // The value is changed and not yet applied.
+  staged?: boolean;
 }
 
 // One machine string per line, such as CLI arguments.
-export function LinesField({ label, value, onChange, disabled }: LinesFieldProps) {
+export function LinesField({ label, value, onChange, disabled, staged }: LinesFieldProps) {
   const pointer = usePointerUI();
   const id = useId();
   const area = (
@@ -99,13 +101,13 @@ export function LinesField({ label, value, onChange, disabled }: LinesFieldProps
   );
   if (!pointer) {
     return (
-      <EditorRow label={label} summary={firstLine(value)}>
+      <EditorRow label={label} summary={firstLine(value)} staged={staged}>
         {area}
       </EditorRow>
     );
   }
   return (
-    <Field label={label} htmlFor={id}>
+    <Field label={label} htmlFor={id} staged={staged}>
       {area}
     </Field>
   );

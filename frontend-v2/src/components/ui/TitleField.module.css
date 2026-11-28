@@ -1,0 +1,42 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  font-size: var(--f-body);
+  color: var(--text);
+}
+
+.row span {
+  flex: none;
+}
+
+.row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-strong);
+  font-size: var(--f-body);
+  text-align: right;
+  outline: none;
+}
+
+.row input::placeholder {
+  color: var(--faint);
+}
+
+.row:focus-within input {
+  text-align: left;
+}
+
+.staged {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-left: -4px;
+  border-radius: var(--r-pill);
+  background: var(--working);
+}

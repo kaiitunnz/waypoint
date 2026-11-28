@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import type { BackendCatalog } from "@waypoint/web-core/backends";
 import { transportPresentation } from "@waypoint/web-core/backends";
@@ -12,7 +12,7 @@ import type { Backend } from "@waypoint/web-core/types";
 import { selectUsageSource, usageSourceChoices } from "@waypoint/web-core/usageLimitSource";
 
 import { ChoiceField } from "@/components/ui/Choice";
-import { Field, TextInput } from "@/components/ui/Field";
+import { TitleField } from "@/components/ui/TitleField";
 import { usePointerUI } from "@/lib/layout";
 
 import { Disclosure, EnvField, LinesField } from "./AdvancedFields";
@@ -51,20 +51,10 @@ export function LaunchFields({
   children,
 }: LaunchFieldsProps) {
   const pointer = usePointerUI();
-  const id = useId();
   const { caps } = form;
   const modelOptions = modelChoices(form.modelInfo?.models.filter((model) => !model.hidden) ?? [], form.model);
 
-  const title = pointer ? (
-    <Field label="Title" htmlFor={`${id}-title`}>
-      <TextInput id={`${id}-title`} value={form.title} placeholder="Untitled" onChange={(event) => form.setTitle(event.target.value)} />
-    </Field>
-  ) : (
-    <label className={styles.titleRow}>
-      <span>Title</span>
-      <input value={form.title} placeholder="Untitled" onChange={(event) => form.setTitle(event.target.value)} />
-    </label>
-  );
+  const title = <TitleField value={form.title} placeholder="Untitled" onChange={form.setTitle} />;
 
   return (
     <div className={styles.fields}>

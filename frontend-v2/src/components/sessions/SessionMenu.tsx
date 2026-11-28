@@ -7,7 +7,7 @@ import type { SessionRecord } from "@waypoint/web-core/types";
 
 import { MenuButton, type MenuButtonItem, type MenuButtonProps } from "@/components/ui/MenuButton";
 
-export type SessionAction = "pin" | "unpin" | "rename" | "terminate" | "delete";
+export type SessionAction = "pin" | "unpin" | "rename" | "settings" | "terminate" | "delete";
 
 export interface ScreenAction extends MenuButtonItem {
   run: () => void;
@@ -67,6 +67,7 @@ export function SessionMenu({ session, subtitle, onAction, header, extra = [], o
       items={[
         { id: pin, label: session.pinned_at ? "Unpin" : "Pin", run: act(pin) },
         { id: "rename", label: "Rename", run: act("rename") },
+        { id: "settings", label: "Settings…", run: act("settings") },
         ...extra,
         end,
       ]}

@@ -26,13 +26,14 @@ import { Menu, MenuItem, Popover } from "@/components/ui/Popover";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { Select } from "@/components/ui/Select";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
-import { ChoiceField } from "@/components/ui/Choice";
+import { ChoiceField, ChoiceRow } from "@/components/ui/Choice";
 import { LinkRow, PickerRow, SettingsRow, SettingsSection, SwitchRow } from "@/components/ui/Settings";
 import { StatusLamp, type LampState } from "@/components/ui/StatusLamp";
 import { useToast } from "@/components/ui/Toast";
 import { Toggle } from "@/components/ui/Toggle";
 
 import { PageHeader } from "@/components/ui/PageHeader";
+import { AssistantDemo } from "./AssistantDemo";
 import styles from "./Gallery.module.css";
 
 const LAMPS: LampState[] = ["needs", "working", "error", "idle", "exited", "online", "offline", "unknown"];
@@ -245,6 +246,25 @@ export function Gallery() {
         <LinkRow label="Appearance" detail="Dark" href="/gallery" />
         <SettingsRow label="Folder" detail="~/waypoint" mono onPress={() => {}} />
       </SettingsSection>
+
+      <SectionHeading title="Choice row" dense />
+      <SettingsSection>
+        <ChoiceRow
+          label="Effort"
+          value={choice}
+          staged={choice !== "high"}
+          onChange={setChoice}
+          options={[
+            { value: "", label: "Default" },
+            { value: "high", label: "High", detail: "More thinking per turn" },
+            { value: "low", label: "Low" },
+          ]}
+        />
+        <SettingsRow label="Model" detail="Opus 5.5" staged onPress={() => {}} />
+      </SettingsSection>
+
+      <SectionHeading title="Assistant settings" dense />
+      <AssistantDemo />
 
       <SectionHeading title="Choice field" dense />
       <ChoiceField

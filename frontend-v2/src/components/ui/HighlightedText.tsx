@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from "react";
 
 import { highlightRuns } from "@waypoint/web-core/fuzzy";
 
-import styles from "./SuggestionMenu.module.css";
+import styles from "./HighlightedText.module.css";
 
 // A long path may wrap after any of its slashes.
 function breakable(value: string): ReactNode {

@@ -7,6 +7,10 @@
   font-size: var(--f-code);
   letter-spacing: -0.01em;
   white-space: pre;
+  /* Right-to-left starts the line at its right edge, so overflow is clipped from the left and the
+     end of the path stays. */
+  direction: rtl;
+  text-align: left;
 }
 
 /* Inline blocks, so a selection copies as one unbroken path; flex items would copy as
@@ -40,6 +44,7 @@
 }
 
 .open {
+  direction: ltr;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }

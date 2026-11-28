@@ -41,6 +41,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Android Chrome shrinks only the visual viewport for the keyboard, as iOS does.
+  interactiveWidget: "resizes-visual",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -11,6 +11,7 @@ import { formatRelativeTime } from "@waypoint/web-core/usage";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Dialog } from "@/components/ui/Dialog";
+import { FileName } from "@/components/ui/FileName";
 import { FileThumb } from "@/components/ui/FileThumb";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -104,9 +105,7 @@ export function SessionFilesDialog({
                 <li key={file.id} className={styles.row}>
                   <FileThumb className={styles.thumb} src={file.kind === "image" ? url : null} />
                   <span className={styles.text}>
-                    <span className={styles.name} title={file.filename}>
-                      {file.filename}
-                    </span>
+                    <FileName name={file.filename} title={file.filename} className={styles.name} />
                     <span className={styles.meta}>
                       {file.origin === "task_output" ? <span className={styles.origin}>task report</span> : null}
                       <span>{typeTag(file.filename, file.kind === "image")}</span>

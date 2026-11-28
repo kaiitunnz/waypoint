@@ -8,6 +8,9 @@
 .rootSheet {
   align-items: flex-end;
   justify-content: center;
+  /* The panel's max-height is a percentage of this box, so it ends above the keyboard;
+     `--visible-height` bounds it when iOS pans the page. */
+  padding-bottom: var(--keyboard-inset);
 }
 
 .rootModal {
@@ -37,7 +40,7 @@
 .sheet {
   width: 100%;
   max-width: 560px;
-  max-height: calc(100dvh - var(--safe-top) - 8px);
+  max-height: calc(min(100%, var(--visible-height)) - var(--safe-top) - 8px);
   border-radius: var(--r-sheet) var(--r-sheet) 0 0;
   box-shadow: var(--shadow-sheet);
   padding-bottom: max(var(--safe-bottom), 12px);

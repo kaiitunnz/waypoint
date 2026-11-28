@@ -1,0 +1,26 @@
+.name {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  white-space: pre;
+}
+
+/* Out of the layout and the selection; read by assistive technology. */
+.whole {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  user-select: none;
+}
+
+.head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tail {
+  flex: none;
+}

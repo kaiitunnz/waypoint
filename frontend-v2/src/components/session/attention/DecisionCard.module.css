@@ -38,7 +38,7 @@
 
 .body {
   min-width: 0;
-  max-height: min(40vh, 360px);
+  max-height: min(calc(var(--visible-height) * 0.4), 360px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }

@@ -38,10 +38,7 @@
 }
 
 .name {
-  overflow: hidden;
   color: var(--text-strong);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .meta {

@@ -2,6 +2,7 @@ import { filesSummary, formatFileSize, typeTag } from "@waypoint/web-core/attach
 import type { PendingAttachment } from "@waypoint/web-core/hooks/useAttachments";
 
 import { Button } from "@/components/ui/Button";
+import { FileName } from "@/components/ui/FileName";
 import { FileThumb } from "@/components/ui/FileThumb";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -36,7 +37,7 @@ export function AttachmentTray({ items, onRemove, onRetry, onClear, locked }: At
           >
             <FileThumb className={styles.thumb} src={item.isImage ? (item.previewUrl ?? null) : null} />
             <span className={styles.text}>
-              <span className={styles.name}>{item.name}</span>
+              <FileName name={item.name} className={styles.name} />
               <span className={styles.meta}>
                 {item.status === "error"
                   ? "Upload failed"

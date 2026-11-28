@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 
-import { Appearance, SessionLists } from "./DeviceSections";
+import { Appearance, SessionLists, Transcript } from "./DeviceSections";
 
 // Device sections are this browser's own choices; server sections belong to the backend
 // in use. A section renders one or more SettingsSections.
@@ -19,6 +19,7 @@ export interface SettingsSectionSpec {
 export const SETTINGS_SECTIONS: SettingsSectionSpec[] = [
   { id: "appearance", title: "Appearance", scope: "device", Component: Appearance },
   { id: "session-lists", title: "Session lists", scope: "device", Component: SessionLists },
+  { id: "transcript", title: "Transcript", scope: "device", Component: Transcript },
 ];
 
 export const settingsSection = (id: string) => SETTINGS_SECTIONS.find((section) => section.id === id);

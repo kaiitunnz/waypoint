@@ -10,7 +10,7 @@ interface ToolGlyphProps extends HTMLAttributes<HTMLSpanElement> {
   family: ToolFamily | null;
 }
 
-// A tool's glyph, in its family's colour while the row or card holding it is lit.
+// A tool's glyph, in its family's colour.
 export function ToolGlyph({ glyph, family, className, ...props }: ToolGlyphProps) {
   return (
     <span {...props} className={cx(styles.glyph, className)} data-family={family ?? undefined}>

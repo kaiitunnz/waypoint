@@ -1,6 +1,7 @@
-/* Faint at rest. A holder sets --lit to 1 to bring the family's colour in. */
+/* In its family's colour at rest, unless the device asks for it on focus: then it is
+   faint until a holder sets --lit to 1. */
 .glyph {
-  color: color-mix(in srgb, var(--family, var(--faint)) calc(var(--lit, 0) * 100%), var(--faint));
+  color: color-mix(in srgb, var(--family, var(--faint)) calc(var(--lit, var(--tool-lit-at-rest)) * 100%), var(--faint));
   transition: color 120ms ease;
 }
 

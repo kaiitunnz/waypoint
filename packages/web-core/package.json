@@ -20,6 +20,7 @@
     "./hostPicker": "./src/hostPicker.ts",
     "./inbox": "./src/inbox.ts",
     "./keyboard": "./src/keyboard.ts",
+    "./keyboardInset": "./src/keyboardInset.ts",
     "./launchTargets": "./src/launchTargets.ts",
     "./layoutRules": "./src/layoutRules.ts",
     "./markdown": "./src/markdown.ts",

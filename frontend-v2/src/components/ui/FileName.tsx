@@ -1,8 +1,8 @@
-import { highlightRuns, positionsWithin } from "@waypoint/web-core/fuzzy";
 import { splitFileName } from "@waypoint/web-core/workspacePaths";
 
 import { cx } from "@/lib/cx";
 
+import { HighlightedText } from "./HighlightedText";
 import styles from "./FileName.module.css";
 
 interface FileNameProps {
@@ -11,18 +11,6 @@ interface FileNameProps {
   positions?: ReadonlyArray<number>;
   title?: string;
   className?: string;
-}
-
-function Text({ text, positions }: { text: string; positions: ReadonlyArray<number> }) {
-  return highlightRuns(text, positions).map((run, index) =>
-    run.hit ? (
-      <mark key={index} className={styles.hit}>
-        {run.value}
-      </mark>
-    ) : (
-      run.value
-    ),
-  );
 }
 
 // A file name on one line that gives up the middle of its name first: the extension and the
@@ -34,11 +22,11 @@ export function FileName({ name, positions = [], title, className }: FileNamePro
     <span className={cx(styles.name, className)} title={title}>
       {head ? (
         <span className={styles.head} aria-hidden="true">
-          <Text text={head} positions={positionsWithin(positions, 0, head.length)} />
+          <HighlightedText text={head} positions={positions} />
         </span>
       ) : null}
       <span className={styles.tail} aria-hidden="true">
-        <Text text={tail} positions={positionsWithin(positions, head.length, tail.length)} />
+        <HighlightedText text={tail} positions={positions.map((position) => position - head.length)} />
       </span>
       <span className={styles.whole}>{name}</span>
     </span>

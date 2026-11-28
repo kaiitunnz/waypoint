@@ -39,7 +39,7 @@ function FileChip({ attachment }: { attachment: InboxAttachmentRef }) {
   const { url, name, preview } = useFile(attachment);
   return (
     <a className={styles.chip} href={url} target="_blank" rel="noreferrer" title={name}>
-      <FileName name={name} className={styles.chipName} />
+      <FileName name={name} />
       <FileThumb className={styles.small} src={preview} />
     </a>
   );

@@ -17,9 +17,9 @@ import type { FileMentionRow } from "@waypoint/web-core/hooks/use-file-mentions"
 
 import { FileName } from "@/components/ui/FileName";
 import { FileThumb } from "@/components/ui/FileThumb";
+import { HighlightedText } from "@/components/ui/HighlightedText";
 import { cx } from "@/lib/cx";
 
-import { HighlightedText } from "./HighlightedText";
 import styles from "./SuggestionMenu.module.css";
 
 // The field points at the highlighted row by this id.

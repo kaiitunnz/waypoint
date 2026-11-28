@@ -61,10 +61,6 @@
   color: var(--text);
 }
 
-.chipName {
-  min-width: 0;
-}
-
 .small {
   --thumb-size: 24px;
 }

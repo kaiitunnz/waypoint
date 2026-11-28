@@ -54,12 +54,6 @@
   white-space: nowrap;
 }
 
-.hit {
-  background: none;
-  color: inherit;
-  font-weight: 700;
-}
-
 .section {
   padding: 8px 12px 4px;
   font-size: var(--f-meta);

@@ -8,6 +8,7 @@ import { formatDuration } from "./cardText";
 import { taskNoteReport } from "./taskNoteBody";
 import {
   callArgumentsForEvent,
+  collapseWhitespace,
   commandForEvent,
   commandOutputForEvent,
   delegationForEvent,
@@ -346,10 +347,13 @@ function argumentLines(
     case "monitor":
     case "followup":
     case "other":
-      // An argument the heading already says is left out; a command never is.
+      // An argument the heading already says is left out; a command never is. A summary
+      // is one line, so the argument is compared as one.
+      const said = (value: unknown) =>
+        summary !== null && typeof value === "string" && collapseWhitespace(value) === collapseWhitespace(summary);
       return (
         Object.entries(input)
-          .filter(([name, value]) => name === "command" || summary === null || value !== summary)
+          .filter(([name, value]) => name === "command" || !said(value))
           .map(([name, value]) => `${name}: ${text(value)}`)
           .join("\n") || null
       );

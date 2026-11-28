@@ -679,6 +679,9 @@ describe("a call's summary", () => {
     expect(describeCall(item)?.label).toBe("command: Watch the build\npersistent: true");
     const [bare] = run([summarized(1, "a", "Monitor", watch)]);
     expect(describeCall(bare)?.label).toContain("description: Watch the build");
+    // A summary joins the lines of a description into one.
+    const [lines] = run([summarized(1, "a", "Monitor", { ...watch, description: "Watch\nthe build" }, "Watch the build")]);
+    expect(describeCall(lines)?.label).toBe("command: Watch the build\npersistent: true");
   });
 
   it("leaves the arguments of a call without one as they are, empty values included", () => {

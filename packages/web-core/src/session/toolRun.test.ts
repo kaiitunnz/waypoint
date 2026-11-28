@@ -696,6 +696,7 @@ describe("a call's summary", () => {
     expect(shell("Grep", { pattern: "TODO", path: "src" })).toBe(false);
     expect(shell("WebFetch", { url: "https://example.com" })).toBe(false);
     expect(shell("Monitor", { command: "tail -f log" })).toBe(false);
+    expect(shell("PowerShell", { command: "Get-ChildItem" })).toBe(false);
     expect(shell("mcp__notes__run", { command: "sync" })).toBe(false);
   });
 

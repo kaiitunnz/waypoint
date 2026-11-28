@@ -16,21 +16,23 @@ function target() {
 }
 
 // An iPhone 852px tall: `screen` is what `100lvh` measures, `frame` the fixed `inset: 0` box.
-function setup({ homeScreenApp = false, visualViewport = true } = {}) {
-  const heights = { frame: 852, screen: 852 };
-  const boxes: { css: string; removed: boolean }[] = [];
+function setup({ homeScreenApp = false, visualViewport = true, frame = 852, visible = 852 } = {}) {
+  const heights = { frame, screen: 852 };
+  const boxes: { kind: "frame" | "screen" | "lift"; removed: boolean }[] = [];
   const host: BoxHost = {
-    createBox(css) {
-      const box = { css, removed: false };
+    measure(kind) {
+      const box = { kind, removed: false };
       boxes.push(box);
-      return {
-        height: () => (css.includes("inset:0") ? heights.frame : css.includes("100lvh") ? heights.screen : 3000),
-        remove: () => void (box.removed = true),
-      };
+      return { height: () => heights[kind], remove: () => void (box.removed = true) };
+    },
+    lift() {
+      const box = { kind: "lift" as const, removed: false };
+      boxes.push(box);
+      return () => void (box.removed = true);
     },
   };
   const viewportEvents = target();
-  const viewport = Object.assign(viewportEvents, { height: 852, offsetTop: 0, scale: 1 });
+  const viewport = Object.assign(viewportEvents, { height: visible, offsetTop: 0, scale: 1 });
   const winEvents = target();
   const docEvents = target();
   const doc = Object.assign(docEvents, { activeElement: null as FocusTarget | null });
@@ -79,7 +81,7 @@ function setup({ homeScreenApp = false, visualViewport = true } = {}) {
     }
     now = end;
   };
-  const lifts = () => boxes.filter((box) => box.css.includes("3000px"));
+  const lifts = () => boxes.filter((box) => box.kind === "lift");
   const keyboardUp = (visible = 483, offsetTop = 310) => {
     viewport.height = visible;
     viewport.offsetTop = offsetTop;
@@ -91,15 +93,14 @@ function setup({ homeScreenApp = false, visualViewport = true } = {}) {
 
 describe("watchTouchViewport", () => {
   describe("the keyboard", () => {
-    it("is measured against the fixed inset-0 box, not the window", () => {
-      const { heights, boxes, viewport, doc, published, flush } = setup();
+    it("is measured against the frame box, not the screen", () => {
+      const { heights, viewport, doc, published, flush } = setup();
       doc.activeElement = INPUT;
       heights.frame = 793;
       viewport.height = 483;
       viewport.offsetTop = 310;
       viewport.fire("resize");
       flush();
-      expect(boxes[0].css).toContain("position:fixed;inset:0");
       expect(published).toEqual([{ inset: 0, visibleHeight: 483 }]);
     });
 
@@ -185,13 +186,13 @@ describe("watchTouchViewport", () => {
       win.fire("resize");
       flush();
       advance(5000);
-      expect(boxes).toHaveLength(1);
+      expect(boxes.map((box) => box.kind)).toEqual(["frame"]);
       expect(lifts()).toHaveLength(0);
     });
 
     it("lifts at once, and lets go when the frame is back", () => {
       const { boxes, heights, win, flush, advance, lifts } = setup({ homeScreenApp: true });
-      expect(boxes.some((box) => box.css.includes("100lvh"))).toBe(true);
+      expect(boxes.some((box) => box.kind === "screen")).toBe(true);
       heights.frame = 793;
       win.fire("resize");
       flush();
@@ -202,14 +203,10 @@ describe("watchTouchViewport", () => {
       expect(lifts()[0].removed).toBe(true);
     });
 
-    it("lifts a frame found short at launch", () => {
-      const parts = setup({ homeScreenApp: true });
-      parts.heights.frame = 793;
-      parts.viewport.height = 793;
-      parts.win.fire("resize");
-      parts.flush();
-      parts.advance(0);
-      expect(parts.lifts()).toHaveLength(1);
+    it("lifts a frame found short at launch, with no event", () => {
+      const { advance, lifts } = setup({ homeScreenApp: true, frame: 793, visible: 793 });
+      advance(0);
+      expect(lifts()).toHaveLength(1);
     });
 
     it("never lifts while the keyboard is up", () => {
@@ -244,10 +241,12 @@ describe("watchTouchViewport", () => {
     });
 
     it("drops a lift that is pending when the keyboard rises before it runs", () => {
-      const { doc, heights, advance, lifts, keyboardUp } = setup({ homeScreenApp: true });
+      const { doc, heights, win, timers, flush, advance, lifts, keyboardUp } = setup({ homeScreenApp: true });
       doc.activeElement = INPUT;
       heights.frame = 793;
-      heights.screen = 852;
+      win.fire("resize");
+      flush();
+      expect(timers.size).toBe(1);
       keyboardUp(483, 310);
       advance(0);
       expect(lifts()).toHaveLength(0);
@@ -282,6 +281,17 @@ describe("watchTouchViewport", () => {
       keyboardUp(483, 310);
       flush();
       expect(published).toHaveLength(count);
+    });
+
+    it("cancels a reveal still pending", () => {
+      const { doc, reveal, frames, stop, keyboardUp, flush } = setup();
+      doc.activeElement = INPUT;
+      keyboardUp(516, 0);
+      expect(frames.size).toBe(1);
+      stop();
+      flush();
+      expect(frames.size).toBe(0);
+      expect(reveal).not.toHaveBeenCalled();
     });
 
     it("publishes closed once and makes no boxes in a browser without a visual viewport", () => {

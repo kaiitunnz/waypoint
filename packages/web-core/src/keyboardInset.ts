@@ -3,7 +3,7 @@
 // that `dvh` and `position: fixed; inset: 0` fill, so the keyboard covers the bottom of every sheet
 // and screen. An iOS home-screen app also shrinks that frame and scrolls the page.
 
-// Under this the gap between the viewports is rounding or a browser bar, not a keyboard.
+// Under this the gap between the viewports is rounding, not a keyboard.
 const TOLERANCE = 8;
 
 // Above this the visual viewport is pinch-zoomed, and its height is not a keyboard.

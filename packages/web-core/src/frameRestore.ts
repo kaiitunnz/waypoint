@@ -1,8 +1,8 @@
 // iOS leaves the frame short of the screen in a home-screen app, at launch and after the keyboard
 // has been up, and restores it once the document is taller than the screen. The restorer makes
-// the document that tall until the frame is back. It starts at once, so the frame grows with the
-// keyboard's closing instead of after it, and tries again once if iOS ignored that first lift. A
-// shortfall has to clear before the restorer tries for it again.
+// the document that tall until the frame is back. It starts at once, so the frame grows as the
+// keyboard closes, and tries again once if iOS ignored that first lift. A shortfall has to clear
+// before the restorer tries for it again.
 
 // Under this the gap between the frame and the screen is rounding.
 const TOLERANCE = 8;

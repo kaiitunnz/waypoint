@@ -14,9 +14,12 @@ export interface Box {
   remove(): void;
 }
 
-// Makes the hidden, non-interactive boxes the viewport is measured and restored with.
 export interface BoxHost {
-  createBox(css: string): Box;
+  // A hidden box to measure against: the fixed `inset: 0` frame the full-screen layouts fill, or the
+  // physical screen (`100lvh`).
+  measure(kind: "frame" | "screen"): Box;
+  // Makes the document taller than any screen; the returned function undoes it.
+  lift(): () => void;
 }
 
 export interface TouchViewportWindow extends KeyboardWindow {
@@ -34,32 +37,24 @@ export interface TouchViewportEnv {
   reveal(): void;
 }
 
-// The frame the full-screen layouts fill, which `innerHeight` is not while iOS has the keyboard up.
-const FRAME_CSS = "position:fixed;inset:0;visibility:hidden;pointer-events:none";
-const SCREEN_CSS = "position:fixed;top:0;height:100lvh;visibility:hidden;pointer-events:none";
-// 3000px is taller than any screen.
-const LIFT_CSS = "position:absolute;top:0;left:0;width:1px;height:3000px;opacity:0;pointer-events:none";
-
 // Publishes the on-screen keyboard, reveals the focused field when the keyboard rises, its visible
 // height changes or focus moves to another field, and in a home-screen app restores the frame the
-// keyboard leaves short. Every part runs off the one reading `watchKeyboard` takes. Returns a stop.
+// keyboard leaves short. Each reading `watchKeyboard` takes drives all three; the restore gate
+// measures the boxes live. Returns a stop.
 export function watchTouchViewport({ win, doc, host, homeScreenApp, publish, reveal }: TouchViewportEnv): () => void {
   const viewport = win.visualViewport;
   if (!viewport) {
     publish(KEYBOARD_CLOSED);
     return () => {};
   }
-  const frame = host.createBox(FRAME_CSS);
-  const screen = homeScreenApp ? host.createBox(SCREEN_CSS) : null;
+  const frame = host.measure("frame");
+  const screen = homeScreenApp ? host.measure("screen") : null;
   const restore = screen
     ? createFrameRestore({
         // Not while the keyboard is in the way, whether or not a field has focus: a keyboard dismissed
         // with its field still focused is the case to restore.
         isShort: () => !viewportShrunk(frame.height(), viewport.height) && frameIsShort(screen.height(), frame.height()),
-        lift: () => {
-          const tall = host.createBox(LIFT_CSS);
-          return () => tall.remove();
-        },
+        lift: () => host.lift(),
         setTimeout: (callback, ms) => win.setTimeout(callback, ms),
         clearTimeout: (handle) => win.clearTimeout(handle),
       })

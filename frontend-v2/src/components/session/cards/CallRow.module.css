@@ -10,10 +10,13 @@
 }
 
 .head {
+  --glyph-column: 16px;
+  --glyph-gap: 7px;
+
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: var(--glyph-column) minmax(0, 1fr) auto;
   align-items: start;
-  column-gap: 7px;
+  column-gap: var(--glyph-gap);
   line-height: var(--lh-diff);
 }
 
@@ -43,6 +46,21 @@
   width: 100%;
   min-width: 0;
   color: var(--text);
+}
+
+.shell {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+/* In the glyph column, on the command's first line. */
+.prompt {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * (var(--glyph-column) + var(--glyph-gap)));
+  width: var(--glyph-column);
+  text-align: center;
 }
 
 .mono {
@@ -117,8 +135,8 @@
 /* A narrow conversation gives the indents back to the text. */
 @container (max-width: 440px) {
   .head {
-    grid-template-columns: 12px minmax(0, 1fr) auto;
-    column-gap: 4px;
+    --glyph-column: 12px;
+    --glyph-gap: 4px;
   }
 
   .inset {

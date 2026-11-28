@@ -9,7 +9,7 @@ import styles from "./CallRow.module.css";
 import { Clamped } from "./Clamped";
 import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
-import { CommandText, Lines } from "./CommandText";
+import { CommandText, Lines, Prompt } from "./CommandText";
 import { FoldedText } from "./FoldedText";
 import { Attachments } from "./Attachments";
 import { Markdown } from "./Markdown";
@@ -66,8 +66,14 @@ export function CallRow({ row }: { row: CallView }) {
               {row.name.tool}
             </div>
           ) : null}
-          {!row.label ? null : command ? (
-            <CommandText text={row.label} quiet={row.summary !== null} />
+          {!row.label ? null : row.shell && row.summary !== null ? (
+            // Under a heading the tool's glyph is a line up, so the command takes a prompt there.
+            <div className={styles.shell}>
+              <Prompt className={styles.prompt} />
+              <CommandText text={row.label} />
+            </div>
+          ) : command ? (
+            <CommandText text={row.label} />
           ) : (
             <div className={cx(styles.text, row.mono && styles.mono)}>
               {row.path ? (

@@ -15,17 +15,19 @@
   color: var(--text);
 }
 
-/* A command under a heading: the open call and the live run line. */
-.quiet {
-  color: var(--muted);
-}
-
 .line {
-  composes: mono quiet;
+  composes: mono;
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre;
+}
+
+.prompt {
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--faint);
+  user-select: none;
 }
 
 /* A narrow conversation gives the indent back to the text. */

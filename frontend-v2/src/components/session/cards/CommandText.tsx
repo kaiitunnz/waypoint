@@ -18,21 +18,32 @@ export function Lines({ text }: { text: string }) {
   ));
 }
 
-// A command under a heading, clipped to one line.
-export function CommandLine({ text }: { text: string }) {
-  return <span className={styles.line}>{text}</span>;
+// The mark before a shell command set under a heading; no part of the command.
+export function Prompt({ className }: { className?: string }) {
+  return (
+    <span className={cx(styles.prompt, className)} aria-hidden="true">
+      $
+    </span>
+  );
 }
 
-// A command or script in mono, folded at eight lines unless `whole`. `quiet` sets it
-// under a heading that names the call.
-export function CommandText({ text, whole, quiet }: { text: string; whole?: boolean; quiet?: boolean }) {
-  const classes = cx(styles.mono, quiet && styles.quiet);
+// A shell command clipped to one line, under a heading.
+export function CommandLine({ text }: { text: string }) {
+  return (
+    <span className={styles.line}>
+      <Prompt /> {text}
+    </span>
+  );
+}
+
+// A command or script in mono, folded at eight lines unless `whole`.
+export function CommandText({ text, whole }: { text: string; whole?: boolean }) {
   return whole ? (
-    <div className={classes}>
+    <div className={styles.mono}>
       <Lines text={foldLines(text, Infinity).text} />
     </div>
   ) : (
-    <FoldedCommand text={text} className={classes} />
+    <FoldedCommand text={text} className={styles.mono} />
   );
 }
 

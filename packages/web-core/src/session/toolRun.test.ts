@@ -689,6 +689,16 @@ describe("a call's summary", () => {
     expect(describeCall(item)?.label).toBe("cursor: null\nlimit: 10");
   });
 
+  it("marks a shell command, and no other argument lines", () => {
+    const shell = (tool: string, input: Record<string, unknown>) => describeCall(run([call(1, "a", tool, input)])[0])?.shell;
+    expect(shell("Bash", { command: "git status" })).toBe(true);
+    expect(shell("Bash", {})).toBe(false);
+    expect(shell("Grep", { pattern: "TODO", path: "src" })).toBe(false);
+    expect(shell("WebFetch", { url: "https://example.com" })).toBe(false);
+    expect(shell("Monitor", { command: "tail -f log" })).toBe(false);
+    expect(shell("mcp__notes__run", { command: "sync" })).toBe(false);
+  });
+
   it("heads the live run line of the call in progress, over its command", () => {
     const items = run([
       summarized(1, "a", "Bash", { command: "ls" }, "List the files"),

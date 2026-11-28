@@ -296,6 +296,8 @@ export interface CallView {
   // Tooltip: a named call's raw tool name, else the row with its paths unshortened.
   title: string;
   mono: boolean;
+  // The label is a shell command.
+  shell: boolean;
   additions: number | null;
   deletions: number | null;
   status: "pending" | "done" | "failed";
@@ -437,7 +439,7 @@ function oneLine(command: string | null): string | null {
 
 export interface LiveCall {
   step: Step | null;
-  // The agent's description of the call, and the command it runs on one line.
+  // The agent's description of the call, and the shell command it runs on one line.
   summary: string | null;
   command: string | null;
 }
@@ -514,6 +516,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
     path: shownPath ? splitPath(shownPath) : null,
     title: named ? tool : (filePath ?? preview),
     mono: filePath !== null || subject !== null,
+    shell: command !== null && subject !== null,
     additions: stats ? stats.totalAdditions : null,
     deletions: stats ? stats.totalDeletions : null,
     status: outcome.status,

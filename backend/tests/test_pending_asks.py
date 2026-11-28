@@ -408,6 +408,26 @@ async def test_short_tool_input_is_not_flagged(env: Env) -> None:
     assert item.approval.tool_input_truncated is False
 
 
+async def test_approval_carries_the_call_summary(env: Env) -> None:
+    env.transport.ids = ("a1",)
+    await approval(env.runtime, "a1", extra={"summary": "s" * 3000})
+
+    item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
+
+    assert item.approval.summary is not None
+    assert len(item.approval.summary) == TEXT_LIMIT + 1
+    assert item.approval.tool_input_truncated is False
+
+
+async def test_approval_without_a_summary_has_none(env: Env) -> None:
+    env.transport.ids = ("a1",)
+    await approval(env.runtime, "a1")
+
+    item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
+
+    assert item.approval.summary is None
+
+
 async def test_toolless_approval_uses_its_text(env: Env) -> None:
     env.transport.ids = ("c1",)
     await approval(

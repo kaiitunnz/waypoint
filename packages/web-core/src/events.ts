@@ -200,6 +200,11 @@ export function normalizeToolName(name: string | null | undefined): string | nul
   return normalized;
 }
 
+export function readSummary(event: EventRecord): string | null {
+  const summary = (event.metadata as Record<string, unknown> | undefined)?.summary;
+  return typeof summary === "string" && summary ? summary : null;
+}
+
 export function readToolName(event: EventRecord): string | null {
   const meta = event.metadata as Record<string, unknown> | undefined;
   if (!meta) return null;

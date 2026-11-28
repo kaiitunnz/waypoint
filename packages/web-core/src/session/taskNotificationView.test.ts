@@ -4,10 +4,13 @@ import type { TaskNotificationView } from "../events";
 import {
   reportUnavailableText,
   summarizeNotificationRun,
+  TASK_NOTIFICATION_BADGES,
   taskNoteHeadline,
+  taskNoteTitle,
   taskStatusLamp,
   taskUsageParts,
 } from "./taskNotificationView";
+import { toolFamilyOf } from "./toolFamily";
 
 const view = (extra: Partial<TaskNotificationView> = {}): TaskNotificationView => ({
   id: "n",
@@ -26,6 +29,19 @@ const view = (extra: Partial<TaskNotificationView> = {}): TaskNotificationView =
   outputUnavailableReason: null,
   usage: null,
   ...extra,
+});
+
+describe("TASK_NOTIFICATION_BADGES", () => {
+  it.each([
+    ["agent", "Agent", "agent"],
+    ["monitor", "Monitor", "bash"],
+    ["background_command", "Bash", "bash"],
+    ["message", null, null],
+    ["unknown", null, null],
+  ] as const)("colours a %s card as its tool", (kind, tool, family) => {
+    expect(TASK_NOTIFICATION_BADGES[kind].family).toBe(family);
+    expect(toolFamilyOf(tool)).toBe(family);
+  });
 });
 
 describe("taskStatusLamp", () => {
@@ -85,11 +101,26 @@ describe("summarizeNotificationRun", () => {
     expect(summarizeNotificationRun(["agent", "agent", "background_command"])).toEqual({
       phrase: "Reports from 2 subagents, 1 background command",
       glyphs: [
-        { glyph: "◇", label: "Subagents", count: 2 },
-        { glyph: "›_", label: "Background commands", count: 1 },
+        { glyph: "◇", label: "Subagents", count: 2, family: "agent" },
+        { glyph: "›_", label: "Background commands", count: 1, family: "bash" },
       ],
     });
     expect(summarizeNotificationRun(["unknown"]).phrase).toBe("Reports from 1 task");
     expect(summarizeNotificationRun([]).phrase).toBe("Reports");
+  });
+});
+
+describe("taskNoteTitle", () => {
+  it("is the summary", () => {
+    const monitor = view({ kind: "monitor", summary: 'Monitor event: "builds"', event: "build failed" });
+    expect(taskNoteTitle(monitor)).toBe('Monitor event: "builds"');
+  });
+
+  it("names the kind of task, never its output, without a summary", () => {
+    const output = { event: "build failed", resultPreview: "done", note: "see the log" };
+    const titles = (["agent", "monitor", "background_command", "message", "unknown"] as const).map((kind) =>
+      taskNoteTitle(view({ kind, ...output })),
+    );
+    expect(titles).toEqual(["Agent", "Monitor", "Command", "Message", "Task"]);
   });
 });

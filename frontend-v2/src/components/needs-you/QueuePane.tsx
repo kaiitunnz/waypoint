@@ -104,7 +104,6 @@ export function QueuePane() {
 
   const agentName = useCallback((backend: string) => humaniseBackend(backend, catalog), [catalog]);
   const askSession = useAskSessions();
-  const fromScreen = (sessionId: string) => askSession(sessionId).fromScreen;
 
   const closeSearch = () => {
     setQ("");
@@ -133,7 +132,7 @@ export function QueuePane() {
   }
 
   const row = (entry: QueueEntry) => {
-    const view = entryView(entry, agentName, fromScreen);
+    const view = entryView(entry, agentName, askSession);
     const common = {
       entry,
       view,

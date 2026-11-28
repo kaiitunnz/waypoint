@@ -54,6 +54,45 @@
   white-space: nowrap;
 }
 
+/* A phrase with a line under it: the marker, counts and chevron stay on the first line. */
+.line.twoLine {
+  align-items: flex-start;
+  height: auto;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.line.twoLine::before {
+  top: 14px;
+}
+
+.twoLine .sum {
+  display: flex;
+  flex-direction: column;
+  line-height: 18px;
+}
+
+.twoLine .sum > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.twoLine .stats,
+.twoLine .glyphs {
+  display: flex;
+  align-items: center;
+  height: 18px;
+}
+
+.twoLine .chev {
+  height: 18px;
+}
+
+.detail {
+  color: var(--muted);
+}
+
 .stats {
   flex: none;
   font-size: var(--f-meta);

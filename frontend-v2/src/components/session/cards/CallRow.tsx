@@ -2,18 +2,20 @@
 
 import { formatCallDuration, type CallView } from "@waypoint/web-core/session/toolRun";
 
+import { SummaryText } from "@/components/ui/SummaryText";
 import { cx } from "@/lib/cx";
 
 import styles from "./CallRow.module.css";
 import { Clamped } from "./Clamped";
 import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
-import { CommandText, Lines } from "./CommandText";
+import { CommandText, Lines, ShellPrompt } from "./CommandText";
 import { FoldedText } from "./FoldedText";
 import { Attachments } from "./Attachments";
 import { Markdown } from "./Markdown";
 import { PathLabel } from "./PathLabel";
 import { TodoItems } from "./TodoItems";
+import { ToolGlyph } from "./ToolGlyph";
 import { FOLD_LINES } from "./useFold";
 
 function Prose({ caption, text }: { caption: string; text: string }) {
@@ -29,7 +31,8 @@ function Prose({ caption, text }: { caption: string; text: string }) {
 
 export function CallRow({ row }: { row: CallView }) {
   const { todos, reply } = row;
-  const command = row.mono && !row.path;
+  // Command or argument lines, kept as written.
+  const machineLines = row.mono && !row.path;
 
   const status =
     row.status !== "failed" && row.additions !== null && row.deletions !== null ? (
@@ -50,17 +53,27 @@ export function CallRow({ row }: { row: CallView }) {
   return (
     <div className={styles.call}>
       <div className={styles.head}>
-        <span className={styles.glyph} role="img" aria-label={row.toolLabel}>
-          {row.glyph}
-        </span>
-        <div className={styles.subject} title={command || row.path || row.name ? undefined : row.title}>
+        <ToolGlyph className={styles.glyph} glyph={row.glyph} family={row.family} role="img" aria-label={row.toolLabel} />
+        <div className={styles.subject} title={machineLines || row.path || row.name ? undefined : row.title}>
+          {row.summary ? (
+            <div className={styles.heading}>
+              <SummaryText text={row.summary} />
+              {row.agentType && !row.label ? <span className={styles.aside}> {row.agentType}</span> : null}
+            </div>
+          ) : null}
           {row.name ? (
             <div className={styles.text} title={row.title}>
               {row.name.server ? <span className={styles.aside}>{row.name.server} · </span> : null}
               {row.name.tool}
             </div>
           ) : null}
-          {!row.label ? null : command ? (
+          {!row.label ? null : row.shell && row.summary !== null ? (
+            // Under a heading the tool's glyph is a line up, so the command takes a shell prompt there.
+            <div className={styles.shell}>
+              <ShellPrompt className={styles.shellPrompt} />
+              <CommandText text={row.label} />
+            </div>
+          ) : machineLines ? (
             <CommandText text={row.label} />
           ) : (
             <div className={cx(styles.text, row.mono && styles.mono)}>

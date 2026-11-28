@@ -4,6 +4,7 @@ import {
   FILE_EDIT_TOOLS,
   parseEvent,
   planForEvent,
+  readSummary,
   readToolName,
   toolFilePath,
   type EventDiffPreview,
@@ -61,12 +62,13 @@ export function approvalBody(event: EventRecord): ApprovalBody {
   if (preview) return { kind: "diff", prompt: event.text, preview };
   const tool = readToolName(event);
   const input = asRecord(event.metadata?.tool_input);
+  const described = readSummary(event) ?? "";
   if (tool === "ExitPlanMode" && typeof input?.plan === "string") return { kind: "plan", plan: input.plan };
   if ((tool === "Task" || tool === "Agent") && typeof input?.prompt === "string") {
-    return { kind: "task", prompt: input.prompt, description: text(input.description), subagent: text(input.subagent_type) };
+    return { kind: "task", prompt: input.prompt, description: described, subagent: text(input.subagent_type) };
   }
   if (tool === "Bash" && typeof input?.command === "string") {
-    return { kind: "command", description: text(input.description), command: input.command };
+    return { kind: "command", description: described, command: input.command };
   }
   if (tool && WORKFLOW_TOOLS.has(tool) && typeof input?.script === "string") {
     return { kind: "workflow", script: input.script };
@@ -75,6 +77,10 @@ export function approvalBody(event: EventRecord): ApprovalBody {
   return { kind: "raw", text: event.text };
 }
 
+// The plain title of a subagent task.
+export const subagentTaskTitle = (description: string, agentType: string | null): string =>
+  `Approve subagent task${description ? `: ${description}` : ""}${agentType ? ` (via ${agentType})` : ""}`;
+
 export function approvalPrompt(body: ApprovalBody): string | null {
   switch (body.kind) {
     case "diff":
@@ -82,7 +88,7 @@ export function approvalPrompt(body: ApprovalBody): string | null {
     case "plan":
       return "Approve plan and exit plan mode";
     case "task":
-      return `Approve subagent task${body.description ? `: ${body.description}` : ""}${body.subagent ? ` (via ${body.subagent})` : ""}`;
+      return subagentTaskTitle(body.description, body.subagent);
     case "command":
       return `Approve Bash command${body.description ? `: ${body.description}` : ""}`;
     case "workflow":

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from waypoint.backends.approvals import open_approval_requests
-from waypoint.backends.claude_code.normalize import format_approval_text
+from waypoint.backends.claude_code.normalize import call_summary, format_approval_text
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty.byte_source import TranscriptTreeReader
 from waypoint.backends.claude_tty.call_match import (
@@ -34,6 +34,7 @@ from waypoint.backends.events import (
     InteractionChoice,
     InteractionEnvelope,
     InteractionKind,
+    set_summary,
 )
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import EventKind, SessionRecord, SessionStatus
@@ -752,6 +753,9 @@ class DialogWatcher:
             metadata["subagent"] = subagent
         if pending.call is not None:
             metadata["tool_use_id"] = pending.call.tool_use_id
+            # Only the call's own record: an unverified card's input is read off
+            # the screen.
+            set_summary(metadata, call_summary(pending.call.name, pending.call.input))
         await self._runtime._emit_adapter_event(
             self._session_id,
             EventKind.APPROVAL_REQUEST,

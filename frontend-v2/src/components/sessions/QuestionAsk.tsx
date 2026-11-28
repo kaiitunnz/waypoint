@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { askNeedsDetail, askSummary } from "@waypoint/web-core/needsYou";
+import { askNeedsDetail, questionLine } from "@waypoint/web-core/needsYou";
 import {
   answerQuestion,
   emptyPicks,
@@ -74,7 +74,7 @@ export function QuestionAsk({ ask, agent, now, openHref }: QuestionAskProps) {
       {openHref ? <OpenHeadline href={openHref}>{headline}</OpenHeadline> : <h3 className={styles.headline}>{headline}</h3>}
       {needsDetail ? (
         <div className={styles.review}>
-          <p className={styles.meta}>{askSummary(ask).text}</p>
+          <p className={styles.meta}>{questionLine(ask)}</p>
           <OpenLink href={openHref} label="Answer" />
         </div>
       ) : single ? (

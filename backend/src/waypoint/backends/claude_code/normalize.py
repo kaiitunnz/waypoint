@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any
 
 from waypoint.backends.claude_code.thinking_signature import is_narration_signature
+from waypoint.backends.events import description_input
 from waypoint.backends.task_notifications import (
     CAPTURE_DISABLED,
     NOT_CAPTURED_ON_IMPORT,
@@ -57,6 +58,16 @@ def format_rate_limit(info: dict[str, Any]) -> str:
     status = info.get("status", "unknown")
     rl_type = info.get("rate_limit_type", "")
     return f"Rate limit ({rl_type}): {status}".strip()
+
+
+# Tools whose ``description`` input describes the call. On any other tool the key
+# is an argument of the call, such as a calendar event's body.
+_DESCRIBED_TOOLS = frozenset({"Bash", "Agent", "Task", "Monitor", "PowerShell"})
+
+
+def call_summary(tool_name: Any, tool_input: Any) -> str | None:
+    """The agent's description of a call, or ``None`` when it gave none."""
+    return description_input(tool_name, tool_input, _DESCRIBED_TOOLS)
 
 
 def format_approval_text(payload: dict[str, Any]) -> str:

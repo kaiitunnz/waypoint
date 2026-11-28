@@ -7,6 +7,8 @@ import {
   approvalRequest,
   buildAnswer,
   decideAsk,
+  askPreview,
+  askTitle,
   decisionView,
   inlineCommand,
   emptyPicks,
@@ -131,13 +133,13 @@ describe("decisions", () => {
   });
 
   it("previews the command or the edited file, and carries the plan text", () => {
-    expect(decisionView(approval()).preview).toEqual({ kind: "command", text: "git push -u origin feat/x" });
-    expect(decisionView(approval({ tool_name: "Edit", tool_input: { file_path: "/a/b.py" } })).preview).toEqual({
+    expect(askPreview(approval(), "/a")).toEqual({ kind: "command", text: "git push -u origin feat/x" });
+    expect(askPreview(approval({ tool_name: "Edit", tool_input: { file_path: "/a/b.py" } }), "/a")).toEqual({
       kind: "path",
       path: "/a/b.py",
     });
-    expect(decisionView(approval({ tool_name: "WebFetch", tool_input: { url: "x" } })).preview).toBeNull();
-    expect(decisionView(approval({ tool_input: null })).preview).toBeNull();
+    expect(askPreview(approval({ tool_name: "WebFetch", tool_input: { url: "x" } }), "/a")).toBeNull();
+    expect(askPreview(approval({ tool_input: null }), "/a")).toBeNull();
     expect(decisionView(plan([])).planBody).toBe("# Plan");
     expect(decisionView(approval()).planBody).toBeNull();
   });
@@ -253,6 +255,32 @@ describe("deciding outside the detail", () => {
     });
   });
 
+  it("titles a detail from the whole request, past where the ask cut it", () => {
+    const ask = approval("Bash", { command: "echo banner…" }, true);
+    ask.approval.summary = "Print a banner";
+    const request = (command: string) =>
+      approvalRequest(
+        ask,
+        ev(1, "approval_request", "Approve Bash", { tool_name: "Bash", tool_input: { command }, summary: "Print a banner" }),
+        session,
+      );
+    expect(askTitle(ask, session.cwd, { status: "loading" })).toMatchObject({ text: "Print a banner", marked: true });
+    expect(askTitle(ask, session.cwd, request("echo banner"))).toMatchObject({ text: "Print a banner", marked: true });
+    expect(askTitle(ask, session.cwd, request("echo banner \u202e"))).toMatchObject({ text: ask.title, marked: false });
+  });
+
+  it("keeps its own title for a call that asks for more than it says", () => {
+    const titled = (extra: Record<string, unknown>) => {
+      const ask = approval("Bash", { command: "ls", ...extra });
+      ask.approval.summary = "List the files";
+      return askTitle(ask, session.cwd);
+    };
+    expect(titled({})).toEqual({ text: "List the files", marked: true, agentType: null });
+    for (const extra of [{ dangerouslyDisableSandbox: true }, { workdir: "/etc" }, { command: "ls \u202e" }]) {
+      expect([extra, titled(extra).marked]).toEqual([extra, false]);
+    }
+  });
+
   it("takes a plan's text from its ask, beside the rest of its call", () => {
     const request = ev(1, "approval_request", "Approve plan", {
       tool_name: "ExitPlanMode",
@@ -269,6 +297,7 @@ describe("deciding outside the detail", () => {
     expect(approvalRequest(plan("# Plan", "approve_plan"), null, session)).toEqual({
       status: "ready",
       body: { kind: "plan", plan: "# Plan" },
+      summary: null,
       fields: { plan: "# Plan" },
       warnings: [],
       unverified: false,

@@ -10,6 +10,7 @@ from typing import Any
 
 from openai_codex.models import UnknownNotification
 
+from waypoint.backends.codex.command_line import runs_only
 from waypoint.backends.diff_preview import (
     DiffPreviewPayload,
     build_preview,
@@ -38,6 +39,38 @@ def error_text(payload: dict[str, Any]) -> str:
     if not details or details == message:
         return message
     return f"{message} — {details}"
+
+
+def command_summary(command: Any, actions: Any) -> str | None:
+    """Names a command by the action Codex parsed from it, or ``None`` unless that
+    action is all the line runs, besides trimming its output: Codex leaves other
+    commands out of its actions. The action's type follows from the program's name,
+    so the program may do more."""
+    match command, actions:
+        case str(), [{"command": str(parsed)} as action] if runs_only(command, parsed):
+            return _action_phrase(action)
+        case _:
+            return None
+
+
+def _action_phrase(action: dict[str, Any]) -> str | None:
+    fields: tuple[str, ...]
+    bare: str | None
+    match action.get("type"):
+        case "read":
+            fields, verb, bare = ("name",), "Read", None
+        case "search":
+            fields, verb, bare = ("query", "path"), "Search", "Search files"
+        case "listFiles":
+            fields, verb, bare = ("path",), "List", "List files"
+        case _:
+            return None
+    for field in fields:
+        if isinstance(value := action.get(field), str) and value:
+            # Backticks mark the machine strings in a summary, so one inside a
+            # string can't be marked.
+            return None if "`" in value else f"{verb} `{value}`"
+    return bare
 
 
 def extract_item_id(payload: dict[str, Any]) -> str | None:

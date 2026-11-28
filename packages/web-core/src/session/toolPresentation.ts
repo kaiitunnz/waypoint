@@ -1,6 +1,7 @@
 import {
   asRecord,
   FILE_EDIT_TOOLS,
+  readSummary,
   readToolName,
   toolFilePath,
   type EventDiffPreview,
@@ -135,12 +136,22 @@ export function delegationForEvent(event: EventRecord): Delegation | null {
   return { prompt: filledText(item?.prompt), report };
 }
 
+// The kind of subagent a call's input names, under either key agents use for it.
+export const subagentKind = (input: Record<string, unknown> | null | undefined): string | null =>
+  filledText(input?.subagent_type) ?? filledText(input?.agent);
+
+// A subagent call's description. A stored event may hold it only in the input.
+export function subagentDescription(event: EventRecord): string | null {
+  const described = readSummary(event) ?? toolInputForEvent(event)?.description;
+  return typeof described === "string" ? described : null;
+}
+
 // What a subagent call asks: its prompt, and the kind of subagent where the agent names one.
 export function subagentRequestForEvent(event: EventRecord): { prompt: string | null; agentType: string | null } {
   const input = toolInputForEvent(event);
   return {
     prompt: delegationForEvent(event)?.prompt ?? filledText(input?.prompt),
-    agentType: filledText(input?.subagent_type) ?? filledText(input?.agent),
+    agentType: subagentKind(input),
   };
 }
 
@@ -287,8 +298,9 @@ export function previewForToolEvent(event: EventRecord, toolLabel: string): stri
     if (toolName === "WebSearch" && typeof input.query === "string") {
       return input.query;
     }
-    if ((toolName === "Task" || toolName === "Agent") && typeof input.description === "string") {
-      return input.description;
+    if (toolName === "Task" || toolName === "Agent") {
+      const described = subagentDescription(event);
+      if (described !== null) return described;
     }
     if (toolName === "TodoWrite" && Array.isArray(input.todos)) {
       return `${input.todos.length} todo${input.todos.length === 1 ? "" : "s"}`;

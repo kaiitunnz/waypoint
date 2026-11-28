@@ -4,7 +4,11 @@ import { useState } from "react";
 
 import type { TaskNotificationView } from "@waypoint/web-core/events";
 import { useReportPreview } from "@waypoint/web-core/hooks/useReportPreview";
-import { TASK_NOTIFICATION_BADGES, taskStatusLamp } from "@waypoint/web-core/session/taskNotificationView";
+import {
+  TASK_NOTIFICATION_BADGES,
+  taskNoteTitle,
+  taskStatusLamp,
+} from "@waypoint/web-core/session/taskNotificationView";
 import { taskNoteBody, taskNoteReport, type ReportPreviewState } from "@waypoint/web-core/session/taskNoteBody";
 import type { EventRecord } from "@waypoint/web-core/types";
 
@@ -16,6 +20,7 @@ import { Attachments } from "./Attachments";
 import { EventTime } from "./EventTime";
 import { FoldedText } from "./FoldedText";
 import styles from "./TaskNote.module.css";
+import { ToolGlyph } from "./ToolGlyph";
 
 function ReportPreview({ state }: { state: ReportPreviewState | null }) {
   if (!state || state.status === "loading") return <p className={styles.caption}>Loading report…</p>;
@@ -43,7 +48,7 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
   const report = taskNoteReport(view, event);
   const { specs, reportSpec, inlineReports } = report;
   const previewState = useReportPreview(credentials, reportSpec, open);
-  const { headline, teaser, usageParts, unavailable, hasBody, showLinks, supersedes, cutCaption } = taskNoteBody(view, report, previewState);
+  const { usageParts, unavailable, hasBody, showLinks, supersedes, cutCaption } = taskNoteBody(view, report, previewState);
 
   const caption = (body: string | null, truncated: boolean) => {
     const kind = cutCaption(body, truncated);
@@ -52,10 +57,14 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
 
   const header = (
     <>
-      <span className={styles.glyph} role="img" aria-label={badge.label}>
-        {badge.glyph}
-      </span>
-      <span className={styles.headline}>{headline}</span>
+      <ToolGlyph
+        className={styles.glyph}
+        glyph={badge.glyph}
+        family={badge.family}
+        // Without a summary the title already says the kind.
+        {...(view.summary ? { role: "img", "aria-label": badge.label } : { "aria-hidden": true })}
+      />
+      <span className={styles.headline}>{taskNoteTitle(view)}</span>
       {lamp ? <span className={cx(styles.status, styles[lamp.tone])}>{lamp.label}</span> : null}
       <EventTime ts={event.ts} className={styles.time} />
     </>
@@ -64,14 +73,19 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
   return (
     <div className={styles.note}>
       {hasBody ? (
-        <button type="button" className={cx(styles.head, styles.tap)} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <button
+          type="button"
+          className={cx(styles.head, styles.tap)}
+          aria-expanded={open}
+          data-lights-glyphs={open ? "always" : "focus"}
+          onClick={() => setOpen(!open)}
+        >
           {header}
           <Icon name={open ? "chevron-up" : "chevron-right"} size={14} strokeWidth={2} />
         </button>
       ) : (
         <div className={styles.head}>{header}</div>
       )}
-      {teaser && !open ? <p className={styles.teaser}>{teaser}</p> : null}
       {open ? (
         <div className={styles.body}>
           {view.resultPreview && !supersedes(view.resultPreview) ? <FoldedText text={view.resultPreview} className={styles.result} /> : null}

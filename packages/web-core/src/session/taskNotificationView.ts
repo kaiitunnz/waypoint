@@ -1,16 +1,17 @@
 import type { TaskNotificationView } from "../events";
 import { formatDuration } from "./cardText";
+import { toolFamilyOf, type ToolFamily } from "./toolFamily";
 import type { ToolBadge } from "./toolPresentation";
 import type { RunGlyph } from "./toolRun";
 
 // A task lifecycle card: subagent/Agent completion, Monitor events and terminal
-// state, or background-command completion.
-export const TASK_NOTIFICATION_BADGES: Record<TaskNotificationView["kind"], ToolBadge> = {
-  agent: { glyph: "◇", variant: "task", label: "Agent" },
-  monitor: { glyph: "◉", variant: "monitor", label: "Monitor" },
-  background_command: { glyph: "›_", variant: "bash", label: "Command" },
-  message: { glyph: "↘", variant: "default", label: "Message" },
-  unknown: { glyph: "⁂", variant: "default", label: "Task" },
+// state, or background-command completion. `family` is that of the tool it reports on.
+export const TASK_NOTIFICATION_BADGES: Record<TaskNotificationView["kind"], ToolBadge & { family: ToolFamily | null }> = {
+  agent: { glyph: "◇", variant: "task", label: "Agent", family: toolFamilyOf("Agent") },
+  monitor: { glyph: "◉", variant: "monitor", label: "Monitor", family: toolFamilyOf("Monitor") },
+  background_command: { glyph: "›_", variant: "bash", label: "Command", family: toolFamilyOf("Bash") },
+  message: { glyph: "↘", variant: "default", label: "Message", family: null },
+  unknown: { glyph: "⁂", variant: "default", label: "Task", family: null },
 };
 
 export type TaskStatusTone = "ok" | "danger" | "warn" | "off" | "info";
@@ -72,6 +73,11 @@ export function taskNoteHeadline(view: TaskNotificationView): string {
   return view.summary || view.event || "Task notification";
 }
 
+// A card's headline, which never quotes the task's output.
+export function taskNoteTitle(view: TaskNotificationView): string {
+  return view.summary || TASK_NOTIFICATION_BADGES[view.kind].label;
+}
+
 export interface NotificationRunSummary {
   // "Reports from 2 subagents, 1 background command".
   phrase: string;
@@ -104,6 +110,7 @@ export function summarizeNotificationRun(kinds: readonly TaskNotificationView["k
         glyph: TASK_NOTIFICATION_BADGES[kind].glyph,
         label: many.charAt(0).toUpperCase() + many.slice(1),
         count: counts.get(kind) ?? 0,
+        family: TASK_NOTIFICATION_BADGES[kind].family,
       };
     }),
   };

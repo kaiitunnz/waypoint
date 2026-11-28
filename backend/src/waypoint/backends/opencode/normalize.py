@@ -20,7 +20,9 @@ from waypoint.backends.events import (
     INTERACTION_METADATA_KEY,
     InteractionChoice,
     InteractionEnvelope,
+    description_input,
     question_interaction,
+    set_summary,
 )
 from waypoint.backends.opencode.forms import Form
 from waypoint.backends.opencode.sessions import Permission
@@ -37,6 +39,8 @@ QUESTION_TOOL = "question"
 # OpenCode's tool names where Waypoint's clients and telemetry know another.
 _TOOL_NAMES = {"shell": "bash", "subagent": "task"}
 _FILE_TOOLS = frozenset({"read", "write", "edit"})
+# Tools whose ``description`` input describes the call. ``shell`` declares none.
+_DESCRIBED_TOOLS = frozenset({"subagent"})
 
 
 def tool_name(name: str) -> str:
@@ -86,19 +90,17 @@ def text_delta(
 
 def tool_call(call_id: str, name: str, raw_input: Any) -> Emission:
     shown, values = tool_name(name), _tool_input(name, raw_input)
-    return (
-        EventKind.TOOL_CALL,
-        f"{shown}({json.dumps(values, indent=2)})",
-        {
-            "method": "session.tool.called",
-            "item_id": call_id,
-            "item_type": "tool_use",
-            "call_id": call_id,
-            "tool_use_id": call_id,
-            "tool_name": shown,
-            "tool_input": values,
-        },
-    )
+    metadata: dict[str, Any] = {
+        "method": "session.tool.called",
+        "item_id": call_id,
+        "item_type": "tool_use",
+        "call_id": call_id,
+        "tool_use_id": call_id,
+        "tool_name": shown,
+        "tool_input": values,
+    }
+    set_summary(metadata, description_input(name, raw_input, _DESCRIBED_TOOLS))
+    return (EventKind.TOOL_CALL, f"{shown}({json.dumps(values, indent=2)})", metadata)
 
 
 def tool_result(
@@ -180,6 +182,7 @@ def approval_request(
     }
     if permission.call_id:
         metadata["item_id"] = permission.call_id
+    set_summary(metadata, description_input(name, raw_input, _DESCRIBED_TOOLS))
     return (EventKind.APPROVAL_REQUEST, title, metadata)
 
 

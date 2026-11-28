@@ -173,3 +173,13 @@ describe("toolPairAttachments", () => {
     expect(toolPairAttachments(pair).map((s) => s.id)).toEqual(["a", "b"]);
   });
 });
+
+describe("a subagent call's preview", () => {
+  const input = { description: "Find callers", prompt: "List them" };
+
+  it("reads the summary, and the input's description for events stored before it", () => {
+    const summarized = ev(1, "tool_call", "", { tool_name: "Agent", payload: { input }, summary: "Find every caller" });
+    expect(previewForToolEvent(summarized, "Agent")).toBe("Find every caller");
+    expect(previewForToolEvent(toolCall("Agent", input), "Agent")).toBe("Find callers");
+  });
+});

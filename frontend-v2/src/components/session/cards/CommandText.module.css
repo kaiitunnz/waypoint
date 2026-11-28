@@ -15,6 +15,21 @@
   color: var(--text);
 }
 
+.line {
+  composes: mono;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.shellPrompt {
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--faint);
+  user-select: none;
+}
+
 /* A narrow conversation gives the indent back to the text. */
 @container (max-width: 440px) {
   .ln {

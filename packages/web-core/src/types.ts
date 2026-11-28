@@ -655,6 +655,10 @@ export interface PendingAskApproval {
   tool_input_truncated: boolean;
   decisions: string[];
   supports_note: boolean;
+  // Whether the request names the call it answers; null when its transport's always do.
+  call_verified?: boolean | null;
+  // The agent's description of the call.
+  summary?: string | null;
 }
 
 // `approve` answers through /approve with approval_id = plan_id; `approve_plan`

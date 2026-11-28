@@ -1,7 +1,9 @@
 import { gateHeadline, gateKey, gateTime, isGateAnswered, type BoardGate } from "./board";
 import type { InboxStatusFilter } from "./inbox";
 import {
-  decisionView,
+  askBodyLine,
+  askPreview,
+  askTitle,
   fitsListing,
   inlineCommand,
   isRecommendedLabel,
@@ -9,6 +11,8 @@ import {
   stripRecommendedSuffix,
 } from "./pendingAskActions";
 import type { AskUserQuestion } from "./session/askQuestion";
+import { plainSummary, type ShownTitle } from "./session/summary";
+import type { AskSession } from "./session/wholeRequest";
 import type { InboxItem, PendingAsk, PendingQuestionAsk } from "./types";
 
 export type NeedsSource = "sessions" | "inbox" | "board";
@@ -36,7 +40,10 @@ function matches(haystack: (string | null | undefined)[], query: string): boolea
 }
 
 function askMatches(ask: PendingAsk, query: string): boolean {
-  return matches([ask.session_title, ask.title, ask.body], query);
+  // Searched as shown, without the marks around its machine strings. With no session
+  // directory at hand, an empty one only rejects more summaries.
+  const { text, marked } = askTitle(ask, "");
+  return matches([ask.session_title, ask.title, ask.body, marked ? plainSummary(text) : null], query);
 }
 
 // A gate also answers to the search its hidden inbox item would.
@@ -151,7 +158,7 @@ export function askNeedsDetail(ask: PendingQuestionAsk): boolean {
   return rest.length > 0 || !prompt || prompt.multi_select || prompt.options.length === 0;
 }
 
-function questionSummary(ask: PendingQuestionAsk): string {
+export function questionLine(ask: PendingQuestionAsk): string {
   const prompts = ask.question.questions;
   if (prompts.length !== 1) return `${prompts.length} questions`;
   const { options } = prompts[0];
@@ -161,13 +168,13 @@ function questionSummary(ask: PendingQuestionAsk): string {
   return recommended ? `${count}, ${stripRecommendedSuffix(recommended.label)} recommended` : count;
 }
 
-export interface AskSummary {
+export interface AskLine {
   text: string;
   // A command or path, set in mono.
   mono: boolean;
 }
 
-export interface AskRow extends AskSummary {
+export interface AskRow extends AskLine {
   // Shown in place of `text`: a path keeps its file name on one line.
   path: string | null;
   // The row shows the whole request and takes the reply.
@@ -175,29 +182,34 @@ export interface AskRow extends AskSummary {
 }
 
 // A row takes a reply only where it shows everything asked.
-export function askRow(ask: PendingAsk, fromScreen: boolean): AskRow {
-  const summary = askSummary(ask);
+export function askRow(ask: PendingAsk, { cwd, fromScreen }: AskSession): AskRow {
+  const line = askLine(ask, cwd);
   if (ask.kind === "question") {
     const answers = !askNeedsDetail(ask) && fitsListing(ask.question.questions[0].question);
-    return { ...summary, path: null, answers };
+    return { ...line, path: null, answers };
   }
-  const preview = ask.kind === "approval" ? decisionView(ask).preview : null;
-  if (preview?.kind === "path") return { ...summary, path: preview.path, answers: false };
+  const preview = askPreview(ask, cwd);
+  if (preview?.kind === "path") return { ...line, path: preview.path, answers: false };
   const command = inlineCommand(ask, fromScreen);
-  if (command !== null) return { ...summary, text: command, path: null, answers: true };
-  return { ...summary, path: null, answers: false };
+  if (command !== null) return { ...line, text: command, path: null, answers: true };
+  return { ...line, path: null, answers: false };
 }
 
-export function askSummary(ask: PendingAsk): AskSummary {
-  if (ask.kind === "question") return { text: questionSummary(ask), mono: false };
+// The line a row shows under its headline, dropped where it repeats the ask's own
+// title. It stays under a summary, which can read like a command it is not.
+export const rowLine = (row: AskRow, headline: ShownTitle): string | null =>
+  row.text && (headline.marked || row.text !== headline.text) ? row.text : null;
+
+export function askLine(ask: PendingAsk, cwd: string): AskLine {
+  if (ask.kind === "question") return { text: questionLine(ask), mono: false };
   if (ask.kind === "plan_approval") return { text: planPreview(ask.plan.text, 1), mono: false };
-  const { preview } = decisionView(ask);
+  const preview = askPreview(ask, cwd);
   if (preview?.kind === "command") {
     const [first, ...rest] = preview.text.split("\n");
     return { text: rest.length > 0 ? `${first} …` : first, mono: true };
   }
   if (preview?.kind === "path") return { text: preview.path, mono: true };
-  return { text: ask.body ?? ask.approval.tool_name ?? ask.title, mono: false };
+  return { text: askBodyLine(ask, cwd) ?? ask.approval.tool_name ?? ask.title, mono: false };
 }
 
 export function askUserQuestions(ask: PendingQuestionAsk): AskUserQuestion[] {

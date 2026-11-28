@@ -21,7 +21,6 @@
 .glyph {
   flex: none;
   font-weight: 400;
-  color: var(--faint);
 }
 
 .headline {
@@ -60,14 +59,6 @@
   font-weight: 400;
 }
 
-.teaser {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--muted);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
 .body {
   display: flex;
   flex-direction: column;
@@ -104,4 +95,11 @@
 /* The header is a button only when the note opens. */
 .tap {
   composes: hit from "../../../styles/hit.module.css";
+}
+
+/* A note that opens is one line while closed. */
+.tap[aria-expanded="false"] .headline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

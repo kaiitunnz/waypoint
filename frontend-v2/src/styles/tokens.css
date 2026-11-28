@@ -45,6 +45,12 @@
   --error: #e8787a;
   --danger: var(--error);
 
+  --tool-read: #85c9fe;
+  --tool-edit: #0faba7;
+  --tool-bash: #91d681;
+  --tool-agent: #a987e0;
+  --tool-skill: #fca8c7;
+
   /* Type. */
   --serif: var(--font-serif), "Source Serif 4", Georgia, serif;
   --sans: var(--font-sans), "Source Sans 3", system-ui, sans-serif;
@@ -191,6 +197,12 @@ html[data-theme="light"] {
   --working: #2f6f9e;
   --done: #257a50;
   --error: #b83038;
+
+  --tool-read: #1753a0;
+  --tool-edit: #009194;
+  --tool-bash: #286402;
+  --tool-agent: #8a60cd;
+  --tool-skill: #8f2162;
 
   --bubble: #efede8;
   --route: color-mix(in srgb, #b8820e 34%, #cbc6ba);

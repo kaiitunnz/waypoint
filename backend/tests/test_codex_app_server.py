@@ -699,6 +699,56 @@ def test_pending_approval_ids_are_empty_before_the_adapter_exists() -> None:
     assert transport.pending_approval_ids(session) == ()
 
 
+def _command_approval(action: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": "command",
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "cmd-1",
+        "startedAtMs": 1_700_000_000_000,
+        "environmentId": "local",
+        "command": f"/bin/bash -lc '{action['command']}'",
+        "cwd": "/tmp/work",
+        "commandActions": [action],
+        "proposedExecpolicyAmendment": action["command"].split(),
+        "availableDecisions": ["accept", "cancel"],
+    }
+
+
+_READ_NOTES = {
+    "type": "read",
+    "command": "cat notes.txt",
+    "name": "notes.txt",
+    "path": "/tmp/work/notes.txt",
+}
+
+
+@pytest.mark.asyncio
+async def test_command_approval_event_takes_no_summary() -> None:
+    emitted: list = []
+    adapter, fake = make_parked_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    await adapter.send_input("sess", "start")
+    handler = fake.approval_handler
+    assert handler is not None
+    reader = asyncio.create_task(
+        asyncio.to_thread(
+            handler,
+            "item/commandExecution/requestApproval",
+            _command_approval(_READ_NOTES),
+        )
+    )
+    while not any(kind == EventKind.APPROVAL_REQUEST for _, kind, *_ in emitted):
+        await asyncio.sleep(0.01)
+    metadata = next(e[3] for e in emitted if e[1] == EventKind.APPROVAL_REQUEST)
+
+    assert "summary" not in metadata
+
+    assert await adapter.respond_to_approval("sess", "approve")
+    await asyncio.wait_for(reader, timeout=2)
+    assert await adapter.terminate_session("sess") is True
+
+
 @pytest.mark.asyncio
 async def test_interrupt_cancels_a_pending_approval_first() -> None:
     emitted: list = []

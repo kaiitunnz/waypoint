@@ -72,12 +72,18 @@ describe("approvalBody", () => {
     expect(plan).toEqual({ kind: "plan", plan: "# Plan" });
     expect(approvalPrompt(plan)).toBe("Approve plan and exit plan mode");
 
-    const task = approvalBody(approval("Agent", { prompt: "go", description: "Audit", subagent_type: "Explore" }));
+    const task = approvalBody(
+      approval("Agent", { prompt: "go", description: "Audit", subagent_type: "Explore" }, { summary: "Audit" }),
+    );
     expect(approvalPrompt(task)).toBe("Approve subagent task: Audit (via Explore)");
 
-    const bash = approvalBody(approval("Bash", { command: "ls", description: "List" }));
+    const bash = approvalBody(approval("Bash", { command: "ls", description: "List" }, { summary: "List" }));
     expect(bash).toEqual({ kind: "command", description: "List", command: "ls" });
     expect(approvalPrompt(bash)).toBe("Approve Bash command: List");
+
+    // The prompt takes the agent's words only from the call's summary.
+    const undescribed = approvalBody(approval("Bash", { command: "ls", description: "List" }));
+    expect(approvalPrompt(undescribed)).toBe("Approve Bash command");
 
     const workflow = approvalBody(approval("Workflow", { script: "x()" }));
     expect(approvalPrompt(workflow)).toBe("Review this dynamic workflow before it runs");

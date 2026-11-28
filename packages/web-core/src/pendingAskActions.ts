@@ -1,7 +1,16 @@
 import { answerAskQuestion, ApiError, approvePlan, approveSession, type AskAnswerPayload } from "./api";
 import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
 import { toggleSelection } from "./session/askQuestion";
-import { shownPlan, shownRequest, type AskSession, type ShownRequest } from "./session/wholeRequest";
+import { subagentTaskTitle } from "./session/approvals";
+import { subagentKind } from "./session/toolPresentation";
+import type { ShownTitle } from "./session/summary";
+import {
+  shownPlan,
+  shownRequest,
+  titlingSummary,
+  type AskSession,
+  type ShownRequest,
+} from "./session/wholeRequest";
 import type {
   EventRecord,
   PendingApprovalAsk,
@@ -119,17 +128,52 @@ const DECISION_ACTIONS: readonly DecisionAction[] = [
   { decision: "decline", label: "Decline" },
 ];
 
+// The whole of what the ask carries is checked, so a new field is scanned too.
+const askSummaryTitle = (ask: PendingAsk, cwd: string): string | null =>
+  ask.kind === "approval" ? titlingSummary({ ...ask.approval }, cwd) : null;
+
+export interface AskTitle extends ShownTitle {
+  // The kind of subagent a summary-titled task asks for.
+  agentType: string | null;
+}
+
+// A subagent task approval's kind of subagent, or null for any other tool.
+const askedTask = ({ tool_name, tool_input }: PendingApprovalAsk["approval"]): { agentType: string | null } | null => {
+  const tool = normalizeToolName(tool_name);
+  return tool === "Task" || tool === "Agent" ? { agentType: subagentKind(tool_input) } : null;
+};
+
+// The title every list and detail gives an ask. A detail passes its request: the ask's
+// strings are cut, so only the whole request shows every reason not to take the summary.
+export function askTitle(ask: PendingAsk, cwd: string, request?: ApprovalRequest): AskTitle {
+  const summary = ask.kind === "approval" && request?.status === "ready" ? request.summary : askSummaryTitle(ask, cwd);
+  if (ask.kind !== "approval" || summary === null) return { text: ask.title, marked: false, agentType: null };
+  return { text: summary, marked: true, agentType: askedTask(ask.approval)?.agentType ?? null };
+}
+
 export type ApprovalPreview = { kind: "command"; text: string } | { kind: "path"; path: string } | null;
 
 // What a tool approval is about: the shell command, or the file being edited.
-function approvalPreview(approval: PendingApprovalAsk["approval"]): ApprovalPreview {
+export function askPreview(ask: PendingApprovalAsk | PendingPlanAsk, cwd: string): ApprovalPreview {
+  if (ask.kind !== "approval") return null;
+  const { approval } = ask;
   const tool = normalizeToolName(approval.tool_name);
   const input = approval.tool_input;
   if (tool === "Bash" && typeof input?.command === "string" && input.command) {
     return { kind: "command", text: input.command };
   }
   const path = tool && FILE_EDIT_TOOLS.has(tool) ? toolFilePath(input) : null;
-  return path ? { kind: "path", path } : null;
+  if (path) return { kind: "path", path };
+  // A summary takes the title, so the command it replaces stays in view here.
+  const command = askSummaryTitle(ask, cwd) === null ? null : input?.command;
+  return typeof command === "string" && command ? { kind: "command", text: command } : null;
+}
+
+// An ask's body as a row or card words it: a summary-titled subagent task's own body
+// would repeat the title.
+export function askBodyLine(ask: PendingAsk, cwd: string): string | null {
+  const task = ask.kind === "approval" && askSummaryTitle(ask, cwd) !== null ? askedTask(ask.approval) : null;
+  return task ? subagentTaskTitle("", task.agentType) : ask.body;
 }
 
 // The first lines of a plan with the markdown marks off, for a card.
@@ -145,27 +189,15 @@ export function planPreview(text: string, maxLines = 3): string {
 export interface DecisionView {
   actions: readonly DecisionAction[];
   supportsNote: boolean;
-  preview: ApprovalPreview;
   // The full plan, for a plan approval.
   planBody: string | null;
 }
 
 export function decisionView(ask: PendingApprovalAsk | PendingPlanAsk): DecisionView {
   if (ask.kind === "approval") {
-    const { approval } = ask;
-    return {
-      actions: DECISION_ACTIONS,
-      supportsNote: approval.supports_note,
-      preview: approvalPreview(approval),
-      planBody: null,
-    };
+    return { actions: DECISION_ACTIONS, supportsNote: ask.approval.supports_note, planBody: null };
   }
-  return {
-    actions: DECISION_ACTIONS,
-    supportsNote: ask.plan.supports_note,
-    preview: null,
-    planBody: ask.plan.text,
-  };
+  return { actions: DECISION_ACTIONS, supportsNote: ask.plan.supports_note, planBody: ask.plan.text };
 }
 
 // What a row or card lists whole beside its actions: a command or question of a few

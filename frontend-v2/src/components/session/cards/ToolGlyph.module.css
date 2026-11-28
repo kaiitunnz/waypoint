@@ -1,0 +1,41 @@
+.glyph {
+  color: var(--family, var(--faint));
+  transition: color 120ms ease;
+}
+
+/* "Tool colours: On focus". A holder says with data-lights-glyphs when its glyphs are
+   coloured: "focus" while it is hovered or keyboard-focused, "always" while it shows. */
+html[data-tool-colours="focus"] .glyph {
+  color: var(--faint);
+}
+
+html[data-tool-colours="focus"] [data-lights-glyphs]:focus-visible .glyph,
+html[data-tool-colours="focus"] [data-lights-glyphs="always"] .glyph {
+  color: var(--family, var(--faint));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html[data-tool-colours="focus"] [data-lights-glyphs]:hover .glyph {
+    color: var(--family, var(--faint));
+  }
+}
+
+.glyph[data-family="bash"] {
+  --family: var(--tool-bash);
+}
+
+.glyph[data-family="read"] {
+  --family: var(--tool-read);
+}
+
+.glyph[data-family="edit"] {
+  --family: var(--tool-edit);
+}
+
+.glyph[data-family="agent"] {
+  --family: var(--tool-agent);
+}
+
+.glyph[data-family="skill"] {
+  --family: var(--tool-skill);
+}

@@ -10,17 +10,19 @@
 }
 
 .head {
+  --glyph-column: 16px;
+  --glyph-gap: 7px;
+
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: var(--glyph-column) minmax(0, 1fr) auto;
   align-items: start;
-  column-gap: 7px;
+  column-gap: var(--glyph-gap);
   line-height: var(--lh-diff);
 }
 
 .glyph {
   font-family: var(--mono);
   font-size: var(--f-stamp);
-  color: var(--faint);
   text-align: center;
 }
 
@@ -32,10 +34,32 @@
   min-width: 0;
 }
 
+.heading {
+  composes: heading from "../../ui/SummaryText.module.css";
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .text {
   width: 100%;
   min-width: 0;
   color: var(--text);
+}
+
+.shell {
+  composes: subject;
+  position: relative;
+  width: 100%;
+}
+
+/* In the glyph column, on the command's first line. */
+.shellPrompt {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * (var(--glyph-column) + var(--glyph-gap)));
+  width: var(--glyph-column);
+  text-align: center;
 }
 
 .mono {
@@ -110,8 +134,8 @@
 /* A narrow conversation gives the indents back to the text. */
 @container (max-width: 440px) {
   .head {
-    grid-template-columns: 12px minmax(0, 1fr) auto;
-    column-gap: 4px;
+    --glyph-column: 12px;
+    --glyph-gap: 4px;
   }
 
   .inset {

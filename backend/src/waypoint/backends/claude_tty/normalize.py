@@ -52,6 +52,7 @@ from waypoint.backends.claude_code.normalize import (
     TaskListTracker,
     build_peer_message_metadata,
     build_task_notification_metadata,
+    call_summary,
     claim_peer_message,
     classify_injected_user_turn,
     deferred_result_metadata,
@@ -81,6 +82,7 @@ from waypoint.backends.diff_preview import (
     build_preview,
     files_from_claude_tool_result,
 )
+from waypoint.backends.events import set_summary
 from waypoint.schemas import EventKind, SessionStatus
 
 FILE_EDIT_TOOL_NAMES: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
@@ -340,18 +342,20 @@ class TranscriptNormalizer:
                 if tool_name in FILE_EDIT_TOOL_NAMES and tool_use_id:
                     self._file_edit_tool_use_ids.add(tool_use_id)
                 input_text = json.dumps(block.get("input") or {}, indent=2)
+                call_metadata: dict[str, Any] = {
+                    "method": "assistant.tool_use",
+                    "item_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "payload": block,
+                    "status": SessionStatus.RUNNING,
+                }
+                set_summary(call_metadata, call_summary(tool_name, block.get("input")))
                 events.append(
                     NormalizedEvent(
                         kind=EventKind.TOOL_CALL,
                         text=f"{tool_name}\n{input_text}",
-                        metadata={
-                            "method": "assistant.tool_use",
-                            "item_id": tool_use_id,
-                            "tool_name": tool_name,
-                            "tool_use_id": tool_use_id,
-                            "payload": block,
-                            "status": SessionStatus.RUNNING,
-                        },
+                        metadata=call_metadata,
                         status=SessionStatus.RUNNING,
                     )
                 )

@@ -1,7 +1,7 @@
 "use client";
 
 import { needsHref } from "@waypoint/web-core/needsYou";
-import { decisionView, inlineCommand, planPreview } from "@waypoint/web-core/pendingAskActions";
+import { askBodyLine, askPreview, askTitle, decisionView, inlineCommand, planPreview } from "@waypoint/web-core/pendingAskActions";
 import type { PendingApprovalAsk, PendingPlanAsk } from "@waypoint/web-core/types";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
@@ -9,6 +9,7 @@ import { CommandText } from "@/components/session/cards/CommandText";
 import { PathLabel } from "@/components/session/cards/PathLabel";
 import { Button } from "@/components/ui/Button";
 import { TextInput } from "@/components/ui/Field";
+import { TitleText } from "@/components/ui/SummaryText";
 
 import { DecisionButtons, useApprovalReply } from "./ApprovalReply";
 import { AskCard } from "./AskCard";
@@ -26,13 +27,16 @@ interface DecisionAskProps {
 
 // A tool approval or a plan approval.
 export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
-  const { preview, planBody } = decisionView(ask);
+  const { planBody } = decisionView(ask);
   const reply = useApprovalReply(ask);
   const askSession = useAskSessions();
+  const { cwd, fromScreen } = askSession(ask.session_id);
+  const preview = askPreview(ask, cwd);
   // Only a command is decided here, and then the card shows it whole.
-  const inline = inlineCommand(ask, askSession(ask.session_id).fromScreen) !== null;
+  const inline = inlineCommand(ask, fromScreen) !== null;
   const status = <AskStatus availability={ask.availability} phase={reply.phase} />;
-  const headline = openHref ? <OpenHeadline href={openHref}>{ask.title}</OpenHeadline> : <h3 className={styles.headline}>{ask.title}</h3>;
+  const title = <TitleText title={askTitle(ask, cwd)} />;
+  const headline = openHref ? <OpenHeadline href={openHref}>{title}</OpenHeadline> : <h3 className={styles.headline}>{title}</h3>;
   const command =
     preview?.kind === "command" ? (
       <div className={styles.command}>
@@ -45,11 +49,12 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
         <PathLabel {...splitPath(preview.path)} full={preview.path} />
       </div>
     ) : null;
-  const summary =
+  const body = askBodyLine(ask, cwd);
+  const gist =
     planBody !== null ? (
       <p className={styles.clamp}>{planPreview(planBody)}</p>
-    ) : ask.body && !command ? (
-      <p className={styles.clamp}>{ask.body}</p>
+    ) : body && !command ? (
+      <p className={styles.clamp}>{body}</p>
     ) : null;
 
   if (!inline) {
@@ -60,7 +65,7 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
           <div>
             {command}
             {path}
-            {summary}
+            {gist}
           </div>
           <OpenLink href={openHref ?? needsHref(ask.id)} label="Review" />
         </div>

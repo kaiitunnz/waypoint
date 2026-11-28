@@ -286,6 +286,20 @@ async def test_cut_off_dialog_is_unverified() -> None:
     assert plugin._pending_approvals["sess-1"].decline_number == 3
 
 
+async def test_unmatched_agent_dialog_has_no_summary() -> None:
+    plugin = ClaudeTtyPlugin()
+    runtime = _make_runtime(_make_session(), _load("approval_agent.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
+
+    meta = runtime._emit_adapter_event.call_args.args[3]
+    assert meta["tool_name"] == "Agent"
+    assert "description" in meta["tool_input"]
+    assert "summary" not in meta
+
+
 _HINTED_COMMAND = (
     "grep -nE '^ {2,6}\"[a-z_]+\": ' telemetry_payload.json | awk -F: '$1>2000' "
     "| head -80"
@@ -325,6 +339,9 @@ async def test_auto_hint_dialog_surfaces_command_not_tip(recorded: bool) -> None
     assert meta["call_verified"] is recorded
     assert meta.get("tool_use_id") == ("tu-2" if recorded else None)
     assert ("timeout" in meta["tool_input"]) is recorded
+    assert meta.get("summary") == (
+        "List section keys in the payload beyond the first page" if recorded else None
+    )
     assert meta["interaction"]["body"] == f"Approve Bash command:\n{_HINTED_COMMAND}"
 
 

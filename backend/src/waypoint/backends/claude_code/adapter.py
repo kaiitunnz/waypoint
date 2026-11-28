@@ -27,6 +27,7 @@ from waypoint.backends.claude_code.normalize import (
     SEND_USER_FILE_TOOL,
     TASK_TOOL_NAMES,
     TaskListTracker,
+    call_summary,
     extract_created_task_id,
     format_approval_text,
     format_compact_boundary,
@@ -64,6 +65,7 @@ from waypoint.backends.events import (
     InteractionChoice,
     InteractionEnvelope,
     question_interaction,
+    set_summary,
 )
 from waypoint.questions import QuestionLiveness
 from waypoint.schemas import (
@@ -1158,32 +1160,30 @@ class ClaudeCliAdapter:
                             InteractionChoice(label="decline"),
                         ],
                     )
+                approval_metadata: dict[str, Any] = {
+                    "tool_name": tool_name,
+                    "tool_input": payload["tool_input"],
+                    "approval_id": tool_use_id,
+                    "method": "can_use_tool",
+                    "status": SessionStatus.WAITING_INPUT,
+                    INTERACTION_METADATA_KEY: interaction.to_metadata(),
+                    **(
+                        {"permission_suggestions": payload["permission_suggestions"]}
+                        if payload.get("permission_suggestions")
+                        else {}
+                    ),
+                    **(
+                        {"diff_preview": payload["diff_preview"]}
+                        if isinstance(payload.get("diff_preview"), dict)
+                        else {}
+                    ),
+                }
+                set_summary(approval_metadata, call_summary(tool_name, tool_input))
                 await self._emit_event(
                     state.session_id,
                     EventKind.APPROVAL_REQUEST,
                     format_approval_text(payload),
-                    {
-                        "tool_name": tool_name,
-                        "tool_input": payload["tool_input"],
-                        "approval_id": tool_use_id,
-                        "method": "can_use_tool",
-                        "status": SessionStatus.WAITING_INPUT,
-                        INTERACTION_METADATA_KEY: interaction.to_metadata(),
-                        **(
-                            {
-                                "permission_suggestions": payload[
-                                    "permission_suggestions"
-                                ]
-                            }
-                            if payload.get("permission_suggestions")
-                            else {}
-                        ),
-                        **(
-                            {"diff_preview": payload["diff_preview"]}
-                            if isinstance(payload.get("diff_preview"), dict)
-                            else {}
-                        ),
-                    },
+                    approval_metadata,
                     SessionStatus.WAITING_INPUT,
                 )
 
@@ -1905,6 +1905,9 @@ class ClaudeCliAdapter:
                     "payload": block,
                     "status": call_status,
                 }
+                set_summary(
+                    tool_call_metadata, call_summary(tool_name, block.get("input"))
+                )
                 if tool_name == "AskUserQuestion":
                     state.seen_ask_question_ids.add(tool_use_id)
                     question = question_interaction(

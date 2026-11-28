@@ -589,6 +589,7 @@ reads only the backend-neutral parts:
   `pending_approval_ids`. A `plan_approval` envelope carries the whole plan in
   `body`; one with an empty body is listed as a plain approval.
 - `metadata["tool_name"]` / `metadata["tool_input"]`, both optional.
+- `metadata["summary"]`, optional: the call's [summary](#call-summaries).
 - `metadata["call_verified"]`, `metadata["tool_use_id"]` and
   `metadata["subagent"]`, set by a transport that reads dialogs off a screen
   ([call verification](pending_asks.md#call-verification)). Its replies must
@@ -956,6 +957,40 @@ for any subagent call: its report preview is the call's result, with the
 report's attachments where the preview is cut, and a `status` other than
 `completed` marks the call failed. An `agent` report reads as prose, any other
 as output. A deferred call with no notification shows as running.
+
+### Call summaries
+
+`metadata["summary"]` is a one-line description of a tool call, on the call's
+`tool_call` event and on the `approval_request` that asks about it
+(`SUMMARY_METADATA_KEY` and `set_summary` in
+[`backends/events.py`](../backend/src/waypoint/backends/events.py)). Backticks
+mark its machine strings. It is the agent's own description of the call, or
+Codex's parse of a command; apart from that parse, a normalizer never composes
+one from a tool's title, path or command. A call without one has no key.
+
+| Agent | Source |
+| --- | --- |
+| Claude (both transports and history import) | The `description` input of `Bash`, `Agent`, `Task`, `Monitor` and `PowerShell`. On any other tool that key is an argument of the call. |
+| OpenCode | The `description` input of the `subagent` tool. `shell` has none. |
+| Codex | One read, search or listing from `commandActions`, such as ``Read `SKILL.md` ``. Calls only. |
+
+A Codex call has a summary only when that one action is the whole command line,
+its output piped at most into `head`, `tail`, `wc` or `nl` given flags and
+numbers
+([`codex/command_line.py`](../backend/src/waypoint/backends/codex/command_line.py)):
+Codex leaves other commands of a line out of `commandActions`. A Codex approval
+has none, because Codex types a command by its program's name, so a parsed read
+can run other programs (`awk`, `rg --pre`).
+
+A transport that reads dialogs off a screen sets it only for a call it matched.
+Clients treat it as untrusted agent text: it titles an approval only where
+[`session/wholeRequest`](../packages/web-core/src/session/wholeRequest.ts) finds
+the call verified, no hidden or direction-changing characters in the request, and
+nothing asked beyond the call. A list or card judges only what the
+[pending ask](pending_asks.md#bounded-payloads) carries: `summary` and
+`tool_input` with their long strings cut, and no `request`. A backend whose
+request can ask for more anywhere but the `tool_input` keys
+`session/wholeRequest` knows gives that approval no summary.
 
 ### Capture seams
 

@@ -1,10 +1,11 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { Icon } from "@/components/ui/Icon";
 
 import styles from "./Ask.module.css";
 
-export function OpenHeadline({ href, children }: { href: string; children: string }) {
+export function OpenHeadline({ href, children }: { href: string; children: ReactNode }) {
   return (
     <h3 className={styles.headline}>
       <Link href={href} className={styles.open}>

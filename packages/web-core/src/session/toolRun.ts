@@ -1,12 +1,16 @@
+import { describeStep, type Step } from "../activity";
 import { attachmentSpecsFor } from "../attachments";
-import { parseEvent, parseTaskNotification, readToolName, toolFilePath, type EventDiffPreview } from "../events";
+import { parseEvent, parseTaskNotification, readSummary, readToolName, toolFilePath, type EventDiffPreview } from "../events";
 import { isTodoListEvent, readTodoEntries, summarizeTodos, type TodoEntry } from "../todos";
 import type { AttachmentSpec, EventRecord } from "../types";
 import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
 import { formatDuration } from "./cardText";
+import { foldLines } from "./foldText";
 import { taskNoteReport } from "./taskNoteBody";
+import { categoryOf, familyOf, toolFamilyOf, type ToolCategory, type ToolFamily } from "./toolFamily";
 import {
   callArgumentsForEvent,
+  collapseWhitespace,
   commandForEvent,
   commandOutputForEvent,
   delegationForEvent,
@@ -15,6 +19,7 @@ import {
   isFileEditToolName,
   previewForToolEvent,
   resultContentForEvent,
+  subagentDescription,
   subagentRequestForEvent,
   toolBadgeFor,
   toolInputForEvent,
@@ -67,51 +72,9 @@ export function toolNamesOfRun(items: readonly LeafItem[]): string[] {
   return names;
 }
 
-type Category =
-  | "read"
-  | "search"
-  | "edit"
-  | "bash"
-  | "web"
-  | "agent"
-  | "followup"
-  | "skill"
-  | "monitor"
-  | "todo"
-  | "other";
-
-function categoryOf(tool: string | null): Category {
-  switch (tool) {
-    case "Read":
-      return "read";
-    case "Grep":
-    case "Glob":
-      return "search";
-    case "Bash":
-      return "bash";
-    case "WebFetch":
-    case "WebSearch":
-      return "web";
-    case "Skill":
-      return "skill";
-    case "Monitor":
-      return "monitor";
-    case "TodoWrite":
-      return "todo";
-    // Waiting on or closing a subagent is part of one subagent's life, not another one.
-    case "Wait":
-    case "closeAgent":
-      return "followup";
-    default:
-      if (isFileEditToolName(tool)) return "edit";
-      if (isAgentToolName(tool)) return "agent";
-      return "other";
-  }
-}
-
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
-const PHRASES: Record<Category, (count: number) => string> = {
+const PHRASES: Record<ToolCategory, (count: number) => string> = {
   read: (n) => `read ${plural(n, "file")}`,
   search: (n) => `searched ${plural(n, "pattern")}`,
   edit: (n) => `edited ${plural(n, "file")}`,
@@ -125,7 +88,7 @@ const PHRASES: Record<Category, (count: number) => string> = {
   other: (n) => `used ${plural(n, "other tool")}`,
 };
 
-const PHRASE_ORDER: Category[] = [
+const PHRASE_ORDER: ToolCategory[] = [
   "read",
   "search",
   "edit",
@@ -144,6 +107,7 @@ export interface RunGlyph {
   glyph: string;
   label: string;
   count: number;
+  family: ToolFamily | null;
 }
 
 export interface ToolRunSummary {
@@ -159,7 +123,7 @@ function isToolItem(child: LeafItem): boolean {
   return child.event.kind === "tool_call" || child.event.kind === "tool_result";
 }
 
-function categoryOfChild(child: LeafItem): Category | null {
+function categoryOfChild(child: LeafItem): ToolCategory | null {
   const event = primaryEvent(child);
   // A todo list event with no tool name is still a todo call.
   if (isTodoListEvent(event)) return "todo";
@@ -194,7 +158,7 @@ function sentence(parts: string[]): string {
 
 // A run in plain words, plus the counts its collapsed line carries.
 export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
-  const counts = new Map<Category, number>();
+  const counts = new Map<ToolCategory, number>();
   const editedFiles = new Set<string>();
   let unnamedEdits = 0;
   let additions = 0;
@@ -228,14 +192,15 @@ export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
 
   const read = (counts.get("read") ?? 0) + (counts.get("search") ?? 0);
   const glyphs: RunGlyph[] = [
-    { glyph: "▤", label: "Reads and searches", count: read },
-    { glyph: "✎", label: "Edited files", count: edits },
-    { glyph: "›_", label: "Commands", count: counts.get("bash") ?? 0 },
-    { glyph: "☑", label: "Task updates", count: counts.get("todo") ?? 0 },
-    { glyph: "◇", label: "Subagents", count: (counts.get("agent") ?? 0) + (counts.get("followup") ?? 0) },
-    { glyph: "❖", label: "Skills", count: counts.get("skill") ?? 0 },
-    { glyph: "◉", label: "Watched tasks", count: counts.get("monitor") ?? 0 },
-    { glyph: "ƒ", label: "Other tools", count: (counts.get("web") ?? 0) + (counts.get("other") ?? 0) },
+    { glyph: "▤", label: "Reads and searches", count: read, family: familyOf("read") },
+    { glyph: "✎", label: "Edited files", count: edits, family: familyOf("edit") },
+    { glyph: "›_", label: "Commands", count: counts.get("bash") ?? 0, family: familyOf("bash") },
+    { glyph: "☑", label: "Task updates", count: counts.get("todo") ?? 0, family: familyOf("todo") },
+    { glyph: "◇", label: "Subagents", count: (counts.get("agent") ?? 0) + (counts.get("followup") ?? 0), family: familyOf("agent") },
+    { glyph: "❖", label: "Skills", count: counts.get("skill") ?? 0, family: familyOf("skill") },
+    { glyph: "◉", label: "Watched tasks", count: counts.get("monitor") ?? 0, family: familyOf("monitor") },
+    // Web calls count here with every other tool, so the chip has no one family.
+    { glyph: "ƒ", label: "Other tools", count: (counts.get("web") ?? 0) + (counts.get("other") ?? 0), family: null },
   ].filter((entry) => entry.count > 0);
 
   return { phrase: sentence(parts), glyphs, additions, deletions };
@@ -252,6 +217,9 @@ export interface CallReply {
 export interface CallView {
   key: string;
   glyph: string;
+  family: ToolFamily | null;
+  // The agent's description of the call, shown as its heading.
+  summary: string | null;
   // The tool's name, for the glyph's accessible label.
   toolLabel: string;
   // Leads the row of a call whose label does not say which tool ran.
@@ -265,6 +233,8 @@ export interface CallView {
   // Tooltip: a named call's raw tool name, else the row with its paths unshortened.
   title: string;
   mono: boolean;
+  // The label is a shell command.
+  shell: boolean;
   additions: number | null;
   deletions: number | null;
   status: "pending" | "done" | "failed";
@@ -298,7 +268,12 @@ export function formatCallDuration(ms: number): string {
 
 // A call's arguments as the lines a person would read: a query and where it looks, a URL,
 // or one `name: value` line per argument. Null for a call with nothing to show that way.
-function argumentLines(tool: string | null, input: Record<string, unknown> | null, cwd: string | null | undefined): string | null {
+function argumentLines(
+  tool: string | null,
+  input: Record<string, unknown> | null,
+  cwd: string | null | undefined,
+  summary: string | null,
+): string | null {
   if (!input) return null;
   const text = (value: unknown) => (typeof value === "string" ? value : JSON.stringify(value) ?? "");
   switch (categoryOf(tool)) {
@@ -311,14 +286,24 @@ function argumentLines(tool: string | null, input: Record<string, unknown> | nul
     case "skill":
     case "monitor":
     case "followup":
-    case "other":
-      return Object.entries(input).map(([name, value]) => `${name}: ${text(value)}`).join("\n") || null;
+    case "other": {
+      // An argument the heading already says is left out; a command never is. A summary
+      // is one line, so the argument is compared as one.
+      const said = (value: unknown) =>
+        summary !== null && typeof value === "string" && collapseWhitespace(value) === collapseWhitespace(summary);
+      return (
+        Object.entries(input)
+          .filter(([name, value]) => name === "command" || !said(value))
+          .map(([name, value]) => `${name}: ${text(value)}`)
+          .join("\n") || null
+      );
+    }
     default:
       return null;
   }
 }
 
-const NAMED_CATEGORIES: ReadonlySet<Category> = new Set(["other", "monitor", "followup"]);
+const NAMED_CATEGORIES: ReadonlySet<ToolCategory> = new Set(["other", "monitor", "followup"]);
 
 const replyWith = (kind: CallReply["kind"], text: string | null, cut = false): CallReply | null =>
   text ? { kind, text, cut } : null;
@@ -383,6 +368,34 @@ export function pendingCallOf(items: readonly LeafItem[]): LeafItem | undefined 
   return items.findLast((child) => (child.kind === "pair" ? !child.pair.result : child.event.kind === "tool_call"));
 }
 
+function oneLine(command: string | null): string | null {
+  const { text, hidden } = foldLines(command?.trim() ?? "", 1);
+  if (!text) return null;
+  return hidden > 0 ? `${text.trimEnd()} …` : text;
+}
+
+// Only a Bash call counts: Monitor and PowerShell calls read as `name: value` arguments.
+const isShellTool = (tool: string | null): boolean => categoryOf(tool) === "bash";
+
+export interface LiveCall {
+  step: Step | null;
+  // The agent's description of the call.
+  summary: string | null;
+  // What the call runs, on one line.
+  command: string | null;
+  // The command is a shell command.
+  shell: boolean;
+}
+
+// What the live run line says of the call in progress.
+export function liveCall(items: readonly LeafItem[], working: boolean): LiveCall | null {
+  const pending = working ? pendingCallOf(items) : undefined;
+  if (!pending) return null;
+  const event = primaryEvent(pending);
+  const command = oneLine(commandForEvent(event));
+  return { step: describeStep(event), summary: readSummary(event), command, shell: command !== null && isShellTool(readToolName(event)) };
+}
+
 export function describeCall(child: LeafItem, cwd?: string | null): CallView | null {
   const call = child.kind === "pair" ? child.pair.call : child.event.kind === "tool_call" ? child.event : null;
   const result = child.kind === "pair" ? child.pair.result : child.event.kind === "tool_result" ? child.event : null;
@@ -395,8 +408,9 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
   const input = toolInputForEvent(event);
   const args = callArgumentsForEvent(event);
   const category = categoryOf(tool);
-  const command = tool === "Bash" ? commandForEvent(event) : null;
-  const subject = (command?.replace(/\r\n?/g, "\n").trim() || null) ?? argumentLines(tool, args, cwd);
+  const summary = call ? readSummary(call) : null;
+  const command = isShellTool(tool) ? commandForEvent(event) : null;
+  const subject = (command?.replace(/\r\n?/g, "\n").trim() || null) ?? argumentLines(tool, args, cwd, summary);
   // A call whose arguments read as lines keeps them all; a path alone stands for a file tool.
   const filePath =
     subject !== null ? null : (toolFilePath(input) ?? (isFileEditToolName(tool) ? (diff?.files[0]?.path ?? null) : null));
@@ -419,7 +433,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
     : (shownPath ?? relativizeInText(preview, cwd));
   const stats = diff && isFileEditToolName(tool) ? diff : null;
 
-  const description = category === "agent" ? filledText(input?.description) : null;
+  const description = category === "agent" ? filledText(subagentDescription(event)) : null;
 
   // A result alone, such as a spawned subagent's notice, is labelled by its text.
   const named = tool !== null && (NAMED_CATEGORIES.has(category) || (category === "agent" && call !== null && !description));
@@ -431,16 +445,22 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
     preview === tool ||
     (!call && outcome.reply?.kind === "output");
 
+  // A subagent call's label is its description, which the heading already says.
+  const echoesSummary = summary !== null && subject === null && preview === summary;
+
   return {
     key: itemKey(child),
     glyph: badge.glyph,
+    family: toolFamilyOf(tool),
+    summary,
     toolLabel: badge.label,
     name: named ? toolNameParts(tool) : null,
-    label: subject ?? (named && repeated ? "" : label),
+    label: echoesSummary ? "" : (subject ?? (named && repeated ? "" : label)),
     todos,
     path: shownPath ? splitPath(shownPath) : null,
     title: named ? tool : (filePath ?? preview),
     mono: filePath !== null || subject !== null,
+    shell: command !== null && subject !== null,
     additions: stats ? stats.totalAdditions : null,
     deletions: stats ? stats.totalDeletions : null,
     status: outcome.status,

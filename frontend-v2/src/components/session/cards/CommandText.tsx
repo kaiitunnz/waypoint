@@ -18,6 +18,29 @@ export function Lines({ text }: { text: string }) {
   ));
 }
 
+// The mark before a shell command set under a heading; no part of the command.
+export function ShellPrompt({ className }: { className?: string }) {
+  return (
+    <span className={cx(styles.shellPrompt, className)} aria-hidden="true">
+      $
+    </span>
+  );
+}
+
+// A command clipped to one line.
+export function CommandLine({ text, shell }: { text: string; shell: boolean }) {
+  return (
+    <span className={styles.line}>
+      {shell ? (
+        <>
+          <ShellPrompt />{" "}
+        </>
+      ) : null}
+      {text}
+    </span>
+  );
+}
+
 // A command or script in mono, folded at eight lines unless `whole`.
 export function CommandText({ text, whole }: { text: string; whole?: boolean }) {
   return whole ? (

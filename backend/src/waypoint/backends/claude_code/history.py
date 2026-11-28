@@ -41,6 +41,7 @@ from waypoint.backends.claude_code.models import (
 from waypoint.backends.claude_code.normalize import (
     build_peer_message_metadata,
     build_task_notification_metadata,
+    call_summary,
     claim_peer_message,
     classify_injected_user_turn,
     deferred_result_metadata,
@@ -64,6 +65,7 @@ from waypoint.backends.claude_code.turn_boundaries import (
     is_user_rejection,
     turn_end_metadata,
 )
+from waypoint.backends.events import set_summary
 from waypoint.questions import ASK_USER_QUESTION_TOOL
 from waypoint.schemas import EventKind, EventRecord, SessionStatus, TokenUsageRecord
 
@@ -195,19 +197,21 @@ def _convert_assistant(
             if tool_name == ASK_USER_QUESTION_TOOL:
                 state.question_ids.add(tool_use_id)
                 status = SessionStatus.WAITING_INPUT
+            metadata: dict[str, Any] = {
+                "method": "assistant.tool_use",
+                "item_id": tool_use_id,
+                "tool_name": tool_name,
+                "tool_use_id": tool_use_id,
+                "payload": block,
+            }
+            set_summary(metadata, call_summary(tool_name, block.get("input")))
             events.append(
                 _event(
                     session_id,
                     ts,
                     EventKind.TOOL_CALL,
                     f"{tool_name}\n{input_text}",
-                    {
-                        "method": "assistant.tool_use",
-                        "item_id": tool_use_id,
-                        "tool_name": tool_name,
-                        "tool_use_id": tool_use_id,
-                        "payload": block,
-                    },
+                    metadata,
                     status,
                 )
             )

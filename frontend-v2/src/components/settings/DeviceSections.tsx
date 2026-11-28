@@ -4,6 +4,7 @@ import { useConversationPreviews } from "@waypoint/web-core/hooks/useConversatio
 
 import { PickerRow, SettingsSection, SwitchRow } from "@/components/ui/Settings";
 import { useTheme } from "@/lib/theme";
+import { useToolColoursOnFocus } from "@/lib/tool-colours";
 
 export function ThemeRow() {
   const { theme, setTheme } = useTheme();
@@ -33,6 +34,23 @@ export function SessionLists() {
   return (
     <SettingsSection>
       <SwitchRow label="Conversation previews" checked={previews} onChange={setPreviews} />
+    </SettingsSection>
+  );
+}
+
+export function TranscriptSettings() {
+  const [onFocus, setOnFocus] = useToolColoursOnFocus();
+  return (
+    <SettingsSection>
+      <PickerRow
+        label="Tool colours"
+        value={onFocus ? "focus" : "always"}
+        onChange={(next) => setOnFocus(next === "focus")}
+        options={[
+          { value: "always", label: "Always" },
+          { value: "focus", label: "On focus" },
+        ]}
+      />
     </SettingsSection>
   );
 }

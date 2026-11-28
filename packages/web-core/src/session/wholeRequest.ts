@@ -1,11 +1,14 @@
-// A pending approval as a screen that decides it shows it: the whole request, or a lock.
+// A pending approval as a screen shows it: its title, and where it is decided, the whole
+// request or a lock.
 
 import { asRecord, readToolName, type EventDiffPreview } from "../events";
 import { buildPlainDiffLines, hunksAddUp } from "../highlight";
 import type { EventRecord } from "../types";
 import { resolveFromCwd } from "../workspacePaths";
-import { approvalBody, WORKFLOW_TOOLS, type ApprovalBody } from "./approvals";
+import { approvalBody, approvalPrompt, WORKFLOW_TOOLS, type ApprovalBody } from "./approvals";
 import { isBareRename } from "./diffPreview";
+import type { ShownTitle } from "./summary";
+import { subagentKind } from "./toolPresentation";
 
 // What reading a session's pending request needs to know of the session.
 export interface AskSession {
@@ -17,6 +20,8 @@ export interface AskSession {
 export interface ShownRequest {
   // The typed view.
   body: ApprovalBody;
+  // The summary that titles the request, or null for its plain title.
+  summary: string | null;
   // Every field of the request, shown raw below the view.
   fields: Record<string, unknown>;
   // What the request asks for beyond the call it names, or why it cannot be decided.
@@ -55,11 +60,13 @@ const HIDDEN_WARNING = "Hidden or direction-changing characters";
 
 // ─── The view ───
 
-// A request that carries its command beside its title shows the command.
-function requestedBody(event: EventRecord): ApprovalBody {
+// A request that carries its command beside its title shows the command. So does one
+// titled by its summary, whose title and text then don't hold the command.
+function requestedBody(event: EventRecord, summarized: boolean): ApprovalBody {
   const body = approvalBody(event);
-  if (body.kind !== "raw" || asRecord(event.metadata?.tool_input)) return body;
-  const command = asRecord(event.metadata?.request)?.command;
+  const input = asRecord(event.metadata?.tool_input);
+  if (body.kind !== "raw" || (input && !summarized)) return body;
+  const command = input?.command ?? asRecord(event.metadata?.request)?.command;
   return typeof command === "string" && command ? { kind: "command", description: "", command } : body;
 }
 
@@ -73,6 +80,8 @@ const ENVELOPE = new Set([
   "item_id",
   "method",
   "status",
+  // The title's text, drawn from what the request says elsewhere.
+  "summary",
   "tool_use_id",
   "version",
 ]);
@@ -86,9 +95,9 @@ function requestFields(event: EventRecord): Record<string, unknown> {
 
 const isSet = (value: unknown) => Boolean(value) && !(Array.isArray(value) && value.length === 0);
 
-function requestWarnings(event: EventRecord, cwd: string): string[] {
-  const input = asRecord(event.metadata?.tool_input) ?? {};
-  const request = asRecord(event.metadata?.request) ?? {};
+function requestWarnings(metadata: Record<string, unknown> | undefined, cwd: string): string[] {
+  const input = asRecord(metadata?.tool_input) ?? {};
+  const request = asRecord(metadata?.request) ?? {};
   const edits = Array.isArray(input.edits) ? input.edits.map(asRecord) : [];
   const home = resolveFromCwd(cwd, "");
   const elsewhere = [input.cwd, input.workdir, request.cwd].some(
@@ -110,9 +119,44 @@ function requestWarnings(event: EventRecord, cwd: string): string[] {
     ["Write access for the whole session", isSet(input.grantRoot) || isSet(request.grantRoot)],
     ["Replaces every occurrence", everywhere],
     ["Different working directory", isSet(input.isolation) || elsewhere],
-    [HIDDEN_WARNING, returns || strings(event.metadata).some(misleads)],
+    [HIDDEN_WARNING, returns || strings(metadata).some(misleads)],
   ];
   return checks.filter(([, applies]) => applies).map(([warning]) => warning);
+}
+
+// ─── Title ───
+
+// The summary, where it may title the request: a verified call that asks for nothing
+// beyond itself and holds no text that reads other than it is. `metadata` is the
+// request event's, or a pending ask's approval.
+export function titlingSummary(metadata: Record<string, unknown> | undefined, cwd: string): string | null {
+  const summary = metadata?.summary;
+  if (typeof summary !== "string" || !summary || metadata?.call_verified === false) return null;
+  return requestWarnings(metadata, cwd).length === 0 ? summary : null;
+}
+
+// A pending approval as the session's dock shows it.
+export interface ApprovalCardView {
+  title: ShownTitle;
+  // The kind of subagent a summary-titled task asks for.
+  agentType: string | null;
+  body: ApprovalBody;
+}
+
+// The plain title names the request without the agent's words for it.
+const undescribed = (body: ApprovalBody): ApprovalBody =>
+  body.kind === "task" || body.kind === "command" ? { ...body, description: "" } : body;
+
+export function approvalCard(event: EventRecord, cwd: string): ApprovalCardView {
+  const summary = titlingSummary(event.metadata, cwd);
+  if (summary !== null) {
+    const body = requestedBody(event, true);
+    const agentType = body.kind === "task" ? subagentKind(asRecord(event.metadata?.tool_input)) : null;
+    return { title: { text: summary, marked: true }, agentType, body };
+  }
+  const body = approvalBody(event);
+  const title = approvalPrompt(undescribed(body)) ?? "Approve this request";
+  return { title: { text: title, marked: false }, agentType: null, body };
 }
 
 // ─── Whole or locked ───
@@ -189,6 +233,7 @@ export function shownPlan(plan: string): ShownRequest {
   const lockNote = lockReason(body, null, null);
   return {
     body,
+    summary: null,
     fields: { plan },
     warnings: misleads(plan) ? [HIDDEN_WARNING] : [],
     unverified: false,
@@ -203,16 +248,18 @@ const UNVERIFIED = "This call can't be verified from here";
 // another call than the one a reply would answer, and its plan, rebuilt from the
 // transcript, may differ from the one it shows, so neither is decided.
 export function shownRequest(request: EventRecord, session: AskSession): ShownRequest {
-  const body = requestedBody(request);
+  const summary = titlingSummary(request.metadata, session.cwd);
+  const body = requestedBody(request, summary !== null);
   const fields = requestFields(request);
   if (session.fromScreen) {
-    return { body, fields, warnings: [UNVERIFIED], unverified: true, whole: false, lockNote: null };
+    return { body, summary, fields, warnings: [UNVERIFIED], unverified: true, whole: false, lockNote: null };
   }
   const lockNote = lockReason(body, asRecord(request.metadata?.tool_input), readToolName(request));
   return {
     body,
+    summary,
     fields,
-    warnings: requestWarnings(request, session.cwd),
+    warnings: requestWarnings(request.metadata, session.cwd),
     unverified: false,
     whole: lockNote === null,
     lockNote,

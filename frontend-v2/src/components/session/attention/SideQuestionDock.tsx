@@ -86,6 +86,7 @@ export function SideQuestionDock({ questions, open, autoFocus, onOpenChange }: S
           ) : undefined
         }
         width={420}
+        align="right"
         side="top"
         resizeKey="side-questions"
       >

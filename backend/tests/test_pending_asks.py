@@ -415,12 +415,14 @@ async def test_approval_carries_the_call_summary_and_request(env: Env) -> None:
         env.runtime,
         "c1",
         tool_name=None,
-        extra={"summary": "Read `a`", "request": {**request, "reason": "x" * 3000}},
+        extra={"summary": "s" * 3000, "request": {**request, "reason": "x" * 3000}},
     )
 
     item = only((await env.runtime.asks.snapshot()).items, PendingApprovalAsk)
 
-    assert item.approval.summary == "Read `a`"
+    assert item.approval.summary is not None
+    assert len(item.approval.summary) == TEXT_LIMIT + 1
+    assert item.approval.tool_input_truncated is False
     assert item.approval.request is not None
     assert item.approval.request["command"] == "cat a"
     assert item.approval.request["additionalPermissions"] == {"network": True}

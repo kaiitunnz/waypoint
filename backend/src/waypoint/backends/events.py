@@ -144,7 +144,21 @@ SUMMARY_METADATA_KEY = "summary"
 
 
 def set_summary(metadata: dict[str, Any], summary: Any) -> dict[str, Any]:
-    """Attach a call's summary; the key stays absent when the agent gave none."""
-    if isinstance(summary, str) and (text := summary.strip()):
+    """Attach a call's summary as one line; the key stays absent when the agent
+    gave none."""
+    if isinstance(summary, str) and (
+        text := " ".join(filter(None, map(str.strip, summary.splitlines())))
+    ):
         metadata[SUMMARY_METADATA_KEY] = text
     return metadata
+
+
+def description_input(
+    name: Any, tool_input: Any, described: frozenset[str]
+) -> str | None:
+    """The ``description`` input of a call to one of the ``described`` tools,
+    those whose ``description`` is the agent's account of the call."""
+    if name not in described or not isinstance(tool_input, dict):
+        return None
+    description = tool_input.get("description")
+    return description if isinstance(description, str) else None

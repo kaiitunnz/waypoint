@@ -117,13 +117,14 @@ function RequestDetail({ ask, session, agent }: RequestDetailProps) {
   const { actions, supportsNote } = decisionView(ask);
   const context = useDetailContext(ask.session_id, session.cwd, agent);
   const text = ask.body ?? ask.title;
+  const heading = askTitle(ask, session.cwd, request);
   const copyText = view ? approvalCopyText(view, text) : shown ? requestText(shown.fields) : text;
 
   return (
     <SessionContextProvider value={context}>
       <DecisionCard
         roomy
-        title={<TitleText title={askTitle(ask, session.cwd, request)} />}
+        title={<TitleText title={heading} aside={heading.subagent} />}
         copyText={copyText}
         copyLabel={ask.kind === "plan_approval" && !shown?.unverified ? "Copy plan" : "Copy request"}
         // Nothing is decided on part of a request.

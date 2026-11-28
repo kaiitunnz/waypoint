@@ -278,8 +278,7 @@ describe("the summary that titles an approval", () => {
 
   it("stands for a verified call that asks for nothing beyond itself", () => {
     expect(approvalCard(described("Bash", bash, "Run the tests"), "/w")).toEqual({
-      title: "Run the tests",
-      marked: true,
+      title: { text: "Run the tests", marked: true },
       subagent: null,
       body: { kind: "command", description: "Run the tests", command: "pytest -q" },
     });
@@ -287,12 +286,12 @@ describe("the summary that titles an approval", () => {
   });
 
   it("gives way to the plain title without one", () => {
-    expect(approvalCard(approve("Bash", bash), "/w")).toMatchObject({ title: "Approve Bash command", marked: false, subagent: null });
+    expect(approvalCard(approve("Bash", bash), "/w")).toMatchObject({ title: { text: "Approve Bash command", marked: false }, subagent: null });
   });
 
   it("gives way for an unverified call, with the agent's words nowhere in the title", () => {
     const card = approvalCard(described("Bash", bash, "Run the tests", { call_verified: false }), "/w");
-    expect(card).toMatchObject({ title: "Approve Bash command", marked: false });
+    expect(card.title).toEqual({ text: "Approve Bash command", marked: false });
   });
 
   it.each([
@@ -300,7 +299,7 @@ describe("the summary that titles an approval", () => {
     ["a direction character", "Run the ‮tests"],
     ["a look-alike blank", "Run the tests"],
   ])("gives way when the summary holds %s", (_name, summary) => {
-    expect(approvalCard(described("Bash", bash, summary), "/w")).toMatchObject({ title: "Approve Bash command", marked: false });
+    expect(approvalCard(described("Bash", bash, summary), "/w").title).toEqual({ text: "Approve Bash command", marked: false });
   });
 
   it.each([
@@ -316,15 +315,14 @@ describe("the summary that titles an approval", () => {
     ["a session write grant", { grantRoot: "/w" }],
   ])("gives way for a Codex request that asks for %s", (_name, extra) => {
     const request = codex(extra);
-    expect(approvalCard(request, "/w")).toMatchObject({ title: "Approve this request", marked: false });
+    expect(approvalCard(request, "/w").title).toEqual({ text: "Approve this request", marked: false });
     // The detail warns for the same reason the title gives way.
     expect(shownRequest(request, ownInput).warnings.length).toBeGreaterThan(0);
   });
 
   it("shows a summary-titled Codex command as the block under the title", () => {
     expect(approvalCard(codex(), "/w")).toEqual({
-      title: "Read `SKILL.md`",
-      marked: true,
+      title: { text: "Read `SKILL.md`", marked: true },
       subagent: null,
       body: { kind: "command", description: "", command: "sed -n 1,5p SKILL.md" },
     });
@@ -346,18 +344,23 @@ describe("the summary that titles an approval", () => {
   it("reads the subagent's kind from whichever key names it", () => {
     const task = { prompt: "List the files", description: "List the text files", agent: "general" };
     expect(approvalCard(described("task", task, "List the text files"), "/w")).toMatchObject({
-      title: "List the text files",
+      title: { text: "List the text files", marked: true },
       subagent: "general",
     });
   });
 
   it("names the subagent's kind beside a summary title", () => {
     const task = { prompt: "List the callers", description: "Find callers", subagent_type: "Explore" };
-    expect(approvalCard(described("Agent", task, "Find callers"), "/w")).toMatchObject({ title: "Find callers", subagent: "Explore" });
+    expect(approvalCard(described("Agent", task, "Find callers"), "/w")).toMatchObject({ title: { text: "Find callers", marked: true }, subagent: "Explore" });
     expect(approvalCard(approve("Agent", task), "/w")).toMatchObject({
-      title: "Approve subagent task (via Explore)",
+      title: { text: "Approve subagent task (via Explore)", marked: false },
       subagent: null,
     });
+  });
+
+  it("stands on a verified call read off the screen, whose request stays locked", () => {
+    const request = described("Bash", bash, "Run the tests", { call_verified: true });
+    expect(shownRequest(request, screen)).toMatchObject({ summary: "Run the tests", unverified: true, whole: false });
   });
 
   it("keeps the summary out of the request's listed fields", () => {

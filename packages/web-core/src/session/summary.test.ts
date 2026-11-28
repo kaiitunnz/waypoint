@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { plainSummary, summaryParts } from "./summary";
+import { plainSummary, plainTitle, summaryParts } from "./summary";
 
 describe("summaryParts", () => {
   it("marks what stands between backticks as machine text", () => {
@@ -20,5 +20,12 @@ describe("summaryParts", () => {
 
   it("reads plain without its marks", () => {
     expect(plainSummary("Read `SKILL.md`")).toBe("Read SKILL.md");
+  });
+});
+
+describe("plainTitle", () => {
+  it("drops the marks of a summary, never those of a request's own title", () => {
+    expect(plainTitle({ text: "Read `a`", marked: true })).toBe("Read a");
+    expect(plainTitle({ text: "echo `date`", marked: false })).toBe("echo `date`");
   });
 });

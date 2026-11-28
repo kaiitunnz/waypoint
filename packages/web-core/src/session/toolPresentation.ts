@@ -140,6 +140,12 @@ export function delegationForEvent(event: EventRecord): Delegation | null {
 export const subagentKind = (input: Record<string, unknown> | null | undefined): string | null =>
   filledText(input?.subagent_type) ?? filledText(input?.agent);
 
+// A subagent call's description. Events stored before summaries hold it only in the input.
+export function subagentDescription(event: EventRecord): string | null {
+  const described = readSummary(event) ?? toolInputForEvent(event)?.description;
+  return typeof described === "string" ? described : null;
+}
+
 // What a subagent call asks: its prompt, and the kind of subagent where the agent names one.
 export function subagentRequestForEvent(event: EventRecord): { prompt: string | null; agentType: string | null } {
   const input = toolInputForEvent(event);
@@ -293,9 +299,8 @@ export function previewForToolEvent(event: EventRecord, toolLabel: string): stri
       return input.query;
     }
     if (toolName === "Task" || toolName === "Agent") {
-      // Events stored before summaries hold the description only in the input.
-      const described = readSummary(event) ?? input.description;
-      if (typeof described === "string") return described;
+      const described = subagentDescription(event);
+      if (described !== null) return described;
     }
     if (toolName === "TodoWrite" && Array.isArray(input.todos)) {
       return `${input.todos.length} todo${input.todos.length === 1 ? "" : "s"}`;

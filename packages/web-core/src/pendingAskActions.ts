@@ -3,7 +3,15 @@ import { FILE_EDIT_TOOLS, normalizeToolName, toolFilePath } from "./events";
 import { toggleSelection } from "./session/askQuestion";
 import { approvalPrompt } from "./session/approvals";
 import { subagentKind } from "./session/toolPresentation";
-import { shownPlan, shownRequest, titlingSummary, type AskSession, type ShownRequest } from "./session/wholeRequest";
+import type { ShownTitle } from "./session/summary";
+import {
+  namedCommand,
+  shownPlan,
+  shownRequest,
+  titlingSummary,
+  type AskSession,
+  type ShownRequest,
+} from "./session/wholeRequest";
 import type {
   EventRecord,
   PendingApprovalAsk,
@@ -121,31 +129,27 @@ const DECISION_ACTIONS: readonly DecisionAction[] = [
   { decision: "decline", label: "Decline" },
 ];
 
-// What an ask carries of its request, as the request's event holds it.
-const askMetadata = ({ tool_name, tool_input, request, summary, subagent, call_verified }: PendingApprovalAsk["approval"]) => ({
-  tool_name,
-  tool_input,
-  request,
-  summary,
-  subagent,
-  call_verified,
-});
-
+// The whole of what the ask carries is checked, so a new field is scanned too.
 const askSummaryTitle = (ask: PendingAsk, cwd: string): string | null =>
-  ask.kind === "approval" ? titlingSummary(askMetadata(ask.approval), cwd) : null;
+  ask.kind === "approval" ? titlingSummary({ ...ask.approval }, cwd) : null;
 
-export interface AskTitle {
-  text: string;
-  // `text` is the agent's summary, so its backticks mark machine strings.
-  marked: boolean;
+export interface AskTitle extends ShownTitle {
+  // The kind of subagent a summary-titled task asks for.
+  subagent: string | null;
 }
+
+const askedSubagent = ({ tool_name, tool_input }: PendingApprovalAsk["approval"]): string | null => {
+  const tool = normalizeToolName(tool_name);
+  return tool === "Task" || tool === "Agent" ? subagentKind(tool_input) : null;
+};
 
 // The title every list and detail gives an ask. `cwd` is its session's. A detail passes
 // its request: the ask's strings are cut, so only the whole request shows every reason
 // not to take the summary.
 export function askTitle(ask: PendingAsk, cwd: string, request?: ApprovalRequest): AskTitle {
   const summary = ask.kind === "approval" && request?.status === "ready" ? request.summary : askSummaryTitle(ask, cwd);
-  return summary === null ? { text: ask.title, marked: false } : { text: summary, marked: true };
+  if (ask.kind !== "approval" || summary === null) return { text: ask.title, marked: false, subagent: null };
+  return { text: summary, marked: true, subagent: askedSubagent(ask.approval) };
 }
 
 export type ApprovalPreview = { kind: "command"; text: string } | { kind: "path"; path: string } | null;
@@ -162,17 +166,20 @@ export function askPreview(ask: PendingApprovalAsk | PendingPlanAsk, cwd: string
   const path = tool && FILE_EDIT_TOOLS.has(tool) ? toolFilePath(input) : null;
   if (path) return { kind: "path", path };
   // A summary takes the title, so the command it replaces stays in view here.
-  const command = askSummaryTitle(ask, cwd) === null ? null : (input?.command ?? approval.request?.command);
-  return typeof command === "string" && command ? { kind: "command", text: command } : null;
+  const command = askSummaryTitle(ask, cwd) === null ? null : namedCommand(input, approval.request);
+  return command === null ? null : { kind: "command", text: command };
 }
 
 // The line a summary-titled subagent approval shows, where its body would repeat the title.
-export function askSubagentLine(ask: PendingAsk, cwd: string): string | null {
+function subagentLine(ask: PendingAsk, cwd: string): string | null {
   if (ask.kind !== "approval" || askSummaryTitle(ask, cwd) === null) return null;
   const tool = normalizeToolName(ask.approval.tool_name);
   if (tool !== "Task" && tool !== "Agent") return null;
   return approvalPrompt({ kind: "task", prompt: "", description: "", subagent: subagentKind(ask.approval.tool_input) ?? "" });
 }
+
+// What a row or card says of an ask that has no command or path to show.
+export const askBodyLine = (ask: PendingAsk, cwd: string): string | null => subagentLine(ask, cwd) ?? ask.body;
 
 // The first lines of a plan with the markdown marks off, for a card.
 export function planPreview(text: string, maxLines = 3): string {

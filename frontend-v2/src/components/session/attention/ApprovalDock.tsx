@@ -12,7 +12,6 @@ import { TitleText } from "@/components/ui/SummaryText";
 
 import { useSessionContext } from "../SessionContext";
 import { ApprovalBody } from "./ApprovalBody";
-import styles from "./ApprovalDock.module.css";
 import { DecisionCard } from "./DecisionCard";
 import { Pager } from "./Pager";
 
@@ -30,19 +29,14 @@ export function ApprovalDock({ approvals, decisions, supportsNote }: ApprovalDoc
   const [openKey, setOpenKey] = useState<string | null>(null);
   const { count, page, current } = pageOfKey(approvals, openKey, keyOf);
   if (!current) return null;
-  const { title, marked, subagent, body } = approvalCard(current, cwd);
+  const { title, subagent, body } = approvalCard(current, cwd);
   const id = approvalId(current);
 
   return (
     <DecisionCard
       // Each approval starts unlocked and without a note.
       key={keyOf(current)}
-      title={
-        <>
-          <TitleText title={{ text: title, marked }} />
-          {subagent ? <span className={styles.aside}> {subagent}</span> : null}
-        </>
-      }
+      title={<TitleText title={title} aside={subagent} />}
       pager={
         count > 1
           ? (locked) => (

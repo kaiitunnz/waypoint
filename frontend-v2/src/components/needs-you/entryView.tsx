@@ -2,9 +2,9 @@ import type { ReactNode } from "react";
 
 import { gateHeadline, gateView } from "@waypoint/web-core/board";
 import { inboxBlockChips } from "@waypoint/web-core/inbox";
-import { askRow, type QueueEntry } from "@waypoint/web-core/needsYou";
+import { askRow, rowLine, type QueueEntry } from "@waypoint/web-core/needsYou";
 import { askTitle } from "@waypoint/web-core/pendingAskActions";
-import { plainSummary } from "@waypoint/web-core/session/summary";
+import { plainTitle } from "@waypoint/web-core/session/summary";
 import type { AskSession } from "@waypoint/web-core/session/wholeRequest";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
@@ -46,19 +46,18 @@ export function entryView(
       ask.kind === "question" && ask.question.questions.length === 1
         ? { text: ask.question.questions[0].question, marked: false }
         : askTitle(ask, session.cwd);
+    const line = rowLine(request, title);
     return {
       lead: <StatusLamp state="needs" size="sm" flat />,
       name: ask.session_title,
       kind: agentName(ask.session_backend),
       headline: <TitleText title={title} />,
-      label: title.marked ? plainSummary(title.text) : title.text,
+      label: plainTitle(title),
       detail: request.path ? (
         <PathLabel {...splitPath(request.path)} full={request.path} />
-      ) : request.text && request.text !== title.text ? (
+      ) : line !== null ? (
         // Each line of a wrapped command hangs under its own start.
-        <span className={cx(request.mono && "mono")}>
-          {request.mono && request.answers ? <Lines text={request.text} /> : request.text}
-        </span>
+        <span className={cx(request.mono && "mono")}>{request.mono && request.answers ? <Lines text={line} /> : line}</span>
       ) : null,
       strong: true,
       quiet: false,

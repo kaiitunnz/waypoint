@@ -16,6 +16,7 @@ import {
   isFileEditToolName,
   previewForToolEvent,
   resultContentForEvent,
+  subagentDescription,
   subagentRequestForEvent,
   toolBadgeFor,
   toolInputForEvent,
@@ -127,7 +128,9 @@ const FAMILIES: Partial<Record<Category, ToolFamily>> = {
   skill: "skill",
 };
 
-export const toolFamilyOf = (tool: string | null): ToolFamily | null => FAMILIES[categoryOf(tool)] ?? null;
+const familyOf = (category: Category): ToolFamily | null => FAMILIES[category] ?? null;
+
+export const toolFamilyOf = (tool: string | null): ToolFamily | null => familyOf(categoryOf(tool));
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
@@ -249,13 +252,13 @@ export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
 
   const read = (counts.get("read") ?? 0) + (counts.get("search") ?? 0);
   const chips: RunGlyph[] = [
-    { glyph: "▤", label: "Reads and searches", count: read, family: "read" },
-    { glyph: "✎", label: "Edited files", count: edits, family: "edit" },
-    { glyph: "›_", label: "Commands", count: counts.get("bash") ?? 0, family: "bash" },
-    { glyph: "☑", label: "Task updates", count: counts.get("todo") ?? 0, family: "agent" },
-    { glyph: "◇", label: "Subagents", count: (counts.get("agent") ?? 0) + (counts.get("followup") ?? 0), family: "agent" },
-    { glyph: "❖", label: "Skills", count: counts.get("skill") ?? 0, family: "skill" },
-    { glyph: "◉", label: "Watched tasks", count: counts.get("monitor") ?? 0, family: "bash" },
+    { glyph: "▤", label: "Reads and searches", count: read, family: familyOf("read") },
+    { glyph: "✎", label: "Edited files", count: edits, family: familyOf("edit") },
+    { glyph: "›_", label: "Commands", count: counts.get("bash") ?? 0, family: familyOf("bash") },
+    { glyph: "☑", label: "Task updates", count: counts.get("todo") ?? 0, family: familyOf("todo") },
+    { glyph: "◇", label: "Subagents", count: (counts.get("agent") ?? 0) + (counts.get("followup") ?? 0), family: familyOf("agent") },
+    { glyph: "❖", label: "Skills", count: counts.get("skill") ?? 0, family: familyOf("skill") },
+    { glyph: "◉", label: "Watched tasks", count: counts.get("monitor") ?? 0, family: familyOf("monitor") },
     // Web calls count here with every other tool, so the chip has no one family.
     { glyph: "ƒ", label: "Other tools", count: (counts.get("web") ?? 0) + (counts.get("other") ?? 0), family: null },
   ];
@@ -346,7 +349,7 @@ function argumentLines(
       // An argument the heading already says is left out; a command never is.
       return (
         Object.entries(input)
-          .filter(([name, value]) => name === "command" || value !== summary)
+          .filter(([name, value]) => name === "command" || summary === null || value !== summary)
           .map(([name, value]) => `${name}: ${text(value)}`)
           .join("\n") || null
       );
@@ -466,8 +469,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
     : (shownPath ?? relativizeInText(preview, cwd));
   const stats = diff && isFileEditToolName(tool) ? diff : null;
 
-  // Events stored before summaries hold the description only in the input.
-  const description = category === "agent" ? (summary ?? filledText(input?.description)) : null;
+  const description = category === "agent" ? filledText(subagentDescription(event)) : null;
 
   // A result alone, such as a spawned subagent's notice, is labelled by its text.
   const named = tool !== null && (NAMED_CATEGORIES.has(category) || (category === "agent" && call !== null && !description));

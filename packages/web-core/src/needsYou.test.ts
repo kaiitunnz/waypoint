@@ -4,7 +4,7 @@ import type { BoardGate } from "./board";
 import {
   askNeedsDetail,
   askRow,
-  askSummary,
+  askLine,
   askUserQuestions,
   buildQueue,
   decodeNeedsId,
@@ -12,6 +12,7 @@ import {
   needsCounts,
   needsHref,
   parseNeedsId,
+  rowLine,
 } from "./needsYou";
 import { askPreview, askTitle } from "./pendingAskActions";
 import type { InboxItem, ManagerTicket, PendingApprovalAsk, PendingPlanAsk, PendingQuestionAsk } from "./types";
@@ -195,16 +196,16 @@ describe("asks", () => {
     const two = question(1);
     two.question.questions.push({ ...two.question.questions[0], question: "Which test?" });
     expect(askNeedsDetail(two)).toBe(true);
-    expect(askSummary(two, "/srv/app")).toEqual({ text: "2 questions", mono: false });
+    expect(askLine(two, "/srv/app")).toEqual({ text: "2 questions", mono: false });
   });
 
-  it("summarises an ask", () => {
-    expect(askSummary(question(1), "/srv/app")).toEqual({ text: "2 options, B recommended", mono: false });
-    expect(askSummary(question(1, []), "/srv/app")).toEqual({ text: "Free-form answer", mono: false });
-    expect(askSummary(approval(1), "/srv/app")).toEqual({ text: "git push …", mono: true });
-    expect(askSummary(approval(1, { command: "ls" }), "/srv/app")).toEqual({ text: "ls", mono: true });
-    expect(askSummary(approval(1, {}), "/srv/app")).toEqual({ text: "Bash", mono: false });
-    expect(askSummary(plan, "/srv/app")).toEqual({ text: "Regenerate figures", mono: false });
+  it("says each ask in a line", () => {
+    expect(askLine(question(1), "/srv/app")).toEqual({ text: "2 options, B recommended", mono: false });
+    expect(askLine(question(1, []), "/srv/app")).toEqual({ text: "Free-form answer", mono: false });
+    expect(askLine(approval(1), "/srv/app")).toEqual({ text: "git push …", mono: true });
+    expect(askLine(approval(1, { command: "ls" }), "/srv/app")).toEqual({ text: "ls", mono: true });
+    expect(askLine(approval(1, {}), "/srv/app")).toEqual({ text: "Bash", mono: false });
+    expect(askLine(plan, "/srv/app")).toEqual({ text: "Regenerate figures", mono: false });
   });
 
   it("lets a row answer only what it can show whole", () => {
@@ -253,13 +254,13 @@ describe("an approval titled by the call's summary", () => {
 
   it("takes the summary and keeps the command in the row", () => {
     const ask = codex("Search `modes`");
-    expect(askTitle(ask, "/srv/app")).toEqual({ text: "Search `modes`", marked: true });
+    expect(askTitle(ask, "/srv/app")).toEqual({ text: "Search `modes`", marked: true, subagent: null });
     expect(askRow(ask, NATIVE)).toEqual({ text: "rg -n modes src", mono: true, path: null, answers: false });
   });
 
   it("keeps its own title, with no extra line, when the summary can't stand", () => {
     for (const ask of [codex(null), codex("Search ‮modes"), codex("Search `modes`", { permissions: { network: true } })]) {
-      expect(askTitle(ask, "/srv/app")).toEqual({ text: ask.title, marked: false });
+      expect(askTitle(ask, "/srv/app")).toEqual({ text: ask.title, marked: false, subagent: null });
       expect(askPreview(ask, "/srv/app")).toBeNull();
     }
     // A session not loaded yet has no directory to check the request's against.
@@ -286,8 +287,34 @@ describe("an approval titled by the call's summary", () => {
     expect(askRow(ask, NATIVE).text).toBe(ask.body);
   });
 
-  it("answers to its summary in a search", () => {
-    const queue = buildQueue({ asks: [codex("Search `modes`")], items: [], gates: [], status: "all", source: "all", q: "search `modes`" });
+  it("answers to its summary, as shown, in a search", () => {
+    const queue = buildQueue({ asks: [codex("Search `modes`")], items: [], gates: [], status: "all", source: "all", q: "search modes" });
     expect(queue).toHaveLength(1);
+  });
+
+  it("keeps the command in view under a summary that reads like it", () => {
+    const command = "echo `rm -rf ~`";
+    const ask = approval(1, { command, description: command });
+    ask.approval.summary = command;
+    const row = askRow(ask, NATIVE);
+    expect(row).toMatchObject({ answers: true, text: command });
+    expect(rowLine(row, askTitle(ask, "/srv/app"))).toBe(command);
+    // The ask's own title is not said twice.
+    expect(rowLine({ ...row, text: ask.title }, { text: ask.title, marked: false })).toBeNull();
+  });
+
+  it("shows a watched command under its summary", () => {
+    const ask = approval(1, { command: "tail -f build.log", description: "Watch the build" });
+    ask.approval.tool_name = "Monitor";
+    ask.approval.summary = "Watch the build";
+    expect(askPreview(ask, "/srv/app")).toEqual({ kind: "command", text: "tail -f build.log" });
+  });
+
+  it("names a subagent's kind from whichever key holds it", () => {
+    const ask = approval(1, { description: "Find callers", prompt: "List them", agent: "general" });
+    ask.approval.tool_name = "task";
+    ask.approval.summary = "Find callers";
+    expect(askRow(ask, NATIVE).text).toBe("Approve subagent task (via general)");
+    expect(askTitle(ask, "/srv/app")).toEqual({ text: "Find callers", marked: true, subagent: "general" });
   });
 });

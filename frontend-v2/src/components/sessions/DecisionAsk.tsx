@@ -1,7 +1,7 @@
 "use client";
 
 import { needsHref } from "@waypoint/web-core/needsYou";
-import { askPreview, askSubagentLine, askTitle, decisionView, inlineCommand, planPreview } from "@waypoint/web-core/pendingAskActions";
+import { askBodyLine, askPreview, askTitle, decisionView, inlineCommand, planPreview } from "@waypoint/web-core/pendingAskActions";
 import type { PendingApprovalAsk, PendingPlanAsk } from "@waypoint/web-core/types";
 import { splitPath } from "@waypoint/web-core/workspacePaths";
 
@@ -49,7 +49,7 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
         <PathLabel {...splitPath(preview.path)} full={preview.path} />
       </div>
     ) : null;
-  const body = askSubagentLine(ask, cwd) ?? ask.body;
+  const body = askBodyLine(ask, cwd);
   const summary =
     planBody !== null ? (
       <p className={styles.clamp}>{planPreview(planBody)}</p>

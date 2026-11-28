@@ -7,6 +7,7 @@ import type { EventRecord } from "../types";
 import { resolveFromCwd } from "../workspacePaths";
 import { approvalBody, approvalPrompt, WORKFLOW_TOOLS, type ApprovalBody } from "./approvals";
 import { isBareRename } from "./diffPreview";
+import type { ShownTitle } from "./summary";
 import { subagentKind } from "./toolPresentation";
 
 // What reading a session's pending request needs to know of the session.
@@ -59,14 +60,20 @@ const HIDDEN_WARNING = "Hidden or direction-changing characters";
 
 // ─── The view ───
 
+// The command a request names, in its call's input or beside it.
+export function namedCommand(input: unknown, request: unknown): string | null {
+  const command = asRecord(input)?.command ?? asRecord(request)?.command;
+  return typeof command === "string" && command ? command : null;
+}
+
 // A request that carries its command beside its title shows the command. So does one
 // titled by its summary, whose title and text then don't hold the command.
 function requestedBody(event: EventRecord, summarized: boolean): ApprovalBody {
   const body = approvalBody(event);
   const input = asRecord(event.metadata?.tool_input);
   if (body.kind !== "raw" || (input && !summarized)) return body;
-  const command = input?.command ?? asRecord(event.metadata?.request)?.command;
-  return typeof command === "string" && command ? { kind: "command", description: "", command } : body;
+  const command = namedCommand(input, event.metadata?.request);
+  return command === null ? body : { kind: "command", description: "", command };
 }
 
 // Metadata that routes or draws a request without being part of it.
@@ -137,9 +144,7 @@ export function titlingSummary(metadata: Record<string, unknown> | undefined, cw
 
 // A pending approval as the session's dock shows it.
 export interface ApprovalCardView {
-  title: string;
-  // `title` is the agent's summary, so its backticks mark machine strings.
-  marked: boolean;
+  title: ShownTitle;
   // The kind of subagent a summary-titled task asks for, which the plain title names.
   subagent: string | null;
   body: ApprovalBody;
@@ -154,10 +159,11 @@ export function approvalCard(event: EventRecord, cwd: string): ApprovalCardView 
   if (summary !== null) {
     const body = requestedBody(event, true);
     const subagent = body.kind === "task" ? subagentKind(asRecord(event.metadata?.tool_input)) : null;
-    return { title: summary, marked: true, subagent, body };
+    return { title: { text: summary, marked: true }, subagent, body };
   }
   const body = approvalBody(event);
-  return { title: approvalPrompt(undescribed(body)) ?? "Approve this request", marked: false, subagent: null, body };
+  const title = approvalPrompt(undescribed(body)) ?? "Approve this request";
+  return { title: { text: title, marked: false }, subagent: null, body };
 }
 
 // ─── Whole or locked ───

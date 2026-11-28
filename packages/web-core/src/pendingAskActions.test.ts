@@ -264,9 +264,21 @@ describe("deciding outside the detail", () => {
         ev(1, "approval_request", "Approve Bash", { tool_name: "Bash", tool_input: { command }, summary: "Print a banner" }),
         session,
       );
-    expect(askTitle(ask, session.cwd, { status: "loading" })).toEqual({ text: "Print a banner", marked: true });
-    expect(askTitle(ask, session.cwd, request("echo banner"))).toEqual({ text: "Print a banner", marked: true });
-    expect(askTitle(ask, session.cwd, request("echo banner \u202e"))).toEqual({ text: ask.title, marked: false });
+    expect(askTitle(ask, session.cwd, { status: "loading" })).toMatchObject({ text: "Print a banner", marked: true });
+    expect(askTitle(ask, session.cwd, request("echo banner"))).toMatchObject({ text: "Print a banner", marked: true });
+    expect(askTitle(ask, session.cwd, request("echo banner \u202e"))).toMatchObject({ text: ask.title, marked: false });
+  });
+
+  it("keeps its own title for a call that asks for more than it says", () => {
+    const titled = (extra: Record<string, unknown>) => {
+      const ask = approval("Bash", { command: "ls", ...extra });
+      ask.approval.summary = "List the files";
+      return askTitle(ask, session.cwd);
+    };
+    expect(titled({})).toEqual({ text: "List the files", marked: true, subagent: null });
+    for (const extra of [{ dangerouslyDisableSandbox: true }, { workdir: "/etc" }, { command: "ls \u202e" }]) {
+      expect([extra, titled(extra).marked]).toEqual([extra, false]);
+    }
   });
 
   it("takes a plan's text from its ask, beside the rest of its call", () => {

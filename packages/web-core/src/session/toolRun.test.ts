@@ -681,6 +681,11 @@ describe("a call's summary", () => {
     expect(describeCall(bare)?.label).toContain("description: Watch the build");
   });
 
+  it("leaves the arguments of a call without one as they are, empty values included", () => {
+    const [item] = run([call(1, "a", "mcp__notes__list", { cursor: null, limit: 10 })]);
+    expect(describeCall(item)?.label).toBe("cursor: null\nlimit: 10");
+  });
+
   it("captions the live run line with the call in progress", () => {
     const items = run([
       summarized(1, "a", "Bash", { command: "ls" }, "List the files"),

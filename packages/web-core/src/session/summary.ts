@@ -14,3 +14,12 @@ export function summaryParts(summary: string): SummaryPart[] {
 
 // The summary as a label that takes no markup reads it.
 export const plainSummary = (summary: string): string => summaryParts(summary).map((part) => part.text).join("");
+
+// A title as a surface shows it: the agent's summary, whose backticks mark machine
+// strings, or the request's own title as written.
+export interface ShownTitle {
+  text: string;
+  marked: boolean;
+}
+
+export const plainTitle = ({ text, marked }: ShownTitle): string => (marked ? plainSummary(text) : text);

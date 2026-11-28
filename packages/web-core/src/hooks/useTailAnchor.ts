@@ -1,44 +1,39 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, type FocusEvent, type RefObject } from "react";
+import { useImperativeHandle, useLayoutEffect, useRef, useState, type FocusEventHandler, type PointerEventHandler, type Ref } from "react";
 
-import { caretToEnd, followsEnd, showEnd } from "../tailAnchor";
+import { createTailAnchor } from "../tailAnchor";
 
-interface TailHandlers {
-  onPointerDown: () => void;
-  onFocus: (event: FocusEvent<HTMLInputElement>) => void;
-  onBlur: (event: FocusEvent<HTMLInputElement>) => void;
+interface TailProps {
+  value?: unknown;
+  onPointerDown?: PointerEventHandler<HTMLInputElement>;
+  onFocus?: FocusEventHandler<HTMLInputElement>;
+  onBlur?: FocusEventHandler<HTMLInputElement>;
 }
 
-// The caller chains the returned handlers into its own. A press leaves the caret where the person
-// put it; a focus no press caused moves it to the end.
-export function useTailAnchor(input: RefObject<HTMLInputElement | null>, value: string): TailHandlers {
-  const pressed = useRef(false);
+// The props for an input that shows the end of its value while it is not being edited. The caller's
+// handlers run after the anchor's, and `forwarded` receives the input.
+export function useTailAnchor(forwarded: Ref<HTMLInputElement> | undefined, { value, onPointerDown, onFocus, onBlur }: TailProps) {
+  const input = useRef<HTMLInputElement>(null);
+  useImperativeHandle(forwarded, () => input.current as HTMLInputElement, []);
+  const [anchor] = useState(() =>
+    createTailAnchor<HTMLInputElement>({ isFocused: (field) => document.activeElement === field, nextFrame: (callback) => void requestAnimationFrame(callback) }),
+  );
+  useLayoutEffect(() => anchor.sync(input.current), [anchor, value]);
 
-  useLayoutEffect(() => {
-    const field = input.current;
-    if (field && followsEnd(field, document.activeElement === field)) showEnd(field);
-  }, [input, value]);
-
-  const onPointerDown = useCallback(() => {
-    pressed.current = true;
-  }, []);
-
-  const onFocus = useCallback((event: FocusEvent<HTMLInputElement>) => {
-    if (pressed.current) return;
-    const field = event.currentTarget;
-    caretToEnd(field);
-    // Some browsers reset the scroll as the focus settles.
-    requestAnimationFrame(() => showEnd(field));
-  }, []);
-
-  const onBlur = useCallback((event: FocusEvent<HTMLInputElement>) => {
-    pressed.current = false;
-    const field = event.currentTarget;
-    requestAnimationFrame(() => {
-      if (document.activeElement !== field) showEnd(field);
-    });
-  }, []);
-
-  return { onPointerDown, onFocus, onBlur };
+  return {
+    ref: input,
+    onPointerDown: (event) => {
+      anchor.press();
+      onPointerDown?.(event);
+    },
+    onFocus: (event) => {
+      anchor.focus(event.currentTarget);
+      onFocus?.(event);
+    },
+    onBlur: (event) => {
+      anchor.blur(event.currentTarget);
+      onBlur?.(event);
+    },
+  } satisfies TailProps & { ref: Ref<HTMLInputElement> };
 }

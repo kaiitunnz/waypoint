@@ -1,6 +1,6 @@
 "use client";
 
-import { useImperativeHandle, useRef, useState, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes } from "react";
+import { useState, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes } from "react";
 
 import { useTailAnchor } from "@waypoint/web-core/hooks/useTailAnchor";
 
@@ -30,46 +30,19 @@ export function Field({ label, htmlFor, children, className }: FieldProps) {
 interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
   ref?: Ref<HTMLInputElement>;
   mono?: boolean;
-  // The value is a path or a command: the field shows its end while it is not being edited.
-  tail?: boolean;
 }
 
 // A mono field holds a machine string, so the keyboard leaves its text as typed.
 const MACHINE = { spellCheck: false, autoCapitalize: "none", autoCorrect: "off" } as const;
 
-export function TextInput({ tail, ...props }: TextInputProps) {
-  return tail ? <TailInput {...props} /> : <PlainInput {...props} />;
-}
-
-function PlainInput({ mono, className, ref, ...rest }: Omit<TextInputProps, "tail">) {
+export function TextInput({ mono, className, ref, ...rest }: TextInputProps) {
   return <input {...(mono ? MACHINE : null)} {...rest} ref={ref} className={cx(styles.input, mono && styles.mono, className)} />;
 }
 
-function TailInput({ mono, className, ref, onPointerDown, onFocus, onBlur, ...rest }: Omit<TextInputProps, "tail">) {
-  const input = useRef<HTMLInputElement>(null);
-  // The caller's ref gets the same element as the hook's.
-  useImperativeHandle(ref, () => input.current as HTMLInputElement, []);
-  const anchor = useTailAnchor(input, typeof rest.value === "string" ? rest.value : "");
-  return (
-    <input
-      {...(mono ? MACHINE : null)}
-      {...rest}
-      ref={input}
-      className={cx(styles.input, mono && styles.mono, className)}
-      onPointerDown={(event) => {
-        anchor.onPointerDown();
-        onPointerDown?.(event);
-      }}
-      onFocus={(event) => {
-        anchor.onFocus(event);
-        onFocus?.(event);
-      }}
-      onBlur={(event) => {
-        anchor.onBlur(event);
-        onBlur?.(event);
-      }}
-    />
-  );
+// A path or command: it shows its end while it is not being edited.
+export function TailInput({ ref, ...props }: TextInputProps) {
+  const anchor = useTailAnchor(ref, props);
+  return <TextInput {...props} {...anchor} />;
 }
 
 export function TextArea({ mono, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "className"> & { mono?: boolean }) {

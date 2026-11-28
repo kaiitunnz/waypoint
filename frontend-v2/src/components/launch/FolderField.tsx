@@ -9,7 +9,7 @@ import { PathLabel } from "@/components/session/cards/PathLabel";
 
 import { Button } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Dialog";
-import { Field, TextInput } from "@/components/ui/Field";
+import { Field, TailInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { SettingsRow } from "@/components/ui/Settings";
 import { cx } from "@/lib/cx";
@@ -92,12 +92,11 @@ function FolderCombobox({ host, token, value, onChange, launchTargetId, recentCw
   return (
     <Field label="Folder" htmlFor={id} className={styles.field}>
       <span className={styles.wrap}>
-        <TextInput
+        <TailInput
           autoComplete="off"
           ref={input}
           id={id}
           mono
-          tail
           role="combobox"
           aria-expanded={shown}
           aria-controls={`${id}-list`}
@@ -199,9 +198,8 @@ function FolderRow({ host, token, value, onChange, launchTargetId, recentCwds, e
         }
       >
         <div className={styles.sheetBody}>
-          <TextInput
+          <TailInput
             mono
-            tail
             autoComplete="off"
             data-autofocus=""
             aria-label="Folder"

@@ -10,7 +10,7 @@ import { Chip } from "@/components/ui/Chip";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal, Sheet } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Field, PasswordInput, SearchInput, TextArea, TextInput } from "@/components/ui/Field";
+import { Field, PasswordInput, SearchInput, TailInput, TextArea, TextInput } from "@/components/ui/Field";
 import { FileName } from "@/components/ui/FileName";
 import { FileThumb } from "@/components/ui/FileThumb";
 import { Flyout } from "@/components/ui/Flyout";
@@ -276,7 +276,7 @@ export function Gallery() {
           <TextInput id="g-host" mono defaultValue="10.0.4.12" />
         </Field>
         <Field label="Folder" htmlFor="g-folder">
-          <TextInput id="g-folder" mono tail defaultValue="/home/noppanat/Workspace/Project/FlowMesh-v2/docs/architecture" />
+          <TailInput id="g-folder" mono defaultValue="/home/noppanat/Workspace/Project/FlowMesh-v2/docs/architecture" />
         </Field>
         <Field label="Password" htmlFor="g-pass">
           <PasswordInput id="g-pass" defaultValue="hunter2" />

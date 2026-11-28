@@ -29,8 +29,9 @@ function field(): Field {
   return state;
 }
 
-// The hook keeps its state in refs, so the handlers from one server render are enough.
-function render(input: Field | null, value = "") {
+// The hook keeps its state in refs, so the handlers from one server render are enough. The mount
+// effect has run by the time it returns.
+function mount(input: Field | null, value = "") {
   let handlers: ReturnType<typeof useTailAnchor> | undefined;
   const ref = { current: input } as unknown as RefObject<HTMLInputElement | null>;
   function Probe() {
@@ -39,6 +40,13 @@ function render(input: Field | null, value = "") {
   }
   renderToStaticMarkup(createElement(Probe));
   return handlers as ReturnType<typeof useTailAnchor>;
+}
+
+// The handlers on a field the mount effect has left scrolled to its start.
+function render(input: Field) {
+  const handlers = mount(input);
+  input.scrollLeft = 0;
+  return handlers;
 }
 
 const event = (target: Field) => ({ currentTarget: target }) as unknown as FocusEvent<HTMLInputElement>;
@@ -72,7 +80,6 @@ describe("useTailAnchor", () => {
   it("leaves the caret and the scroll where a press put them", () => {
     const input = field();
     const handlers = render(input);
-    input.scrollLeft = 0;
     handlers.onPointerDown();
     handlers.onFocus(event(input));
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, 0]);
@@ -98,15 +105,14 @@ describe("useTailAnchor", () => {
     const input = field();
     active = input;
     const handlers = render(input);
-    input.scrollLeft = 0;
     handlers.onBlur(event(input));
     expect(input.scrollLeft).toBe(0);
   });
 
-  describe("when its value is set", () => {
+  describe("on mount", () => {
     it("shows the end of a field that is not focused", () => {
       const input = field();
-      render(input, input.value);
+      mount(input, input.value);
       expect(input.scrollLeft).toBe(340);
     });
 
@@ -114,7 +120,7 @@ describe("useTailAnchor", () => {
       const input = field();
       input.selectionStart = input.selectionEnd = input.value.length;
       active = input;
-      render(input, input.value);
+      mount(input, input.value);
       expect(input.scrollLeft).toBe(340);
     });
 
@@ -122,12 +128,12 @@ describe("useTailAnchor", () => {
       const input = field();
       input.selectionStart = input.selectionEnd = 3;
       active = input;
-      render(input, input.value);
+      mount(input, input.value);
       expect(input.scrollLeft).toBe(0);
     });
 
     it("has nothing to scroll before the field mounts", () => {
-      expect(() => render(null)).not.toThrow();
+      expect(() => mount(null)).not.toThrow();
     });
   });
 });

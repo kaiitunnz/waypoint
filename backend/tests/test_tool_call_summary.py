@@ -12,6 +12,7 @@ from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeSessio
 from waypoint.backends.claude_code.history import convert_transcript_records
 from waypoint.backends.claude_code.normalize import call_summary
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
+from waypoint.backends.codex import normalize as codex_normalize
 from waypoint.backends.codex.event_registry import render_item_started
 from waypoint.backends.codex.history import turns_to_events
 from waypoint.backends.codex.normalize import approval_summary, command_summary
@@ -421,7 +422,53 @@ def test_codex_live_and_imported_commands(
     assert "summary" not in result.metadata
 
 
-def test_codex_approval_takes_the_parsed_action() -> None:
+# Command lines Codex parses as one read or search although their program runs more,
+# or reads more than the file it names. Captured from live sessions.
+PROGRAM_NAMED = [
+    (
+        '/bin/bash -lc "awk \'BEGIN{system(\\"echo ran\\")}\' README.md"',
+        {"type": "read", "name": "README.md"},
+        "Read `README.md`",
+    ),
+    (
+        "/bin/bash -lc \"sed -n -e 1p -e 'e echo ran' README.md\"",
+        {"type": "read", "name": "README.md"},
+        "Read `README.md`",
+    ),
+    (
+        "/bin/bash -lc 'rg --pre=cat hello .'",
+        {"type": "search", "query": "hello"},
+        "Search `hello`",
+    ),
+    (
+        "/bin/bash -lc 'head -n 2 README.md notes.txt'",
+        {"type": "read", "name": "README.md"},
+        "Read `README.md`",
+    ),
+]
+
+
+@pytest.mark.parametrize(("command", "action", "heading"), PROGRAM_NAMED)
+def test_codex_heads_a_call_by_its_parse_and_never_its_approval(
+    command: str, action: dict[str, str], heading: str
+) -> None:
+    actions = [{**action, "command": shlex.split(command)[2]}]
+    params = {"command": command, "commandActions": actions}
+
+    assert command_summary(command, actions) == heading
+    assert approval_summary("item/commandExecution/requestApproval", params) is None
+
+
+def test_codex_approval_takes_no_summary() -> None:
+    params = {"command": "cat SKILL.md", "commandActions": [_read("SKILL.md")]}
+
+    assert approval_summary("item/commandExecution/requestApproval", params) is None
+
+
+def test_codex_approval_summaries_switched_on_keep_the_reason_rule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(codex_normalize, "SUMMARIZE_APPROVALS", True)
     method = "item/commandExecution/requestApproval"
     params: dict[str, Any] = {
         "command": "cat SKILL.md",

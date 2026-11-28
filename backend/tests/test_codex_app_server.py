@@ -726,21 +726,15 @@ _READ_NOTES = {
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("request_params", "summary"),
+    "request_params",
     [
-        (_command_approval(_READ_NOTES), "Read `notes.txt`"),
-        (_command_approval({"type": "unknown", "command": "rm a"}), None),
+        _command_approval(_READ_NOTES),
         # An escalated read: only its reason says it leaves the sandbox.
-        (
-            _command_approval(
-                _READ_NOTES, reason="Check the notes outside the sandbox"
-            ),
-            None,
-        ),
+        _command_approval(_READ_NOTES, reason="Check the notes outside the sandbox"),
     ],
 )
-async def test_command_approval_event_carries_the_summary(
-    request_params: dict[str, Any], summary: str | None
+async def test_command_approval_event_takes_no_summary(
+    request_params: dict[str, Any],
 ) -> None:
     emitted: list = []
     adapter, fake = make_parked_adapter(emitted)
@@ -757,7 +751,7 @@ async def test_command_approval_event_carries_the_summary(
         await asyncio.sleep(0.01)
     metadata = next(e[3] for e in emitted if e[1] == EventKind.APPROVAL_REQUEST)
 
-    assert metadata.get("summary") == summary
+    assert "summary" not in metadata
 
     assert await adapter.respond_to_approval("sess", "approve")
     await asyncio.wait_for(reader, timeout=2)

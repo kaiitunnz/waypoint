@@ -277,11 +277,21 @@ def map_turn_status(value: Any) -> SessionStatus:
     return SessionStatus.RUNNING
 
 
+# Whether a command approval is titled by Codex's parse, as its call is headed.
+# Codex types a command by its program's name, so one it parses as a read can run
+# others, and the title of a decision does not rest on that.
+SUMMARIZE_APPROVALS = False
+
+
 def approval_summary(method: str, params: dict[str, Any]) -> str | None:
-    """A command approval's summary. A request that gives a ``reason`` has none:
-    it can ask for more than its command, such as running outside the sandbox,
-    and nothing else in it says so."""
-    if method != "item/commandExecution/requestApproval" or params.get("reason"):
+    """A command approval's summary: none unless ``SUMMARIZE_APPROVALS``, and none
+    for a request that gives a ``reason``, which can ask for more than its command,
+    such as running outside the sandbox, with nothing else saying so."""
+    if (
+        not SUMMARIZE_APPROVALS
+        or method != "item/commandExecution/requestApproval"
+        or params.get("reason")
+    ):
         return None
     return command_summary(params.get("command"), params.get("commandActions"))
 

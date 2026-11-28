@@ -975,7 +975,7 @@ tool's title, path or command:
 | --- | --- |
 | Claude (both transports and history import) | The `description` input of `Bash`, `Agent`, `Task`, `Monitor` and `PowerShell`. On any other tool that key is an argument of the call. |
 | OpenCode | The `description` input of the `subagent` tool. `shell` has none. |
-| Codex | The command's parsed `commandActions`, such as ``Read `SKILL.md` ``, only when one read, search or listing is the whole command, its output piped at most into `head`, `tail`, `wc` or `nl` given flags and numbers. A command approval that gives a `reason` has none, since the reason can ask for more than the command, such as running it outside the sandbox. |
+| Codex | The command's parsed `commandActions`, such as ``Read `SKILL.md` ``, on the call only, when one read, search or listing is the whole command, its output piped at most into `head`, `tail`, `wc` or `nl` given flags and numbers. An approval has none: Codex types a command by its program's name, so one it parses as a read can run others, as `awk` or `rg --pre` can. |
 
 Codex leaves other commands of a command line out of `commandActions`, so
 [`codex/command_line.py`](../backend/src/waypoint/backends/codex/command_line.py)
@@ -987,7 +987,9 @@ Clients show it as untrusted agent text. It titles an approval only where
 [`session/wholeRequest`](../packages/web-core/src/session/wholeRequest.ts) finds
 the call verified, no hidden or direction-changing characters anywhere in the
 request, and nothing asked beyond the call, which it reads from the
-`tool_input` and `request` keys its warnings name. A backend whose request can
+`tool_input` and `request` keys its warnings name. A list or card that judges a
+[pending ask](pending_asks.md#bounded-payloads) sees only what the ask carries
+of a long string. A backend whose request can
 ask for more in a way those keys don't show gives that approval no summary.
 
 ### Capture seams

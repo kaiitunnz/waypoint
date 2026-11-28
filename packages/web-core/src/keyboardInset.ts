@@ -19,22 +19,29 @@ export interface ViewportMetrics {
 }
 
 // An iOS home-screen app shows a gap between `innerHeight` and the visual viewport's height with no
-// keyboard up, about the safe-area insets. Only a keyboard widens it, so the smallest gap seen
-// since the window last changed width is the gap at rest.
+// keyboard up, about the safe-area insets. The gap at rest is the smallest seen while a field has
+// focus and the latest seen otherwise, so a keyboard that is up does not set it; a width change
+// starts over, since rotating changes the gap. Until one is seen it is 0.
 export interface RestGap {
   width: number;
-  gap: number;
+  gap: number | null;
 }
 
-export const UNKNOWN_REST_GAP: RestGap = { width: Number.NaN, gap: Number.POSITIVE_INFINITY };
+export const UNKNOWN_REST_GAP: RestGap = { width: Number.NaN, gap: null };
+
+// The widest gap that can be a rest gap; a keyboard is taller.
+const MAX_REST_GAP = 120;
 
 export function trackRestGap(
   rest: RestGap,
   { layoutWidth, layoutHeight, visualHeight, scale }: { layoutWidth: number; layoutHeight: number; visualHeight: number; scale: number },
+  typing: boolean,
 ): RestGap {
   if (scale > ZOOMED) return rest;
-  const known = layoutWidth === rest.width ? rest.gap : Number.POSITIVE_INFINITY;
-  return { width: layoutWidth, gap: Math.min(known, Math.max(0, layoutHeight - visualHeight)) };
+  const known = layoutWidth === rest.width ? rest.gap : null;
+  const seen = layoutHeight - visualHeight;
+  if (seen < 0 || seen > MAX_REST_GAP) return { width: layoutWidth, gap: known };
+  return { width: layoutWidth, gap: typing && known !== null ? Math.min(known, seen) : seen };
 }
 
 export interface KeyboardState {
@@ -47,7 +54,8 @@ export interface KeyboardState {
 export const KEYBOARD_CLOSED: KeyboardState = { inset: 0, visibleHeight: null };
 
 // The keyboard is open when a field that takes typing has focus and the visual viewport has lost
-// height; the focus keeps browser bars, zoom and scrollbars from reading as a keyboard.
+// height beyond the rest gap; the focus keeps browser bars, zoom and scrollbars from reading as a
+// keyboard.
 //
 // The visible band is [offsetTop, offsetTop + height]; what lies below it is covered. A browser
 // that resizes the layout viewport itself (Android Chrome with `resizes-content`) shrinks
@@ -104,8 +112,9 @@ export function watchKeyboard(win: KeyboardWindow, doc: KeyboardDocument, onChan
   let rest = UNKNOWN_REST_GAP;
   const measure = () => {
     const layout = { layoutWidth: win.innerWidth, layoutHeight: win.innerHeight, visualHeight: viewport.height, scale: viewport.scale };
-    rest = trackRestGap(rest, layout);
-    return keyboardState({ ...layout, visualOffsetTop: viewport.offsetTop, restGap: rest.gap }, isTextEntry(doc.activeElement));
+    const typing = isTextEntry(doc.activeElement);
+    rest = trackRestGap(rest, layout, typing);
+    return keyboardState({ ...layout, visualOffsetTop: viewport.offsetTop, restGap: rest.gap ?? 0 }, typing);
   };
 
   let last = measure();

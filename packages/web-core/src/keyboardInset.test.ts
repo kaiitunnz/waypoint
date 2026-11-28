@@ -77,29 +77,37 @@ describe("keyboardState", () => {
 
 describe("trackRestGap", () => {
   const view = { layoutWidth: 393, layoutHeight: 852, visualHeight: 759, scale: 1 };
+  const learned = trackRestGap(UNKNOWN_REST_GAP, view, true);
 
-  it("starts from the first reading", () => {
-    expect(trackRestGap(UNKNOWN_REST_GAP, view)).toEqual({ width: 393, gap: 93 });
+  it("learns the first reading, typing or not", () => {
+    expect(learned).toEqual({ width: 393, gap: 93 });
+    expect(trackRestGap(UNKNOWN_REST_GAP, view, false)).toEqual({ width: 393, gap: 93 });
   });
 
-  it("keeps the smallest gap, so a keyboard's wider one never raises it", () => {
-    const rest = trackRestGap(UNKNOWN_REST_GAP, view);
-    expect(trackRestGap(rest, { ...view, visualHeight: 459 }).gap).toBe(93);
-    expect(trackRestGap(rest, { ...view, visualHeight: 800 }).gap).toBe(52);
+  it("keeps the smallest gap while a field has focus", () => {
+    expect(trackRestGap(learned, { ...view, visualHeight: 800 }, true).gap).toBe(52);
+    expect(trackRestGap(learned, { ...view, visualHeight: 740 }, true).gap).toBe(93);
+  });
+
+  it("takes the latest gap with no field focused, so a low reading heals", () => {
+    const low = trackRestGap(learned, { ...view, visualHeight: 852 }, true);
+    expect(low.gap).toBe(0);
+    expect(trackRestGap(low, view, false).gap).toBe(93);
+  });
+
+  it("does not take a keyboard for a rest gap, nor a viewport taller than the layout", () => {
+    expect(trackRestGap(learned, { ...view, visualHeight: 459 }, false)).toEqual(learned);
+    expect(trackRestGap(UNKNOWN_REST_GAP, { ...view, visualHeight: 459 }, true).gap).toBeNull();
+    expect(trackRestGap(learned, { ...view, visualHeight: 860 }, false)).toEqual(learned);
   });
 
   it("starts over when the window changes width", () => {
-    const rest = trackRestGap(UNKNOWN_REST_GAP, view);
-    expect(trackRestGap(rest, { ...view, layoutWidth: 852, layoutHeight: 393, visualHeight: 273 })).toEqual({ width: 852, gap: 120 });
+    expect(trackRestGap(learned, { ...view, layoutWidth: 852, layoutHeight: 393, visualHeight: 273 }, true)).toEqual({ width: 852, gap: 120 });
+    expect(trackRestGap(learned, { ...view, layoutWidth: 852, layoutHeight: 393, visualHeight: 100 }, true)).toEqual({ width: 852, gap: null });
   });
 
   it("does not learn from a zoomed viewport", () => {
-    const rest = trackRestGap(UNKNOWN_REST_GAP, view);
-    expect(trackRestGap(rest, { ...view, visualHeight: 426, scale: 2 })).toBe(rest);
-  });
-
-  it("is never negative", () => {
-    expect(trackRestGap(UNKNOWN_REST_GAP, { ...view, visualHeight: 860 }).gap).toBe(0);
+    expect(trackRestGap(learned, { ...view, visualHeight: 426, scale: 2 }, true)).toBe(learned);
   });
 });
 
@@ -241,6 +249,26 @@ describe("watchKeyboard", () => {
     expect(seen.at(-1)).toEqual({ inset: 200, visibleHeight: 193 });
   });
 
+  it("reads a keyboard that is up when the watcher starts", () => {
+    const { win, doc, viewport } = fakes();
+    doc.activeElement = INPUT;
+    viewport.height = 516;
+    const seen: unknown[] = [];
+    watchKeyboard(win, doc, (state) => seen.push(state));
+    expect(seen).toEqual([{ inset: 336, visibleHeight: 516 }]);
+  });
+
+  it("reads a keyboard that stays up through a rotation", () => {
+    const { win, doc, viewport, winTarget, flush, seen } = opened();
+    void doc;
+    win.innerWidth = 852;
+    win.innerHeight = 393;
+    viewport.height = 193;
+    winTarget.dispatchEvent(new Event("resize"));
+    flush();
+    expect(seen.at(-1)).toEqual({ inset: 200, visibleHeight: 193 });
+  });
+
   describe("with a gap between the viewports at rest", () => {
     function biased() {
       const parts = fakes();
@@ -265,6 +293,25 @@ describe("watchKeyboard", () => {
       viewport.height = 759;
       viewport.dispatchEvent(new Event("resize"));
       flush();
+      expect(seen.at(-1)).toEqual(KEYBOARD_CLOSED);
+    });
+
+    it("heals a reading that was too low once no field has focus", () => {
+      const parts = fakes();
+      parts.doc.activeElement = INPUT;
+      const seen: unknown[] = [];
+      watchKeyboard(parts.win, parts.doc, (state) => seen.push(state));
+      parts.viewport.height = 759;
+      parts.viewport.dispatchEvent(new Event("resize"));
+      parts.flush();
+      expect(seen.at(-1)).toEqual({ inset: 93, visibleHeight: 759 });
+
+      parts.doc.activeElement = null;
+      parts.docTarget.dispatchEvent(new Event("focusout"));
+      parts.flush();
+      parts.doc.activeElement = INPUT;
+      parts.docTarget.dispatchEvent(new Event("focusin"));
+      parts.flush();
       expect(seen.at(-1)).toEqual(KEYBOARD_CLOSED);
     });
 

@@ -437,8 +437,8 @@ function oneLine(command: string | null): string | null {
   return hidden > 0 ? `${text.trimEnd()} …` : text;
 }
 
-// Only this tool's command is a call's own label, in an open row and on the live
-// line, so only it is marked as a shell command.
+// Only a Bash call's command is marked as a shell command, the same in an open row
+// and on the live line; Monitor and PowerShell rows read as `name: value` arguments.
 const isShellTool = (tool: string | null): boolean => categoryOf(tool) === "bash";
 
 export interface LiveCall {

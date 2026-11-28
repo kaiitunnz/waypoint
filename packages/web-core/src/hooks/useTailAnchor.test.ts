@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TailField } from "../tailAnchor";
 import { useTailAnchor } from "./useTailAnchor";
 
+// A server render skips layout effects; run them as the render goes.
+vi.mock("react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react")>()),
+  useLayoutEffect: (effect: () => void) => effect(),
+}));
+
 type Field = TailField & { id: string };
 
 function field(): Field {
@@ -66,6 +72,7 @@ describe("useTailAnchor", () => {
   it("leaves the caret and the scroll where a press put them", () => {
     const input = field();
     const handlers = render(input);
+    input.scrollLeft = 0;
     handlers.onPointerDown();
     handlers.onFocus(event(input));
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, 0]);
@@ -90,7 +97,37 @@ describe("useTailAnchor", () => {
   it("leaves a field that has taken the focus back alone after a blur", () => {
     const input = field();
     active = input;
-    render(input).onBlur(event(input));
+    const handlers = render(input);
+    input.scrollLeft = 0;
+    handlers.onBlur(event(input));
     expect(input.scrollLeft).toBe(0);
+  });
+
+  describe("when its value is set", () => {
+    it("shows the end of a field that is not focused", () => {
+      const input = field();
+      render(input, input.value);
+      expect(input.scrollLeft).toBe(340);
+    });
+
+    it("shows the end of a focused field whose caret is at the end", () => {
+      const input = field();
+      input.selectionStart = input.selectionEnd = input.value.length;
+      active = input;
+      render(input, input.value);
+      expect(input.scrollLeft).toBe(340);
+    });
+
+    it("leaves a focused field alone while the caret is elsewhere", () => {
+      const input = field();
+      input.selectionStart = input.selectionEnd = 3;
+      active = input;
+      render(input, input.value);
+      expect(input.scrollLeft).toBe(0);
+    });
+
+    it("has nothing to scroll before the field mounts", () => {
+      expect(() => render(null)).not.toThrow();
+    });
   });
 });

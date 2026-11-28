@@ -153,6 +153,9 @@
   /* Layout. */
   --rail-width: 64px;
   --tabbar-height: 52px;
+  /* The room the tab bar takes. Not `--safe-bottom`, which the keyboard zeroes: a page keeps this room
+     while the keyboard hides the bar. */
+  --tabbar-room: calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px));
   --bar-height: 48px;
   --session-col: 860px;
   --session-gutter: 28px;

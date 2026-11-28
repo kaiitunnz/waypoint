@@ -12,14 +12,15 @@
 }
 
 .withTabBar {
-  /* The page keeps the bar's room while the keyboard hides the bar, so its height does not change as
-     the keyboard opens and closes. */
-  --tabbar-room: calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px));
   /* For a screen that sizes itself to the space above the bar. */
   --tabbar-inset: var(--tabbar-room);
+  /* The page keeps the bar's room while the keyboard hides the bar, so its height does not change as
+     the keyboard opens and closes. */
   padding-bottom: var(--tabbar-room);
 }
 
+/* The bar is hidden, so a screen that sizes itself above it reserves none of it and adds the
+   keyboard's inset itself. */
 html[data-keyboard] .withTabBar {
   --tabbar-inset: 0px;
 }

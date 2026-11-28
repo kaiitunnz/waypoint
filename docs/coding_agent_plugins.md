@@ -986,11 +986,11 @@ A transport that reads dialogs off a screen sets it only for a call it matched.
 Clients treat it as untrusted agent text: it titles an approval only where
 [`session/wholeRequest`](../packages/web-core/src/session/wholeRequest.ts) finds
 the call verified, no hidden or direction-changing characters in the request, and
-nothing asked beyond the call. A list or card checks the
-[pending ask](pending_asks.md#bounded-payloads), which carries `tool_input` with
-its long strings cut and no `request`. A backend whose request can ask for more
-anywhere but the `tool_input` keys `session/wholeRequest` knows gives that
-approval no summary.
+nothing asked beyond the call. A list or card judges only what the
+[pending ask](pending_asks.md#bounded-payloads) carries: `summary` and
+`tool_input` with their long strings cut, and no `request`. A backend whose
+request can ask for more anywhere but the `tool_input` keys
+`session/wholeRequest` knows gives that approval no summary.
 
 ### Capture seams
 

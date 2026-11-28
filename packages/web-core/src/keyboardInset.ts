@@ -1,7 +1,7 @@
 // The on-screen keyboard on touch. iOS Safari (a home-screen app too) and Android Chrome with
-// `interactive-widget=resizes-visual` shrink only the visual viewport when it opens; the layout
-// viewport, `dvh` and `position: fixed; inset: 0` stay put, so the keyboard covers the bottom of
-// every sheet and screen.
+// `interactive-widget=resizes-visual` shrink the visual viewport when it opens but leave the frame
+// that `dvh` and `position: fixed; inset: 0` fill, so the keyboard covers the bottom of every sheet
+// and screen.
 
 // Under this the gap between the viewports is rounding or a browser bar, not a keyboard.
 const TOLERANCE = 8;
@@ -10,38 +10,11 @@ const TOLERANCE = 8;
 const ZOOMED = 1.01;
 
 export interface ViewportMetrics {
+  // The height of the frame the full-screen layouts fill: a fixed box with `inset: 0`.
   layoutHeight: number;
   visualHeight: number;
   visualOffsetTop: number;
   scale: number;
-  // The gap between the two heights with no keyboard.
-  restGap: number;
-}
-
-// An iOS home-screen app shows a gap between `innerHeight` and the visual viewport's height with no
-// keyboard up, about the safe-area insets. The gap at rest is the smallest seen while a field has
-// focus and the latest seen otherwise, so a keyboard that is up does not set it; a width change
-// starts over, since rotating changes the gap. Until one is seen it is 0.
-export interface RestGap {
-  width: number;
-  gap: number | null;
-}
-
-export const UNKNOWN_REST_GAP: RestGap = { width: Number.NaN, gap: null };
-
-// The widest gap that can be a rest gap; a keyboard is taller.
-const MAX_REST_GAP = 120;
-
-export function trackRestGap(
-  rest: RestGap,
-  { layoutWidth, layoutHeight, visualHeight, scale }: { layoutWidth: number; layoutHeight: number; visualHeight: number; scale: number },
-  typing: boolean,
-): RestGap {
-  if (scale > ZOOMED) return rest;
-  const known = layoutWidth === rest.width ? rest.gap : null;
-  const seen = layoutHeight - visualHeight;
-  if (seen < 0 || seen > MAX_REST_GAP) return { width: layoutWidth, gap: known };
-  return { width: layoutWidth, gap: typing && known !== null ? Math.min(known, seen) : seen };
 }
 
 export interface KeyboardState {
@@ -53,18 +26,17 @@ export interface KeyboardState {
 
 export const KEYBOARD_CLOSED: KeyboardState = { inset: 0, visibleHeight: null };
 
-// The keyboard is open when a field that takes typing has focus and the visual viewport has lost
-// height beyond the rest gap; the focus keeps browser bars, zoom and scrollbars from reading as a
-// keyboard.
+// The keyboard is open when a field that takes typing has focus and the visual viewport is shorter
+// than the layout frame; the focus keeps browser bars, zoom and scrollbars from reading as a keyboard.
 //
 // The visible band is [offsetTop, offsetTop + height]; what lies below it is covered. A browser
-// that resizes the layout viewport itself (Android Chrome with `resizes-content`) shrinks
-// `innerHeight` with the visual viewport and reads closed, so the keyboard is never counted twice.
-// An iOS pan that brings the band's bottom to the layout bottom reads an inset of 0 with the
-// keyboard still open; `visibleHeight` still bounds anything taller than the band.
-export function keyboardState({ layoutHeight, visualHeight, visualOffsetTop, scale, restGap }: ViewportMetrics, typing: boolean): KeyboardState {
+// that resizes the frame itself (Android Chrome with `resizes-content`) shrinks it with the visual
+// viewport and reads closed, so the keyboard is never counted twice. An iOS home-screen app scrolls
+// the page so the band's bottom meets the frame's bottom: that reads an inset of 0 with the
+// keyboard still open, and `visibleHeight` bounds anything taller than the band.
+export function keyboardState({ layoutHeight, visualHeight, visualOffsetTop, scale }: ViewportMetrics, typing: boolean): KeyboardState {
   if (!typing || scale > ZOOMED) return KEYBOARD_CLOSED;
-  const lost = layoutHeight - visualHeight - restGap;
+  const lost = layoutHeight - visualHeight;
   if (lost < TOLERANCE) return KEYBOARD_CLOSED;
   return { inset: Math.max(0, Math.round(lost - visualOffsetTop)), visibleHeight: Math.round(visualHeight) };
 }
@@ -92,8 +64,6 @@ interface Listenable {
 
 // What the watcher reads; narrow so tests run without a DOM.
 export interface KeyboardWindow extends Listenable {
-  innerWidth: number;
-  innerHeight: number;
   visualViewport: (Listenable & { height: number; offsetTop: number; scale: number }) | null;
   requestAnimationFrame(callback: () => void): number;
   cancelAnimationFrame(handle: number): void;
@@ -103,19 +73,22 @@ export interface KeyboardDocument extends Listenable {
   activeElement: FocusTarget | null;
 }
 
-export function watchKeyboard(win: KeyboardWindow, doc: KeyboardDocument, onChange: (state: KeyboardState) => void): () => void {
+export function watchKeyboard(
+  win: KeyboardWindow,
+  doc: KeyboardDocument,
+  layoutHeight: () => number,
+  onChange: (state: KeyboardState) => void,
+): () => void {
   const viewport = win.visualViewport;
   if (!viewport) {
     onChange(KEYBOARD_CLOSED);
     return () => {};
   }
-  let rest = UNKNOWN_REST_GAP;
-  const measure = () => {
-    const layout = { layoutWidth: win.innerWidth, layoutHeight: win.innerHeight, visualHeight: viewport.height, scale: viewport.scale };
-    const typing = isTextEntry(doc.activeElement);
-    rest = trackRestGap(rest, layout, typing);
-    return keyboardState({ ...layout, visualOffsetTop: viewport.offsetTop, restGap: rest.gap ?? 0 }, typing);
-  };
+  const measure = () =>
+    keyboardState(
+      { layoutHeight: layoutHeight(), visualHeight: viewport.height, visualOffsetTop: viewport.offsetTop, scale: viewport.scale },
+      isTextEntry(doc.activeElement),
+    );
 
   let last = measure();
   onChange(last);

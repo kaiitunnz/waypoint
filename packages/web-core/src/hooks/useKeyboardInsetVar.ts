@@ -14,8 +14,14 @@ export function useKeyboardInsetVar() {
   useEffect(() => {
     if (pointer) return;
     const root = document.documentElement;
+    // The frame the full-screen layouts fill; `innerHeight` differs from it while iOS has the
+    // keyboard up.
+    const frame = document.createElement("div");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.cssText = "position:fixed;inset:0;visibility:hidden;pointer-events:none";
+    document.body.append(frame);
     let open = false;
-    const stop = watchKeyboard(window, document, (state) => {
+    const stop = watchKeyboard(window, document, () => frame.getBoundingClientRect().height, (state) => {
       open = state.visibleHeight !== null;
       publishKeyboard(root, state);
       if (open) requestAnimationFrame(() => revealFocusedField(document, window));
@@ -27,6 +33,7 @@ export function useKeyboardInsetVar() {
     document.addEventListener("focusin", onFocusIn);
     return () => {
       stop();
+      frame.remove();
       document.removeEventListener("focusin", onFocusIn);
       publishKeyboard(root, KEYBOARD_CLOSED);
     };

@@ -69,6 +69,11 @@
   --r-sheet: 18px;
   --r-pill: 999px;
 
+  /* The on-screen keyboard. useKeyboardInsetVar writes these on <html> with data-keyboard while it
+     is up on touch: how far it covers the bottom of the layout viewport, and the height in view. */
+  --keyboard-inset: 0px;
+  --visible-height: 100dvh;
+
   /* Safe areas: chrome pads by these insets. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
@@ -159,6 +164,11 @@
   --z-bar: 20;
   --z-overlay: 40;
   --z-toast: 60;
+}
+
+/* The keyboard covers the home indicator. */
+html[data-keyboard] {
+  --safe-bottom: 0px;
 }
 
 html[data-theme="light"] {

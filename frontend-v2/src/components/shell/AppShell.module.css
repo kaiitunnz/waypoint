@@ -9,12 +9,19 @@
   background: var(--plane);
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
+  /* Room to scroll the last field clear of the keyboard. */
+  padding-bottom: var(--keyboard-inset);
 }
 
 .withTabBar {
   /* For a screen that sizes itself to the space above the bar. */
   --tabbar-inset: calc(var(--tabbar-height) + var(--safe-bottom));
-  padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom));
+  padding-bottom: max(var(--tabbar-inset), var(--keyboard-inset));
+}
+
+/* The tab bar is under the keyboard, or floats over the field above it. */
+html[data-keyboard] .withTabBar {
+  --tabbar-inset: 0px;
 }
 
 @media (hover: hover) and (pointer: fine) {

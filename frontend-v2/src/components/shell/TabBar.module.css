@@ -34,6 +34,10 @@
   left: calc(50% + 6px);
 }
 
+html[data-keyboard] .bar {
+  display: none;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .bar {
     display: none;

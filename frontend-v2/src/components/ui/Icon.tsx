@@ -46,7 +46,9 @@ export type IconName =
   | "tailscale"
   | "ssh"
   | "lock"
-  | "unlock";
+  | "unlock"
+  | "power"
+  | "switch";
 
 const PATHS: Record<IconName, ReactNode> = {
   "chevron-right": <path d="M9 6l6 6-6 6" />,
@@ -233,6 +235,13 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M8 11V8a4 4 0 0 1 7.7-1.5" />
     </>
   ),
+  power: (
+    <>
+      <path d="M12 4v8" />
+      <path d="M7.5 6.8a7 7 0 1 0 9 0" />
+    </>
+  ),
+  switch: <path d="M5 8h13l-3-3M19 16H6l3 3" />,
 };
 
 interface IconProps {

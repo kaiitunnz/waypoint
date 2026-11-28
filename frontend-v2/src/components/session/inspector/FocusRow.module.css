@@ -1,0 +1,23 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--f-body);
+  color: var(--text);
+}
+
+.detail {
+  font-size: var(--f-meta);
+  color: var(--faint);
+}

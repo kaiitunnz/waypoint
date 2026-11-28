@@ -1,0 +1,51 @@
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0 0 8px;
+  list-style: none;
+}
+
+.bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 12px;
+  row-gap: 6px;
+  font-size: var(--f-body);
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.value {
+  color: var(--muted);
+  font-size: var(--f-meta);
+  white-space: nowrap;
+}
+
+.value b {
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.value b.warn {
+  color: var(--warn);
+}
+
+.value b.danger {
+  color: var(--error);
+}
+
+/* Over the shared meter's own width. */
+.bar .meter {
+  grid-column: 1 / -1;
+  width: 100%;
+}

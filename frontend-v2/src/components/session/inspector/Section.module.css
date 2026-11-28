@@ -1,0 +1,27 @@
+.section {
+  padding: 18px 20px 4px;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.title {
+  font-size: var(--f-body);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.count {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.action {
+  margin-left: auto;
+  font-size: var(--f-meta);
+  font-weight: 600;
+}

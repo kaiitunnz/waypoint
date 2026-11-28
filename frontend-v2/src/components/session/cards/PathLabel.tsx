@@ -18,6 +18,8 @@ interface PathLabelProps {
   className?: string;
   // All of `full`, wrapped, where nothing may be cut.
   whole?: boolean;
+  // The path is a folder, shown whole at full brightness: its end is the part to read.
+  folder?: boolean;
 }
 
 // One line, unless `whole`: the folder gives way first, from its left, then the middle
@@ -26,7 +28,7 @@ export function PathLabel({ whole, ...props }: PathLabelProps) {
   return whole ? <span className={cx(styles.path, styles.open, props.className)}>{props.full}</span> : <CutPath {...props} />;
 }
 
-function CutPath({ dir, base, full, className }: Omit<PathLabelProps, "whole">) {
+function CutPath({ dir, base, full, className, folder }: Omit<PathLabelProps, "whole">) {
   const [open, setOpen] = useState(false);
   const hold = useTranscriptHold();
   const press = useLongPress((element) => {
@@ -36,7 +38,7 @@ function CutPath({ dir, base, full, className }: Omit<PathLabelProps, "whole">) 
   const name = splitFileName(base);
   const columns = { "--name": textColumns(base), "--tail": textColumns(name.tail) } as CSSProperties;
   return (
-    <span className={cx(styles.path, open && styles.open, className)} style={columns} title={full} {...press}>
+    <span className={cx(styles.path, open && styles.open, folder && styles.folder, className)} style={columns} title={full} {...press}>
       {open ? (
         full
       ) : (

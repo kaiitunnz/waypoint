@@ -1,0 +1,96 @@
+.root {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The pane scrolls its sections above the foot. */
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.foot {
+  flex: none;
+  padding: 10px 14px calc(10px + var(--safe-bottom));
+  border-top: 1px solid var(--line);
+}
+
+/* The sheet scrolls as a whole and has no foot rule. */
+.sheet .body {
+  overflow: visible;
+}
+
+.sheet .foot {
+  padding: 10px 20px 4px;
+  border-top: 0;
+}
+
+.tiles {
+  padding: 16px 20px 0;
+}
+
+.summary {
+  padding: 16px 20px 0;
+}
+
+.cells {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 44px;
+  text-align: left;
+}
+
+.cell[aria-expanded="true"] .cellValue {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cellLabel {
+  font-size: var(--f-meta);
+  color: var(--muted);
+}
+
+.cellValue {
+  font-size: var(--f-head);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+/* The opened summary reads as part of the row, not as another section. */
+.summary > section {
+  margin: 0 -20px;
+}
+
+.focus {
+  margin: 8px 20px 0;
+  border-top: 1px solid var(--line);
+}
+
+.paneFocus {
+  margin-top: 4px;
+}
+
+.density {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  margin: 0 20px;
+  border-top: 1px solid var(--line);
+  font-size: var(--f-body);
+  color: var(--text);
+}

@@ -43,6 +43,10 @@
   max-width: calc(100% - var(--tail) * (1ch - 0.01em));
 }
 
+.folder .dir {
+  color: inherit;
+}
+
 .open {
   direction: ltr;
   overflow-wrap: anywhere;

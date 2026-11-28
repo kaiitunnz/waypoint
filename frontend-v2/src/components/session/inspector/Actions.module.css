@@ -1,0 +1,50 @@
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 4px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 2px 0 4px;
+  font-size: var(--f-meta);
+  line-height: 16px;
+  text-align: center;
+  color: var(--text);
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: var(--r-card);
+  background: var(--fill-quiet);
+  color: var(--text-strong);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tile:hover .icon {
+    background: var(--fill-raised);
+  }
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The end action sits at the far side, apart from the rest. */
+.end {
+  margin-left: auto;
+}
+
+.sheetFoot {
+  gap: 8px;
+}

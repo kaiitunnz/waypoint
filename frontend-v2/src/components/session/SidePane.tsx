@@ -1,14 +1,17 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Icon } from "@/components/ui/Icon";
+import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/lib/cx";
 
+import { Inspector, type InspectorProps } from "./inspector/Inspector";
 import { PanelButton } from "./PanelButton";
 import styles from "./SidePane.module.css";
 
-type PaneTab = "overview" | "changes" | "files";
+export type PaneTab = "overview" | "changes" | "files";
 
 const TABS: { id: PaneTab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -16,10 +19,22 @@ const TABS: { id: PaneTab; label: string }[] = [
   { id: "files", label: "Files" },
 ];
 
-// The terminal is a main-pane view, never a tab here. `onClose` is for the pane
-// drawn as a drawer.
-export function SidePane({ onClose }: { onClose?: () => void }) {
-  const [tab, setTab] = useState<PaneTab>("overview");
+interface SidePaneProps {
+  // Held by the screen, so the pane drawn as a drawer comes back where it was left.
+  tab: PaneTab;
+  onTab: (tab: PaneTab) => void;
+  // Settings is pushed over the tabs, with a way back to Overview.
+  settings: ReactNode | null;
+  onCloseSettings: () => void;
+  // Null until the session has loaded.
+  inspector: Omit<InspectorProps, "surface" | "identity"> | null;
+  // For the pane drawn as a drawer.
+  onClose?: () => void;
+}
+
+// The terminal is a main-pane view, never a tab here.
+export function SidePane({ tab, onTab, settings, onCloseSettings, inspector, onClose }: SidePaneProps) {
+  const setTab = onTab;
   const tabs = useRef<Record<PaneTab, HTMLButtonElement | null>>({ overview: null, changes: null, files: null });
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -32,6 +47,27 @@ export function SidePane({ onClose }: { onClose?: () => void }) {
     setTab(target);
     tabs.current[target]?.focus();
   };
+  const close = onClose ? (
+    <span className={styles.close}>
+      <PanelButton panel="pane" size="sm" control={{ open: true, toggle: onClose }} />
+    </span>
+  ) : null;
+  if (settings) {
+    return (
+      <aside className={styles.pane} aria-label="Session settings">
+        <div className={styles.top}>
+          <span className={styles.back}>
+            <IconButton label="Back to overview" size="sm" onClick={onCloseSettings}>
+              <Icon name="chevron-left" size={20} />
+            </IconButton>
+          </span>
+          <h2 className={styles.heading}>Settings</h2>
+          {close}
+        </div>
+        <div className={styles.body}>{settings}</div>
+      </aside>
+    );
+  }
   return (
     <aside className={styles.pane} aria-label="Session details">
       <div className={styles.top}>
@@ -55,14 +91,16 @@ export function SidePane({ onClose }: { onClose?: () => void }) {
             </button>
           ))}
         </div>
-        {onClose ? (
-          <span className={styles.close}>
-            <PanelButton panel="pane" size="sm" control={{ open: true, toggle: onClose }} />
-          </span>
-        ) : null}
+        {close}
       </div>
-      <div role="tabpanel" id="pane-panel" tabIndex={0} aria-labelledby={`pane-tab-${tab}`} className={styles.body}>
-        <EmptyState title="Not built yet" detail={TABS.find((item) => item.id === tab)?.label} />
+      <div role="tabpanel" id="pane-panel" tabIndex={tab === "overview" ? -1 : 0} aria-labelledby={`pane-tab-${tab}`} className={styles.body}>
+        {tab === "overview" ? (
+          inspector ? (
+            <Inspector surface="pane" {...inspector} />
+          ) : null
+        ) : (
+          <EmptyState title="Not built yet" detail={TABS.find((item) => item.id === tab)?.label} />
+        )}
       </div>
     </aside>
   );

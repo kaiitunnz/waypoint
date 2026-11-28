@@ -1,0 +1,22 @@
+.identity {
+  min-width: 0;
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: var(--f-title);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 3px;
+  font-size: var(--f-meta);
+  color: var(--muted);
+}

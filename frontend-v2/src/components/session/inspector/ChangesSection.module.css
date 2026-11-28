@@ -1,0 +1,30 @@
+.files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 8px;
+  list-style: none;
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.path {
+  flex: 1 1 auto;
+}
+
+.letter {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--f-code);
+  color: var(--muted);
+}
+
+.more {
+  padding-bottom: 8px;
+}

@@ -21,9 +21,11 @@ import { useTurnStart } from "@waypoint/web-core/hooks/useTurnStart";
 import { COMPACT_HEADER_WIDTH } from "@waypoint/web-core/layoutRules";
 import { findPendingApprovals, pendingPlanApproval } from "@waypoint/web-core/session/approvals";
 import { isAgentBusy } from "@waypoint/web-core/session/connection";
+import { inspectorActions, type InspectorActionId } from "@waypoint/web-core/session/inspectorActions";
 import { composerAvailability, isExitedSession } from "@waypoint/web-core/session/send";
 import { deriveTranscript, TRANSCRIPT_DENSITIES, type TranscriptDensity } from "@waypoint/web-core/session/transcriptView";
 import { workingStep } from "@waypoint/web-core/session/workingRow";
+import { effortLabel } from "@waypoint/web-core/modelDisplay";
 import { agentLabel, agentModelLabel, sessionStanding } from "@waypoint/web-core/sessionPresentation";
 import type { SessionRecord } from "@waypoint/web-core/types";
 
@@ -35,6 +37,8 @@ import { ActionMenu, SessionMenu } from "@/components/sessions/SessionMenu";
 import { useSessionMenuActions } from "@/components/sessions/useSessionMenuActions";
 import { useSwitcher } from "@/components/sessions/SwitcherProvider";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Icon } from "@/components/ui/Icon";
+import { IconButton } from "@/components/ui/IconButton";
 import { useToast } from "@/components/ui/Toast";
 import { handleAuthFailure } from "@/lib/auth";
 import { cx } from "@/lib/cx";
@@ -54,8 +58,10 @@ import { SessionFooter } from "./SessionFooter";
 import { SessionHeader } from "./SessionHeader";
 import { SessionRail } from "./SessionRail";
 import styles from "./SessionScreen.module.css";
+import { SessionSheet } from "./inspector/SessionSheet";
+import { SessionSettingsPane } from "./settings/SessionSettingsPane";
 import { SideDrawer } from "./SideDrawer";
-import { SidePane } from "./SidePane";
+import { SidePane, type PaneTab } from "./SidePane";
 import { TerminalKeys } from "./terminal/TerminalKeys";
 import { TerminalView } from "./terminal/TerminalView";
 import { Transcript } from "./Transcript";
@@ -79,6 +85,11 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
   const scheduled = useSessionScheduledMessages(host, token, id);
   const [filesOpen, setFilesOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  // The side pane's state is held here, so the pane drawn as a drawer comes back where it was left.
+  const [paneTab, setPaneTab] = useState<PaneTab>("overview");
+  const [paneSettings, setPaneSettings] = useState(false);
+  // The session sheet, on touch.
+  const [sheetOpen, setSheetOpen] = useState(false);
   const reportFailure = useFailureToast();
   // The composer portals its drop overlay here.
   const [conversationNode, setConversationNode] = useState<HTMLElement | null>(null);
@@ -111,7 +122,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
     },
     [id, setSession],
   );
-  const { onAction, reattach, dialogs } = useSessionMenuActions({ onRemoved, onUpdated });
+  const { onAction, openDialog, reattach, recordUpdate, dialogs } = useSessionMenuActions({ onRemoved, onUpdated });
   // A second reattach, from the menu or the question form, would restart the session the
   // first one restored; the ref stops a second tap before the next render.
   const [reconnecting, setReconnecting] = useState(false);
@@ -244,7 +255,7 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
   const fullHeader = pointer && !narrowHeader;
   const viewSwitch = hasPane || terminalOnly ? <ViewSwitch value={activeView} onChange={switchView} variant={fullHeader ? "text" : "icon"} terminalOnly={terminalOnly} /> : null;
   const inlineDensity = fullHeader && activeView === "chat" ? <DensityToggle variant="inline" value={density} onChange={setDensity} /> : null;
-  const menuDensity = !pointer || (narrowHeader && activeView === "chat") ? <DensityToggle variant="menu" value={density} onChange={setDensity} /> : null;
+  const menuDensity = pointer && narrowHeader && activeView === "chat" ? <DensityToggle variant="menu" value={density} onChange={setDensity} /> : null;
   const focus = useSessionFocus({ host, token, sessionId: id, session, onSession: stream.setSession });
   const reconnectAction = dormant ? { busy: reconnecting, run: () => void reconnect() } : null;
   const resumeTerminal = async () => {
@@ -270,15 +281,6 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
         }
       : null,
   });
-  const overflow = session ? (
-    <SessionMenu
-      session={session}
-      subtitle={agent}
-      header={menuDensity}
-      onAction={onAction}
-      extra={menus.session}
-    />
-  ) : null;
   const terminalMenu = <ActionMenu label="Terminal actions" title="Terminal" subtitle={agent} items={menus.terminal} />;
   const terminalViewRef = useRef<HTMLElement>(null);
   const title = session?.title || "Session";
@@ -289,6 +291,92 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
       ? { open: paneBesideTerminal, toggle: () => setPaneBesideTerminal((open) => !open) }
       : panels.pane;
   const paneColumn = columns && sidePane.open;
+  // Settings is pushed over the pane's tabs only while the pane is open; closing the pane
+  // by any way, such as its toggle, the drawer's scrim or the Terminal view, ends it.
+  if (!paneColumn && panels.drawer !== "pane" && paneSettings) setPaneSettings(false);
+  const openPaneSettings = () => {
+    setPaneTab("overview");
+    setPaneSettings(true);
+    if (!sidePane.open) sidePane.toggle();
+  };
+
+  // What the pane and the sheet list and do for the session.
+  const runAction = (surface: "pane" | "sheet") => (id: InspectorActionId) => {
+    if (!session) return;
+    // A dialog opens over the screen, not over the sheet it came from.
+    if (surface === "sheet") setSheetOpen(false);
+    switch (id) {
+      case "switch":
+        switcher.open();
+        break;
+      case "terminal":
+        switchView("terminal");
+        break;
+      case "chat":
+        switchView("chat");
+        break;
+      case "files":
+        openFiles?.();
+        break;
+      case "schedule":
+        setScheduleOpen(true);
+        break;
+      case "settings":
+        if (surface === "pane") openPaneSettings();
+        else openDialog({ kind: "settings", session });
+        break;
+      case "refresh":
+        window.location.reload();
+        break;
+      case "reconnect":
+        void reconnect();
+        break;
+      case "rename":
+      case "pin":
+      case "unpin":
+      case "terminate":
+      case "delete":
+        onAction(id, session);
+        break;
+    }
+  };
+  const inspector =
+    session === null
+      ? null
+      : {
+          session,
+          catalog,
+          events,
+          latestTodo: stream.latestTodo,
+          heldMessages: stream.heldMessages,
+          scheduled,
+          focus: { on: focus.on, busy: focus.busy, set: focus.set },
+          onSession: stream.setSession,
+        };
+  const paneInspector = inspector && {
+    ...inspector,
+    actions: inspectorActions({ surface: "pane", session: inspector.session, hasPane, terminalOnly, view: activeView, composing, dormant, hasFiles: openFiles !== null }),
+    onAction: runAction("pane"),
+  };
+  // Pushed over the pane's tabs; the pane keeps the form only while it shows.
+  const paneSettingsView =
+    paneSettings && session ? <SessionSettingsPane session={session} onApplied={recordUpdate} onDone={() => setPaneSettings(false)} /> : null;
+  const overflow = session ? (
+    pointer ? (
+      // The screen's own menu opens Settings in its pane; rows elsewhere open it over the screen.
+      <SessionMenu
+        session={session}
+        subtitle={agent}
+        header={menuDensity}
+        onAction={(action, target) => (action === "settings" ? openPaneSettings() : onAction(action, target))}
+        extra={menus.session}
+      />
+    ) : (
+      <IconButton label="Session details" size="sm" aria-haspopup="dialog" aria-expanded={sheetOpen} onClick={() => setSheetOpen(true)}>
+        <Icon name="more" size={20} />
+      </IconButton>
+    )
+  ) : null;
 
   const body = loadFailed ? (
     <EmptyState
@@ -413,7 +501,15 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
               }
             />
           </section>
-          {paneColumn ? <SidePane /> : null}
+          {paneColumn ? (
+            <SidePane
+              tab={paneTab}
+              onTab={setPaneTab}
+              settings={paneSettingsView}
+              onCloseSettings={() => setPaneSettings(false)}
+              inspector={paneInspector}
+            />
+          ) : null}
           {panels.drawer === "rail" ? (
             <SideDrawer side="left" label="Sessions" onClose={panels.closeDrawer}>
               <SessionRail
@@ -427,10 +523,29 @@ export function SessionScreen({ id, initialView }: { id: string; initialView: Se
           ) : null}
           {panels.drawer === "pane" ? (
             <SideDrawer side="right" label="Session details" onClose={panels.closeDrawer}>
-              <SidePane onClose={panels.closeDrawer} />
+              <SidePane
+                tab={paneTab}
+                onTab={setPaneTab}
+                settings={paneSettingsView}
+                onCloseSettings={() => setPaneSettings(false)}
+                inspector={paneInspector}
+                onClose={panels.closeDrawer}
+              />
             </SideDrawer>
           ) : null}
         </div>
+        {!pointer && inspector ? (
+          <SessionSheet
+            {...inspector}
+            open={sheetOpen}
+            onClose={() => setSheetOpen(false)}
+            standing={standing}
+            agent={session?.effort ? `${agent}, ${effortLabel(session.effort)}` : agent}
+            actions={inspectorActions({ surface: "sheet", session: inspector.session, hasPane, terminalOnly, view: activeView, composing, dormant, hasFiles: openFiles !== null })}
+            onAction={runAction("sheet")}
+            density={activeView === "chat" ? <DensityToggle variant="inline" value={density} onChange={setDensity} /> : null}
+          />
+        ) : null}
         {dialogs}
       </AskControllerProvider>
     </SessionContextProvider>

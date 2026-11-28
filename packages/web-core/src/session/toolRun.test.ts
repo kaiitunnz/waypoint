@@ -8,7 +8,6 @@ import {
   pendingCallOf,
   formatCallDuration,
   summarizeToolRun,
-  toolFamilyOf,
   toolNamesOfRun,
   toolRunCounts,
 } from "./toolRun";
@@ -739,35 +738,7 @@ describe("a call's summary", () => {
   });
 });
 
-describe("toolFamilyOf", () => {
-  it.each([
-    ["Bash", "bash"],
-    ["Monitor", "bash"],
-    ["Read", "read"],
-    ["Grep", "read"],
-    ["Glob", "read"],
-    ["WebFetch", "read"],
-    ["WebSearch", "read"],
-    ["Edit", "edit"],
-    ["MultiEdit", "edit"],
-    ["NotebookEdit", "edit"],
-    ["Write", "edit"],
-    ["Agent", "agent"],
-    ["Task", "agent"],
-    ["spawnAgent", "agent"],
-    ["Subagent", "agent"],
-    ["Wait", "agent"],
-    ["closeAgent", "agent"],
-    ["TodoWrite", "agent"],
-    ["Skill", "skill"],
-    ["mcp__notes__ping", null],
-    ["notes:ping", null],
-    ["ToolSearch", null],
-    [null, null],
-  ])("puts %s in its family", (tool, family) => {
-    expect(toolFamilyOf(tool)).toBe(family);
-  });
-
+describe("a run's glyph families", () => {
   it("gives the other-tools chip no family", () => {
     const items = run([call(1, "a", "WebSearch", { query: "x" }), call(2, "b", "Bash", { command: "ls" })]);
     expect(summarizeToolRun(items).glyphs.map((entry) => [entry.glyph, entry.family])).toEqual([

@@ -1,14 +1,15 @@
 import type { TaskNotificationView } from "../events";
 import { formatDuration } from "./cardText";
+import { toolFamilyOf, type ToolFamily } from "./toolFamily";
 import type { ToolBadge } from "./toolPresentation";
-import type { RunGlyph, ToolFamily } from "./toolRun";
+import type { RunGlyph } from "./toolRun";
 
 // A task lifecycle card: subagent/Agent completion, Monitor events and terminal
-// state, or background-command completion. `family` is the tool family it reports on.
+// state, or background-command completion. `family` is that of the tool it reports on.
 export const TASK_NOTIFICATION_BADGES: Record<TaskNotificationView["kind"], ToolBadge & { family: ToolFamily | null }> = {
-  agent: { glyph: "◇", variant: "task", label: "Agent", family: "agent" },
-  monitor: { glyph: "◉", variant: "monitor", label: "Monitor", family: "bash" },
-  background_command: { glyph: "›_", variant: "bash", label: "Command", family: "bash" },
+  agent: { glyph: "◇", variant: "task", label: "Agent", family: toolFamilyOf("Agent") },
+  monitor: { glyph: "◉", variant: "monitor", label: "Monitor", family: toolFamilyOf("Monitor") },
+  background_command: { glyph: "›_", variant: "bash", label: "Command", family: toolFamilyOf("Bash") },
   message: { glyph: "↘", variant: "default", label: "Message", family: null },
   unknown: { glyph: "⁂", variant: "default", label: "Task", family: null },
 };

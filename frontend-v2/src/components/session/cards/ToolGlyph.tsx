@@ -1,4 +1,4 @@
-import type { ToolFamily } from "@waypoint/web-core/session/toolRun";
+import type { ToolFamily } from "@waypoint/web-core/session/toolFamily";
 import type { HTMLAttributes } from "react";
 
 import { cx } from "@/lib/cx";

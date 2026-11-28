@@ -7,6 +7,7 @@ import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
 import { formatDuration } from "./cardText";
 import { foldLines } from "./foldText";
 import { taskNoteReport } from "./taskNoteBody";
+import { categoryOf, familyOf, toolFamilyOf, type ToolCategory, type ToolFamily } from "./toolFamily";
 import {
   callArgumentsForEvent,
   collapseWhitespace,
@@ -71,72 +72,9 @@ export function toolNamesOfRun(items: readonly LeafItem[]): string[] {
   return names;
 }
 
-type Category =
-  | "read"
-  | "search"
-  | "edit"
-  | "bash"
-  | "web"
-  | "agent"
-  | "followup"
-  | "skill"
-  | "monitor"
-  | "todo"
-  | "other";
-
-function categoryOf(tool: string | null): Category {
-  switch (tool) {
-    case "Read":
-      return "read";
-    case "Grep":
-    case "Glob":
-      return "search";
-    case "Bash":
-      return "bash";
-    case "WebFetch":
-    case "WebSearch":
-      return "web";
-    case "Skill":
-      return "skill";
-    case "Monitor":
-      return "monitor";
-    case "TodoWrite":
-      return "todo";
-    // Waiting on or closing a subagent is part of one subagent's life, not another one.
-    case "Wait":
-    case "closeAgent":
-      return "followup";
-    default:
-      if (isFileEditToolName(tool)) return "edit";
-      if (isAgentToolName(tool)) return "agent";
-      return "other";
-  }
-}
-
-// The families that share a glyph colour; every other tool's glyph stays plain.
-export type ToolFamily = "bash" | "read" | "edit" | "agent" | "skill";
-
-const FAMILIES: Partial<Record<Category, ToolFamily>> = {
-  bash: "bash",
-  // A monitor watches a command's output.
-  monitor: "bash",
-  read: "read",
-  search: "read",
-  web: "read",
-  edit: "edit",
-  agent: "agent",
-  followup: "agent",
-  todo: "agent",
-  skill: "skill",
-};
-
-const familyOf = (category: Category): ToolFamily | null => FAMILIES[category] ?? null;
-
-export const toolFamilyOf = (tool: string | null): ToolFamily | null => familyOf(categoryOf(tool));
-
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
-const PHRASES: Record<Category, (count: number) => string> = {
+const PHRASES: Record<ToolCategory, (count: number) => string> = {
   read: (n) => `read ${plural(n, "file")}`,
   search: (n) => `searched ${plural(n, "pattern")}`,
   edit: (n) => `edited ${plural(n, "file")}`,
@@ -150,7 +88,7 @@ const PHRASES: Record<Category, (count: number) => string> = {
   other: (n) => `used ${plural(n, "other tool")}`,
 };
 
-const PHRASE_ORDER: Category[] = [
+const PHRASE_ORDER: ToolCategory[] = [
   "read",
   "search",
   "edit",
@@ -185,7 +123,7 @@ function isToolItem(child: LeafItem): boolean {
   return child.event.kind === "tool_call" || child.event.kind === "tool_result";
 }
 
-function categoryOfChild(child: LeafItem): Category | null {
+function categoryOfChild(child: LeafItem): ToolCategory | null {
   const event = primaryEvent(child);
   // A todo list event with no tool name is still a todo call.
   if (isTodoListEvent(event)) return "todo";
@@ -220,7 +158,7 @@ function sentence(parts: string[]): string {
 
 // A run in plain words, plus the counts its collapsed line carries.
 export function summarizeToolRun(items: readonly LeafItem[]): ToolRunSummary {
-  const counts = new Map<Category, number>();
+  const counts = new Map<ToolCategory, number>();
   const editedFiles = new Set<string>();
   let unnamedEdits = 0;
   let additions = 0;
@@ -365,7 +303,7 @@ function argumentLines(
   }
 }
 
-const NAMED_CATEGORIES: ReadonlySet<Category> = new Set(["other", "monitor", "followup"]);
+const NAMED_CATEGORIES: ReadonlySet<ToolCategory> = new Set(["other", "monitor", "followup"]);
 
 const replyWith = (kind: CallReply["kind"], text: string | null, cut = false): CallReply | null =>
   text ? { kind, text, cut } : null;

@@ -273,6 +273,11 @@ export function matchPath(path: string, query: string): number[] | null {
   return positions;
 }
 
+// The match positions that fall in text[start, start + length), relative to start.
+export function positionsWithin(positions: ReadonlyArray<number>, start: number, length: number): number[] {
+  return positions.filter((position) => position >= start && position < start + length).map((position) => position - start);
+}
+
 // A matched label as runs of hit and plain text, for highlighting.
 export function highlightRuns(text: string, positions: ReadonlyArray<number>): { hit: boolean; value: string }[] {
   const hits = new Set(positions);

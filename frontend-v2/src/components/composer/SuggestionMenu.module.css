@@ -81,12 +81,6 @@
   min-width: 0;
 }
 
-.fileText .name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .fileText .description {
   display: flex;
   flex: none;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { highlightRuns, matchPath, rankItems, span } from "./fuzzy";
+import { highlightRuns, matchPath, positionsWithin, rankItems, span } from "./fuzzy";
 
 const names = (items: string[], query: string, options?: { prefixOnly?: boolean }) =>
   rankItems(items, query, (item) => item, undefined, options).map((r) => r.item);
@@ -142,6 +142,17 @@ describe("matchPath", () => {
 
   it("returns null for a query made only of slashes", () => {
     expect(matchPath("a/b", "/")).toBeNull();
+  });
+});
+
+describe("positionsWithin", () => {
+  it("keeps the positions inside the slice, relative to its start", () => {
+    expect(positionsWithin([0, 2, 5, 9], 2, 4)).toEqual([0, 3]);
+  });
+
+  it("is empty when no position falls inside", () => {
+    expect(positionsWithin([0, 9], 2, 4)).toEqual([]);
+    expect(positionsWithin([], 0, 4)).toEqual([]);
   });
 });
 

@@ -11,6 +11,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal, Sheet } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field, PasswordInput, SearchInput, TextArea, TextInput } from "@/components/ui/Field";
+import { FileName } from "@/components/ui/FileName";
 import { FileThumb } from "@/components/ui/FileThumb";
 import { Flyout } from "@/components/ui/Flyout";
 import { GlassBar } from "@/components/ui/GlassBar";
@@ -263,11 +264,19 @@ export function Gallery() {
         <FileThumb src={null} />
       </div>
 
+      <SectionHeading title="File names" dense />
+      <div className={styles.fields}>
+        <FileName name="quarterly-capacity-planning-spreadsheet-final-v3.xlsx" />
+      </div>
+
       <SectionHeading title="Fields" dense />
       <div className={styles.fields}>
         <SearchInput aria-label="Search sessions" placeholder="Search sessions" />
         <Field label="Host" htmlFor="g-host">
           <TextInput id="g-host" mono defaultValue="10.0.4.12" />
+        </Field>
+        <Field label="Folder" htmlFor="g-folder">
+          <TextInput id="g-folder" mono tail defaultValue="/home/noppanat/Workspace/Project/FlowMesh-v2/docs/architecture" />
         </Field>
         <Field label="Password" htmlFor="g-pass">
           <PasswordInput id="g-pass" defaultValue="hunter2" />

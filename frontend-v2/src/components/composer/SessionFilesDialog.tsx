@@ -105,9 +105,7 @@ export function SessionFilesDialog({
                 <li key={file.id} className={styles.row}>
                   <FileThumb className={styles.thumb} src={file.kind === "image" ? url : null} />
                   <span className={styles.text}>
-                    <span title={file.filename}>
-                      <FileName name={file.filename} className={styles.name} />
-                    </span>
+                    <FileName name={file.filename} title={file.filename} className={styles.name} />
                     <span className={styles.meta}>
                       {file.origin === "task_output" ? <span className={styles.origin}>task report</span> : null}
                       <span>{typeTag(file.filename, file.kind === "image")}</span>

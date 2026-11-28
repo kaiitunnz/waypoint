@@ -13,7 +13,7 @@
 @media not all and (hover: hover) and (pointer: fine) {
   .screen {
     position: fixed;
-    inset: 0 0 var(--tabbar-inset, var(--keyboard-inset));
+    inset: 0 0 calc(var(--tabbar-inset, 0px) + var(--keyboard-inset));
     height: auto;
   }
 }

@@ -17,11 +17,10 @@
   padding-bottom: var(--tabbar-inset);
 }
 
-/* The bar is hidden while the keyboard is up, so what the screen reserves is the keyboard's. A page
-   that scrolls the document needs no room of its own: iOS scrolls it down to the keyboard. */
+/* The bar is hidden while the keyboard is up. A page that scrolls the document needs no room of its
+   own then: iOS scrolls it down to the keyboard. */
 html[data-keyboard] .withTabBar {
-  --tabbar-inset: var(--keyboard-inset);
-  padding-bottom: 0;
+  --tabbar-inset: 0px;
 }
 
 @media (hover: hover) and (pointer: fine) {

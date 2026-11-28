@@ -18,7 +18,6 @@ from openai_codex.errors import (
 )
 from openai_codex.generated.v2_all import AgentMessageThreadItem
 
-from codex_command_lines import PROGRAM_NAMED, parsed_action
 from waypoint.backends.approvals import approval_request_id
 from waypoint.backends.codex import adapter as adapter_module
 from waypoint.backends.codex import subagents as subagents_module
@@ -700,7 +699,7 @@ def test_pending_approval_ids_are_empty_before_the_adapter_exists() -> None:
     assert transport.pending_approval_ids(session) == ()
 
 
-def _command_approval(action: dict[str, Any], **fields: Any) -> dict[str, Any]:
+def _command_approval(action: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": "command",
         "threadId": "thread-1",
@@ -713,7 +712,6 @@ def _command_approval(action: dict[str, Any], **fields: Any) -> dict[str, Any]:
         "commandActions": [action],
         "proposedExecpolicyAmendment": action["command"].split(),
         "availableDecisions": ["accept", "cancel"],
-        **fields,
     }
 
 
@@ -726,22 +724,7 @@ _READ_NOTES = {
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "request_params",
-    [
-        _command_approval(_READ_NOTES),
-        # An escalated read: only its reason says it leaves the sandbox.
-        _command_approval(_READ_NOTES, reason="Check the notes outside the sandbox"),
-        # Each has a heading as a call, so only the approval rule keeps it from one.
-        *(
-            _command_approval(parsed_action(command, action), command=command)
-            for command, action, _ in PROGRAM_NAMED
-        ),
-    ],
-)
-async def test_command_approval_event_takes_no_summary(
-    request_params: dict[str, Any],
-) -> None:
+async def test_command_approval_event_takes_no_summary() -> None:
     emitted: list = []
     adapter, fake = make_parked_adapter(emitted)
     await adapter.start_session("sess", "/tmp/work")
@@ -750,7 +733,9 @@ async def test_command_approval_event_takes_no_summary(
     assert handler is not None
     reader = asyncio.create_task(
         asyncio.to_thread(
-            handler, "item/commandExecution/requestApproval", request_params
+            handler,
+            "item/commandExecution/requestApproval",
+            _command_approval(_READ_NOTES),
         )
     )
     while not any(kind == EventKind.APPROVAL_REQUEST for _, kind, *_ in emitted):

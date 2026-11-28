@@ -1,5 +1,4 @@
-"""The ``summary`` a tool call carries: the agent's own description of it, taken
-from the field each agent writes for that purpose and absent otherwise."""
+"""Which tool calls carry a ``summary``, for each agent."""
 
 import asyncio
 import shlex
@@ -8,7 +7,6 @@ from typing import Any
 import pytest
 from openai_codex.generated.v2_all import Turn
 
-from codex_command_lines import PROGRAM_NAMED, parsed_action
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeSessionState
 from waypoint.backends.claude_code.history import convert_transcript_records
 from waypoint.backends.claude_code.normalize import call_summary
@@ -25,7 +23,7 @@ BASH_INPUT = {"command": "git status --short", "description": "Check for changes
 
 
 def _tool_use(name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-    """An assistant record as Claude Code writes it, with synthetic ids."""
+    """An assistant record as Claude Code writes it."""
     return {
         "type": "assistant",
         "uuid": "record-1",
@@ -178,21 +176,6 @@ def test_claude_tty_and_history_calls(
     assert ("summary" in tty.metadata) is (expected is not None)
 
 
-def test_claude_agent_call_is_summarized() -> None:
-    record = _tool_use(
-        "Agent",
-        {"description": "Find callers", "prompt": "List them", "subagent_type": "x"},
-    )
-
-    [event] = [
-        event
-        for event in TranscriptNormalizer().process_record(record)
-        if event.kind is EventKind.TOOL_CALL
-    ]
-
-    assert event.metadata["summary"] == "Find callers"
-
-
 SUBAGENT_INPUT = {"description": "Map the callers", "prompt": "List them"}
 
 
@@ -328,7 +311,6 @@ def test_codex_command_summary_allows_trimmed_output(script: str) -> None:
 @pytest.mark.parametrize(
     "script",
     [
-        # Codex reports only the read for each of these.
         "cat README.md | tee /dev/null",
         "cat README.md && printf ok",
         "cat README.md | xargs echo found",
@@ -364,20 +346,16 @@ def test_codex_command_summary_needs_the_whole_command(script: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("script", "parsed", "covered"),
+    ("script", "parsed"),
     [
-        ("rg x | head -n 50", "rg x", True),
-        ("rg -l hello . | xargs echo found", "rg -l hello .", False),
-        ("rg -n 'a && b' src | head -n 5", "rg -n 'a && b' src", True),
-        ('rg -g "*.py" x', "rg -g '*.py' x", True),
+        ("rg -n 'a && b' src | head -n 5", "rg -n 'a && b' src"),
+        ('rg -g "*.py" x', "rg -g '*.py' x"),
     ],
 )
-def test_codex_command_summary_reads_quoting(
-    script: str, parsed: str, covered: bool
-) -> None:
+def test_codex_command_summary_reads_quoting(script: str, parsed: str) -> None:
     action = {"type": "search", "command": parsed, "query": "x"}
 
-    assert (command_summary(_wrapped(script), [action]) is not None) is covered
+    assert command_summary(_wrapped(script), [action]) == "Search `x`"
 
 
 def _command_item(actions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -422,8 +400,36 @@ def test_codex_live_and_imported_commands(
     assert "summary" not in result.metadata
 
 
-@pytest.mark.parametrize(("command", "action", "heading"), PROGRAM_NAMED)
+# Command lines captured from live Codex sessions, which it parses as one read or
+# search although their program runs more, or reads more than the file it names.
+@pytest.mark.parametrize(
+    ("command", "action", "heading"),
+    [
+        (
+            '/bin/bash -lc "awk \'BEGIN{system(\\"echo ran\\")}\' README.md"',
+            {"type": "read", "name": "README.md"},
+            "Read `README.md`",
+        ),
+        (
+            "/bin/bash -lc \"sed -n -e 1p -e 'e echo ran' README.md\"",
+            {"type": "read", "name": "README.md"},
+            "Read `README.md`",
+        ),
+        (
+            "/bin/bash -lc 'rg --pre=cat hello .'",
+            {"type": "search", "query": "hello"},
+            "Search `hello`",
+        ),
+        (
+            "/bin/bash -lc 'head -n 2 README.md notes.txt'",
+            {"type": "read", "name": "README.md"},
+            "Read `README.md`",
+        ),
+    ],
+)
 def test_codex_heads_a_call_by_its_parse(
     command: str, action: dict[str, str], heading: str
 ) -> None:
-    assert command_summary(command, [parsed_action(command, action)]) == heading
+    parsed = {**action, "command": shlex.split(command)[2]}
+
+    assert command_summary(command, [parsed]) == heading

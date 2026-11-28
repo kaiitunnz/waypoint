@@ -20,8 +20,8 @@ _TOKEN = re.compile(
     re.VERBOSE,
 )
 
-# Filters that only cut down what is piped into them, each with its flags whose
-# value is the next word.
+# The filters output may be piped into, each with its flags whose value is the next
+# word.
 _TRIMMERS = {
     "head": frozenset({"-n", "-c", "--lines", "--bytes"}),
     "tail": frozenset({"-n", "-c", "--lines", "--bytes"}),

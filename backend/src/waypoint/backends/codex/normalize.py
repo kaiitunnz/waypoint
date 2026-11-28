@@ -42,10 +42,10 @@ def error_text(payload: dict[str, Any]) -> str:
 
 
 def command_summary(command: Any, actions: Any) -> str | None:
-    """Names a command by the action Codex parsed from it, or ``None`` unless the
-    parsed command is all the line runs, besides trimming its output: Codex leaves
-    other commands out of its actions. The action's type is Codex's reading of the
-    program's name, which the program can outrun."""
+    """Names a command by the action Codex parsed from it, or ``None`` unless that
+    action is all the line runs, besides trimming its output: Codex leaves other
+    commands out of its actions. The action's type follows from the program's name,
+    so the program may do more."""
     match command, actions:
         case str(), [{"command": str(parsed)} as action] if runs_only(command, parsed):
             return _action_phrase(action)

@@ -60,9 +60,8 @@ def format_rate_limit(info: dict[str, Any]) -> str:
     return f"Rate limit ({rl_type}): {status}".strip()
 
 
-# Tools whose ``description`` input is the agent's description of the call. On
-# any other tool the key is an argument the call carries (an event's body, a
-# page's subtitle), so it never describes the call.
+# Tools whose ``description`` input describes the call. On any other tool the key
+# is an argument of the call, such as a calendar event's body.
 _DESCRIBED_TOOLS = frozenset({"Bash", "Agent", "Task", "Monitor", "PowerShell"})
 
 

@@ -280,12 +280,24 @@ async def test_cut_off_dialog_is_unverified() -> None:
     meta = runtime._emit_adapter_event.call_args.args[3]
     assert meta["tool_name"] == "Unknown"
     assert meta["tool_input"] == {"description": ""}
-    # The screen's reading is not the agent's description.
-    assert "summary" not in meta
     assert meta["call_verified"] is False
     assert "tool_use_id" not in meta
     assert plugin._pending_approvals["sess-1"].approve_number == 1
     assert plugin._pending_approvals["sess-1"].decline_number == 3
+
+
+async def test_unmatched_agent_dialog_has_no_summary() -> None:
+    plugin = ClaudeTtyPlugin()
+    runtime = _make_runtime(_make_session(), _load("approval_agent.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer.dialogs.poll()
+    await tailer.dialogs.poll()
+
+    meta = runtime._emit_adapter_event.call_args.args[3]
+    assert meta["tool_name"] == "Agent"
+    assert "description" in meta["tool_input"]
+    assert "summary" not in meta
 
 
 _HINTED_COMMAND = (

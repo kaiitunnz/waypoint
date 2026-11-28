@@ -39,8 +39,7 @@ QUESTION_TOOL = "question"
 # OpenCode's tool names where Waypoint's clients and telemetry know another.
 _TOOL_NAMES = {"shell": "bash", "subagent": "task"}
 _FILE_TOOLS = frozenset({"read", "write", "edit"})
-# Tools whose ``description`` input is the agent's description of the call.
-# ``shell`` declares none, and no other tool's text stands in for one.
+# Tools whose ``description`` input describes the call. ``shell`` declares none.
 _DESCRIBED_TOOLS = frozenset({"subagent"})
 
 

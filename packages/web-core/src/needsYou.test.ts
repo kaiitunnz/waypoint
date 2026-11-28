@@ -282,9 +282,17 @@ describe("an approval titled by the call's summary", () => {
     expect(askRow(ask, NATIVE).text).toBe(ask.body);
   });
 
+  const searched = (ask: PendingApprovalAsk) =>
+    buildQueue({ asks: [ask], items: [], gates: [], status: "all", source: "all", q: "search modes" });
+
   it("answers to its summary, as shown, in a search", () => {
-    const queue = buildQueue({ asks: [watch("Search `modes`")], items: [], gates: [], status: "all", source: "all", q: "search modes" });
-    expect(queue).toHaveLength(1);
+    expect(searched(watch("Search `modes`"))).toHaveLength(1);
+  });
+
+  it("doesn't answer to a summary that can't title it", () => {
+    expect(searched(watch("Search `modes`", { dangerouslyDisableSandbox: true }))).toEqual([]);
+    // A search has no session directory to check the call's against.
+    expect(searched(watch("Search `modes`", { workdir: "/srv/app" }))).toEqual([]);
   });
 
   it("keeps the command in view under a summary that reads like it", () => {

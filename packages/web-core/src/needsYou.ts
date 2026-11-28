@@ -3,6 +3,7 @@ import type { InboxStatusFilter } from "./inbox";
 import {
   askBodyLine,
   askPreview,
+  askTitle,
   fitsListing,
   inlineCommand,
   isRecommendedLabel,
@@ -39,9 +40,10 @@ function matches(haystack: (string | null | undefined)[], query: string): boolea
 }
 
 function askMatches(ask: PendingAsk, query: string): boolean {
-  // Searched as shown, without the marks around its machine strings.
-  const described = ask.kind === "approval" && ask.approval.summary ? plainSummary(ask.approval.summary) : null;
-  return matches([ask.session_title, ask.title, ask.body, described], query);
+  // Searched as shown, without the marks around its machine strings. With no session
+  // directory at hand, an empty one only rejects more summaries.
+  const { text, marked } = askTitle(ask, "");
+  return matches([ask.session_title, ask.title, ask.body, marked ? plainSummary(text) : null], query);
 }
 
 // A gate also answers to the search its hidden inbox item would.

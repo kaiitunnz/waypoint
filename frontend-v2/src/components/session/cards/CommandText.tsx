@@ -19,19 +19,24 @@ export function Lines({ text }: { text: string }) {
 }
 
 // The mark before a shell command set under a heading; no part of the command.
-export function Prompt({ className }: { className?: string }) {
+export function ShellPrompt({ className }: { className?: string }) {
   return (
-    <span className={cx(styles.prompt, className)} aria-hidden="true">
+    <span className={cx(styles.shellPrompt, className)} aria-hidden="true">
       $
     </span>
   );
 }
 
-// A shell command clipped to one line, under a heading.
-export function CommandLine({ text }: { text: string }) {
+// A command clipped to one line, under a heading. `shell` marks a shell command.
+export function CommandLine({ text, shell }: { text: string; shell: boolean }) {
   return (
     <span className={styles.line}>
-      <Prompt /> {text}
+      {shell ? (
+        <>
+          <ShellPrompt />{" "}
+        </>
+      ) : null}
+      {text}
     </span>
   );
 }

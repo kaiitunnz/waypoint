@@ -55,7 +55,7 @@
 }
 
 /* In the glyph column, on the command's first line. */
-.prompt {
+.shellPrompt {
   position: absolute;
   top: 0;
   left: calc(-1 * (var(--glyph-column) + var(--glyph-gap)));

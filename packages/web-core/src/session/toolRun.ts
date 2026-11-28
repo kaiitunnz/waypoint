@@ -437,11 +437,17 @@ function oneLine(command: string | null): string | null {
   return hidden > 0 ? `${text.trimEnd()} …` : text;
 }
 
+// Only this tool's command is a call's own label, in an open row and on the live
+// line, so only it is marked as a shell command.
+const isShellTool = (tool: string | null): boolean => categoryOf(tool) === "bash";
+
 export interface LiveCall {
   step: Step | null;
-  // The agent's description of the call, and the shell command it runs on one line.
+  // The agent's description of the call, and the command it runs on one line.
   summary: string | null;
   command: string | null;
+  // The command is a shell command.
+  shell: boolean;
 }
 
 // What the live run line says of the call in progress.
@@ -449,7 +455,8 @@ export function liveCall(items: readonly LeafItem[], working: boolean): LiveCall
   const pending = working ? pendingCallOf(items) : undefined;
   if (!pending) return null;
   const event = primaryEvent(pending);
-  return { step: describeStep(event), summary: readSummary(event), command: oneLine(commandForEvent(event)) };
+  const command = oneLine(commandForEvent(event));
+  return { step: describeStep(event), summary: readSummary(event), command, shell: command !== null && isShellTool(readToolName(event)) };
 }
 
 export function describeCall(child: LeafItem, cwd?: string | null): CallView | null {
@@ -465,7 +472,7 @@ export function describeCall(child: LeafItem, cwd?: string | null): CallView | n
   const args = callArgumentsForEvent(event);
   const category = categoryOf(tool);
   const summary = call ? readSummary(call) : null;
-  const command = tool === "Bash" ? commandForEvent(event) : null;
+  const command = isShellTool(tool) ? commandForEvent(event) : null;
   const subject = (command?.replace(/\r\n?/g, "\n").trim() || null) ?? argumentLines(tool, args, cwd, summary);
   // A call whose arguments read as lines keeps them all; a path alone stands for a file tool.
   const filePath =

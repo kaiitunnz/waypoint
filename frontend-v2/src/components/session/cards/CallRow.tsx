@@ -9,7 +9,7 @@ import styles from "./CallRow.module.css";
 import { Clamped } from "./Clamped";
 import { DiffBlock } from "./DiffBlock";
 import { DiffStat } from "./DiffStat";
-import { CommandText, Lines, Prompt } from "./CommandText";
+import { CommandText, Lines, ShellPrompt } from "./CommandText";
 import { FoldedText } from "./FoldedText";
 import { Attachments } from "./Attachments";
 import { Markdown } from "./Markdown";
@@ -31,7 +31,8 @@ function Prose({ caption, text }: { caption: string; text: string }) {
 
 export function CallRow({ row }: { row: CallView }) {
   const { todos, reply } = row;
-  const command = row.mono && !row.path;
+  // Command or argument lines, kept as written.
+  const machineLines = row.mono && !row.path;
 
   const status =
     row.status !== "failed" && row.additions !== null && row.deletions !== null ? (
@@ -53,7 +54,7 @@ export function CallRow({ row }: { row: CallView }) {
     <div className={styles.call}>
       <div className={styles.head}>
         <ToolGlyph className={styles.glyph} glyph={row.glyph} family={row.family} role="img" aria-label={row.toolLabel} />
-        <div className={styles.subject} title={command || row.path || row.name ? undefined : row.title}>
+        <div className={styles.subject} title={machineLines || row.path || row.name ? undefined : row.title}>
           {row.summary ? (
             <div className={styles.heading}>
               <SummaryText text={row.summary} />
@@ -67,12 +68,12 @@ export function CallRow({ row }: { row: CallView }) {
             </div>
           ) : null}
           {!row.label ? null : row.shell && row.summary !== null ? (
-            // Under a heading the tool's glyph is a line up, so the command takes a prompt there.
+            // Under a heading the tool's glyph is a line up, so the command takes a shell prompt there.
             <div className={styles.shell}>
-              <Prompt className={styles.prompt} />
+              <ShellPrompt className={styles.shellPrompt} />
               <CommandText text={row.label} />
             </div>
-          ) : command ? (
+          ) : machineLines ? (
             <CommandText text={row.label} />
           ) : (
             <div className={cx(styles.text, row.mono && styles.mono)}>

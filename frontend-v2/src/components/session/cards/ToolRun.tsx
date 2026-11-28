@@ -26,7 +26,7 @@ export function ToolRun({ items, working }: ToolRunProps) {
   const step = live?.step ? <StepText step={live.step} /> : null;
   // A described call is headed by its summary, with what it runs under it.
   const heading = live?.summary ? <SummaryHeading text={live.summary} /> : null;
-  const under = heading && (live?.command ? <CommandLine text={live.command} /> : step);
+  const under = heading && (live?.command ? <CommandLine text={live.command} shell={live.shell} /> : step);
 
   return (
     <RunLine

@@ -23,7 +23,7 @@
   white-space: pre;
 }
 
-.prompt {
+.shellPrompt {
   font-family: var(--mono);
   font-size: var(--f-code);
   color: var(--faint);

@@ -709,6 +709,7 @@ describe("a call's summary", () => {
       step: { verb: "Running", subject: "git status --short" },
       summary: "Check for changes",
       command: "git status --short",
+      shell: true,
     });
     expect(liveCall(items, false)).toBeNull();
     expect(liveCall(run([summarized(1, "a", "Bash", { command: "ls" })]), true)).toMatchObject({ summary: null });
@@ -722,9 +723,19 @@ describe("a call's summary", () => {
     expect(command(`echo ${"x".repeat(200)}`)).toBe(`echo ${"x".repeat(200)}`);
   });
 
+  it("shows a watched command on the live line without calling it a shell command", () => {
+    const items = run([summarized(1, "a", "Monitor", { command: "tail -f log" }, "Watch the log")]);
+    expect(liveCall(items, true)).toMatchObject({ command: "tail -f log", shell: false });
+  });
+
   it("names no command for a live call that runs none", () => {
     const items = run([summarized(1, "a", "Agent", { prompt: "List them" }, "Find callers")]);
-    expect(liveCall(items, true)).toEqual({ step: { verb: "Running a subagent", subject: null }, summary: "Find callers", command: null });
+    expect(liveCall(items, true)).toEqual({
+      step: { verb: "Running a subagent", subject: null },
+      summary: "Find callers",
+      command: null,
+      shell: false,
+    });
   });
 });
 

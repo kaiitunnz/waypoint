@@ -707,6 +707,7 @@ describe("a call's summary", () => {
   it("keeps a live command to its first line, and says when more follow", () => {
     const command = (text: string) => liveCall(run([summarized(1, "a", "Bash", { command: text })]), true)?.command;
     expect(command("cd src\r\nls -a\n")).toBe("cd src …");
+    expect(command("cd src\rls -a")).toBe("cd src …");
     expect(command("\n  ls -a\n\n")).toBe("ls -a");
     expect(command(`echo ${"x".repeat(200)}`)).toBe(`echo ${"x".repeat(200)}`);
   });

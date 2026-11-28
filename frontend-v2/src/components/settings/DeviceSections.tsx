@@ -38,7 +38,7 @@ export function SessionLists() {
   );
 }
 
-export function Transcript() {
+export function TranscriptSettings() {
   const [onFocus, setOnFocus] = useToolColoursOnFocus();
   return (
     <SettingsSection>

@@ -5,6 +5,7 @@ import { isTodoListEvent, readTodoEntries, summarizeTodos, type TodoEntry } from
 import type { AttachmentSpec, EventRecord } from "../types";
 import { relativeToCwd, relativizeInText, splitPath } from "../workspacePaths";
 import { formatDuration } from "./cardText";
+import { foldLines } from "./foldText";
 import { taskNoteReport } from "./taskNoteBody";
 import {
   callArgumentsForEvent,
@@ -429,9 +430,9 @@ export function pendingCallOf(items: readonly LeafItem[]): LeafItem | undefined 
 
 // A command's first line, marked when more follow.
 function oneLine(command: string | null): string | null {
-  const [first, ...rest] = command?.trim().split("\n") ?? [];
-  if (!first) return null;
-  return rest.length > 0 ? `${first.trimEnd()} …` : first;
+  const { text, hidden } = foldLines(command?.trim() ?? "", 1);
+  if (!text) return null;
+  return hidden > 0 ? `${text.trimEnd()} …` : text;
 }
 
 export interface LiveCall {

@@ -45,7 +45,7 @@
   --error: #e8787a;
   --danger: var(--error);
 
-  /* Tool families, for their glyphs once a row is lit. */
+  /* Tool family colours, for their glyphs. */
   --tool-read: #85c9fe;
   --tool-edit: #0faba7;
   --tool-bash: #91d681;

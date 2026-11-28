@@ -133,7 +133,8 @@
   padding: 0 0 4px 20px;
 }
 
-/* The glyphs of a focused or hovered line, and of an open run, take their colours. */
+/* A focused or hovered line and an open run light their glyphs, which shows under
+   "Tool colours: On focus". */
 .line:focus-visible,
 .body {
   --lit: 1;

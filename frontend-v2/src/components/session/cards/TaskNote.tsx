@@ -62,8 +62,8 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
         className={styles.glyph}
         glyph={badge.glyph}
         family={TASK_NOTIFICATION_FAMILIES[view.kind]}
-        role="img"
-        aria-label={badge.label}
+        // Without a summary the title already says the kind.
+        {...(view.summary ? { role: "img", "aria-label": badge.label } : { "aria-hidden": true })}
       />
       <span className={styles.headline}>{taskNoteTitle(view)}</span>
       {lamp ? <span className={cx(styles.status, styles[lamp.tone])}>{lamp.label}</span> : null}

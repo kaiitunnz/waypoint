@@ -33,6 +33,7 @@ _FLAG = re.compile(
     r"-[A-Za-z]+\d*|-\d+"
     r"|--(?:lines|bytes|chars|words|quiet|silent|verbose)(?:=[+-]?\d+)?"
 )
+# A trimmer's count or width.
 _NUMBER = re.compile(r"[+-]?\d+")
 
 
@@ -68,6 +69,8 @@ def _stages(script: str) -> list[list[str]] | None:
     stages: list[list[str]] = [[]]
     word: str | None = None
     position = 0
+    # The added blank ends the last word.
+    script = f"{script} "
     while position < len(script):
         if (token := _TOKEN.match(script, position)) is None:
             return None
@@ -81,8 +84,6 @@ def _stages(script: str) -> list[list[str]] | None:
                     stages.append([])
             case str(group):
                 word = (word or "") + token[group]
-    if word is not None:
-        stages[-1].append(word)
     return stages if all(stages) else None
 
 

@@ -50,7 +50,7 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
       </div>
     ) : null;
   const body = askBodyLine(ask, cwd);
-  const summary =
+  const gist =
     planBody !== null ? (
       <p className={styles.clamp}>{planPreview(planBody)}</p>
     ) : body && !command ? (
@@ -65,7 +65,7 @@ export function DecisionAsk({ ask, agent, now, openHref }: DecisionAskProps) {
           <div>
             {command}
             {path}
-            {summary}
+            {gist}
           </div>
           <OpenLink href={openHref ?? needsHref(ask.id)} label="Review" />
         </div>

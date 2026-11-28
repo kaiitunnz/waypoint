@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionContextUsage, SessionRecord, SessionRateLimitUsage, SessionTokenUsage } from "../types";
-import { sessionCoverageLabel, USAGE_POPOVER_SIZE_KEY, usagePanelModel } from "./usagePanel";
+import { sessionCoverageLabel, USAGE_POPOVER_SIZE_KEY, usageBars, usagePanelModel } from "./usagePanel";
 
 const context = (patch: Partial<SessionContextUsage> = {}): SessionContextUsage => ({
   used_tokens: 620_000,
@@ -118,5 +118,44 @@ describe("sessionCoverageLabel", () => {
   it("names the coverage", () => {
     expect(sessionCoverageLabel(totals())).toBe("Entire Waypoint session");
     expect(sessionCoverageLabel(totals({ coverage: "partial" }))).toBe("Partial coverage");
+  });
+});
+
+describe("usageBars", () => {
+  const NOW = Date.parse("2026-01-01T00:00:00Z");
+  const bars = (patch: Partial<SessionRecord>) => usageBars(usagePanelModel(session(patch)), NOW);
+
+  it("has no bars for a session without usage", () => {
+    expect(bars({})).toEqual([]);
+  });
+
+  it("leads with the context window, then each rate-limit window", () => {
+    const shown = bars({
+      context_usage: context(),
+      rate_limit_usage: limits({
+        windows: [
+          { id: "5h", label: "Claude Max, 5 hours", used_percent: 77, resets_at: "2026-01-01T01:12:00Z" },
+          { id: "wk", label: "Claude Max, week", used_percent: 16 },
+        ],
+      }),
+    });
+    expect(shown.map((bar) => bar.id)).toEqual(["context", "window-5h", "window-wk"]);
+    expect(shown[0]).toMatchObject({ label: "Context", percent: 62, tone: "good", detail: "620K of 1M" });
+    expect(shown[1]).toMatchObject({ percent: 77, tone: "warn", detail: "resets in 1h 12m" });
+    expect(shown[2]).toMatchObject({ percent: 16, tone: "good", detail: null });
+  });
+
+  it("falls back to the backend's reset description when a window gives no time", () => {
+    const [bar] = bars({
+      rate_limit_usage: limits({ windows: [{ id: "w", label: "Week", used_percent: 40, reset_description: "resets Monday" }] }),
+    });
+    expect(bar.detail).toBe("resets Monday");
+  });
+
+  it("says so when the context fill is unknown", () => {
+    const [unreported] = bars({ context_usage: context({ used_tokens: 0 }) });
+    expect(unreported).toMatchObject({ percent: null, detail: "1M window, usage not reported" });
+    const [noWindow] = bars({ context_usage: context({ context_window_tokens: null }) });
+    expect(noWindow).toMatchObject({ percent: null, detail: "620K" });
   });
 });

@@ -1,7 +1,18 @@
 import { humaniseBackend, type BackendCatalog } from "../backends";
 import { UNIFIED_TOKEN_LABELS, unifyTokens } from "../tokens";
+import { serverNow } from "../serverClock";
+import { formatCompactNumber } from "../telemetry";
 import type { SessionContextUsage, SessionRecord, SessionTokenUsage } from "../types";
-import { clampPercent, formatRelativeTime, formatTokens, rateLimitUsageTone, usageTone, type UsageTone } from "../usage";
+import {
+  clampPercent,
+  formatRelativeTime,
+  formatTokens,
+  rateLimitUsageTone,
+  rateLimitWindowPercent,
+  usageTone,
+  type UsageTone,
+} from "../usage";
+import { formatResetsIn } from "../usageSummary";
 
 // Versioned so a future shape change can coexist with an old saved value.
 export const USAGE_POPOVER_SIZE_KEY = "waypoint.usage-popover-size.v1";
@@ -167,4 +178,49 @@ export function usagePanelModel(session: SessionRecord | null, catalog?: Backend
       rateLimitSummary ? `Rate limits ${rateLimitSummary}` : null,
     ].filter((part) => part !== null),
   };
+}
+
+// One bar of the inspector's Context and limits: the context window, then each rate-limit window.
+export interface UsageBar {
+  id: string;
+  label: string;
+  // Null where the fill is unknown.
+  percent: number | null;
+  tone: UsageTone;
+  // "620k of 1M", "resets in 1h 12m".
+  detail: string | null;
+}
+
+export function usageBars(model: UsagePanelModel, now: number = serverNow()): UsageBar[] {
+  const bars: UsageBar[] = [];
+  const { contextUsage, contextWindowTokens } = model;
+  if (contextUsage) {
+    const used = formatCompactNumber(contextUsage.used_tokens);
+    const window = contextWindowTokens !== null ? formatCompactNumber(contextWindowTokens) : null;
+    bars.push({
+      id: "context",
+      label: "Context",
+      percent: model.contextPercent,
+      tone: model.contextTone,
+      detail: model.contextUnreported
+        ? window
+          ? `${window} window, usage not reported`
+          : "usage not reported"
+        : window
+          ? `${used} of ${window}`
+          : used,
+    });
+  }
+  for (const window of model.rateLimitUsage?.windows ?? []) {
+    const percent = rateLimitWindowPercent(window);
+    const resets = formatResetsIn(window.resets_at, now);
+    bars.push({
+      id: `window-${window.id}`,
+      label: window.label,
+      percent,
+      tone: usageTone(percent),
+      detail: resets ? `resets in ${resets}` : (window.reset_description ?? null),
+    });
+  }
+  return bars;
 }

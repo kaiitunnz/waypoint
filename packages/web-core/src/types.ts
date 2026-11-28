@@ -188,6 +188,8 @@ export interface SessionRecord {
   launch_mode?: LaunchMode;
   repo_name?: string | null;
   branch?: string | null;
+  // The git worktree the session was launched into, when it was.
+  worktree_path?: string | null;
   status: SessionStatus;
   created_at: string;
   updated_at: string;

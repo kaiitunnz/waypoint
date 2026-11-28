@@ -960,35 +960,37 @@ as output. A deferred call with no notification shows as running.
 
 ### Call summaries
 
-`metadata["summary"]` is the agent's short description of a tool call, on the
-call's `tool_call` event and on the `approval_request` that asks about it
+`metadata["summary"]` is a one-line description of a tool call, on the call's
+`tool_call` event and on the `approval_request` that asks about it
 (`SUMMARY_METADATA_KEY` and `set_summary` in
-[`backends/events.py`](../backend/src/waypoint/backends/events.py)). It is one
-line of prose, with backticks around its machine strings. A call the agent did
-not describe has no key. A normalizer takes it from the agent's own description
-of the call, or from Codex's parse of a command, and never makes one up from a
-tool's title, path or command:
+[`backends/events.py`](../backend/src/waypoint/backends/events.py)). Backticks
+mark its machine strings. It is the agent's own description of the call, or
+Codex's parse of a command; apart from that parse, a normalizer never composes
+one from a tool's title, path or command. A call without one has no key.
 
 | Agent | Source |
 | --- | --- |
 | Claude (both transports and history import) | The `description` input of `Bash`, `Agent`, `Task`, `Monitor` and `PowerShell`. On any other tool that key is an argument of the call. |
 | OpenCode | The `description` input of the `subagent` tool. `shell` has none. |
-| Codex | The command's parsed `commandActions`, such as ``Read `SKILL.md` ``, on the call only, when one read, search or listing is the whole command, its output piped at most into `head`, `tail`, `wc` or `nl` given flags and numbers. An approval has none: Codex types a command by its program's name, so one it parses as a read can run others, as `awk` or `rg --pre` can. |
+| Codex | One read, search or listing from `commandActions`, such as ``Read `SKILL.md` ``. Calls only. |
 
-Codex leaves other commands of a command line out of `commandActions`, so
-[`codex/command_line.py`](../backend/src/waypoint/backends/codex/command_line.py)
-reads the line itself and refuses anything it does not follow: another command,
-a redirection, a substitution or a subshell.
+A Codex call has a summary only when that one action is the whole command line,
+its output piped at most into `head`, `tail`, `wc` or `nl` given flags and
+numbers
+([`codex/command_line.py`](../backend/src/waypoint/backends/codex/command_line.py)):
+Codex leaves other commands of a line out of `commandActions`. A Codex approval
+has none, because Codex types a command by its program's name, so a parsed read
+can run other programs (`awk`, `rg --pre`).
 
 A transport that reads dialogs off a screen sets it only for a call it matched.
-Clients show it as untrusted agent text. It titles an approval only where
+Clients treat it as untrusted agent text: it titles an approval only where
 [`session/wholeRequest`](../packages/web-core/src/session/wholeRequest.ts) finds
-the call verified, no hidden or direction-changing characters in what it reads,
-and nothing asked beyond the call, which it reads from the keys its warnings name
-in `tool_input`. A list or card judges a
-[pending ask](pending_asks.md#bounded-payloads), which carries the input with its
-long strings cut. A backend whose request can ask for more anywhere but those keys
-gives that approval no summary.
+the call verified, no hidden or direction-changing characters in the request, and
+nothing asked beyond the call. A list or card checks the
+[pending ask](pending_asks.md#bounded-payloads), whose long strings are cut.
+`session/wholeRequest` looks for an ask beyond the call under known keys of
+`tool_input` and `request`; a backend whose request can ask for more anywhere
+else gives that approval no summary.
 
 ### Capture seams
 

@@ -97,6 +97,7 @@ function FolderCombobox({ host, token, value, onChange, launchTargetId, recentCw
           ref={input}
           id={id}
           mono
+          tail
           role="combobox"
           aria-expanded={shown}
           aria-controls={`${id}-list`}
@@ -200,6 +201,7 @@ function FolderRow({ host, token, value, onChange, launchTargetId, recentCwds, e
         <div className={styles.sheetBody}>
           <TextInput
             mono
+            tail
             autoComplete="off"
             data-autofocus=""
             aria-label="Folder"

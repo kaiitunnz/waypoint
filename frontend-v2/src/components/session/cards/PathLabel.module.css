@@ -7,6 +7,10 @@
   font-size: var(--f-code);
   letter-spacing: -0.01em;
   white-space: pre;
+  /* The line starts at its right edge, so what the parts' widths below fail to make fit is
+     cut from the left and the end of the path always stays. */
+  direction: rtl;
+  text-align: left;
 }
 
 /* Inline blocks, so a selection copies as one unbroken path; flex items would copy as
@@ -40,6 +44,8 @@
 }
 
 .open {
+  direction: ltr;
+  text-align: start;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }

@@ -26,11 +26,8 @@
 }
 
 .name {
-  overflow: hidden;
   font-size: var(--f-meta);
   color: var(--text-strong);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .size {

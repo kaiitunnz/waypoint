@@ -1,0 +1,15 @@
+.name {
+  display: flex;
+  min-width: 0;
+  white-space: pre;
+}
+
+.head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tail {
+  flex: none;
+}

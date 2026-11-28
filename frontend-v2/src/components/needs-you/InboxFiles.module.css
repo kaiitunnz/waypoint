@@ -18,12 +18,9 @@
 }
 
 .name {
-  overflow: hidden;
   font-family: var(--mono);
   font-size: var(--f-code);
   color: var(--text-strong);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .type {
@@ -66,9 +63,6 @@
 
 .chipName {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .small {

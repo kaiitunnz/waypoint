@@ -4,6 +4,7 @@ import { attachmentUrl } from "@waypoint/web-core/api";
 import { typeTag } from "@waypoint/web-core/attachments";
 import type { InboxAttachmentRef } from "@waypoint/web-core/types";
 
+import { FileName } from "@/components/ui/FileName";
 import { FileThumb } from "@/components/ui/FileThumb";
 import { Icon } from "@/components/ui/Icon";
 import { useShellData } from "@/lib/shell-data";
@@ -24,7 +25,7 @@ export function FileTile({ attachment }: { attachment: InboxAttachmentRef }) {
     <a className={styles.tile} href={url} target="_blank" rel="noreferrer" title={name}>
       <FileThumb className={styles.thumb} src={preview} />
       <span className={styles.text}>
-        <span className={styles.name}>{name}</span>
+        <FileName name={name} className={styles.name} />
         <span className={styles.type}>{typeTag(name, image)}</span>
       </span>
       <span className={styles.open}>
@@ -38,7 +39,7 @@ function FileChip({ attachment }: { attachment: InboxAttachmentRef }) {
   const { url, name, preview } = useFile(attachment);
   return (
     <a className={styles.chip} href={url} target="_blank" rel="noreferrer" title={name}>
-      <span className={styles.chipName}>{name}</span>
+      <FileName name={name} className={styles.chipName} />
       <FileThumb className={styles.small} src={preview} />
     </a>
   );

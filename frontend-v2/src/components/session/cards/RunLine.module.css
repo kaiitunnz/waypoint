@@ -79,10 +79,13 @@
 }
 
 .twoLine .stats,
-.twoLine .glyphs,
-.twoLine .chev {
+.twoLine .glyphs {
   display: flex;
   align-items: center;
+  height: 18px;
+}
+
+.twoLine .chev {
   height: 18px;
 }
 

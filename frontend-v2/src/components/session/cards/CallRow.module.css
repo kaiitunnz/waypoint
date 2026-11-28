@@ -49,9 +49,9 @@
 }
 
 .shell {
+  composes: subject;
   position: relative;
   width: 100%;
-  min-width: 0;
 }
 
 /* In the glyph column, on the command's first line. */

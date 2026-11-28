@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  frameIsShort,
   isTextEntry,
   KEYBOARD_CLOSED,
   keyboardState,
@@ -202,8 +201,8 @@ describe("watchKeyboard", () => {
   });
 
   describe("in an iOS home-screen app", () => {
-    // The keyboard shrinks the layout viewport and scrolls the page, the fixed frame keeps its
-    // height, and dismissing the keyboard leaves the frame short of the screen.
+    // The keyboard shrinks the frame and scrolls the page; dismissing it leaves the frame short of
+    // the screen.
     it("reads open above the keyboard, closed after it is dismissed with the field still focused", () => {
       const { doc, viewport, frame, flush, seen, watch } = fakes();
       doc.activeElement = INPUT;
@@ -257,17 +256,6 @@ describe("watchKeyboard", () => {
     const onChange = vi.fn();
     watch(onChange)();
     expect(onChange).toHaveBeenCalledExactlyOnceWith(KEYBOARD_CLOSED);
-  });
-});
-
-describe("frameIsShort", () => {
-  it("is false for a frame that fills the screen, to the rounding", () => {
-    expect(frameIsShort(852, 852)).toBe(false);
-    expect(frameIsShort(852, 846)).toBe(false);
-  });
-
-  it("is true for the status bar's height left over, as an iOS home-screen app can leave it", () => {
-    expect(frameIsShort(852, 793)).toBe(true);
   });
 });
 

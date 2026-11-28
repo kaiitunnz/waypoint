@@ -1,7 +1,7 @@
-// The on-screen keyboard on touch. iOS Safari (a home-screen app too) and Android Chrome with
+// The on-screen keyboard on touch. iOS Safari and Android Chrome with
 // `interactive-widget=resizes-visual` shrink the visual viewport when it opens but leave the frame
 // that `dvh` and `position: fixed; inset: 0` fill, so the keyboard covers the bottom of every sheet
-// and screen.
+// and screen. An iOS home-screen app also shrinks that frame and scrolls the page.
 
 // Under this the gap between the viewports is rounding or a browser bar, not a keyboard.
 const TOLERANCE = 8;
@@ -117,12 +117,6 @@ export function watchKeyboard(
     doc.removeEventListener("focusin", schedule);
     doc.removeEventListener("focusout", schedule);
   };
-}
-
-// An iOS home-screen app can leave the frame the full-screen layouts fill shorter than the screen,
-// a dead band that nothing paints into. Under the tolerance the gap is rounding.
-export function frameIsShort(screenHeight: number, frameHeight: number): boolean {
-  return screenHeight - frameHeight >= TOLERANCE;
 }
 
 export interface KeyboardRoot {

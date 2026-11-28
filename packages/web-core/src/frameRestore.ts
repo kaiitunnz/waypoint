@@ -3,10 +3,17 @@
 // the document that tall until the frame is back. It tries once per shortfall: the shortfall has
 // to clear before it tries again.
 
+// Under this the gap between the frame and the screen is rounding.
+const TOLERANCE = 8;
+
 // Lets the keyboard finish closing before the frame is judged.
 const SETTLE_MS = 200;
 const POLL_MS = 50;
 const POLLS = 20;
+
+export function frameIsShort(screenHeight: number, frameHeight: number): boolean {
+  return screenHeight - frameHeight >= TOLERANCE;
+}
 
 export interface FrameRestoreEnv {
   // The frame is short of the screen and nothing else explains it, such as a keyboard that is up.
@@ -37,8 +44,12 @@ export function createFrameRestore(env: FrameRestoreEnv): FrameRestore {
   const poll = (left: number) => {
     timer = env.setTimeout(() => {
       timer = null;
-      if (left > 0 && env.isShort()) poll(left - 1);
-      else stop();
+      if (left > 0 && env.isShort()) {
+        poll(left - 1);
+        return;
+      }
+      stop();
+      if (!env.isShort()) tried = false;
     }, POLL_MS);
   };
 

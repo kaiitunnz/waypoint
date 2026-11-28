@@ -2,8 +2,8 @@
 
 import { useEffect } from "react";
 
-import { createFrameRestore } from "../frameRestore";
-import { frameIsShort, KEYBOARD_CLOSED, publishKeyboard, watchKeyboard } from "../keyboardInset";
+import { createFrameRestore, frameIsShort } from "../frameRestore";
+import { KEYBOARD_CLOSED, publishKeyboard, watchKeyboard } from "../keyboardInset";
 import { POINTER_QUERY } from "../layoutRules";
 import { revealFocusedField } from "../revealField";
 import { useMediaQuery } from "./use-media-query";
@@ -28,10 +28,11 @@ export function useKeyboardInsetVar() {
     // keyboard up.
     const frame = hiddenBox("position:fixed;inset:0;visibility:hidden;pointer-events:none");
     const screen = hiddenBox("position:fixed;top:0;height:100lvh;visibility:hidden;pointer-events:none");
-    const standalone = window.matchMedia("(display-mode: standalone)").matches;
+    // Only an iOS home-screen app leaves the frame short; `navigator.standalone` is iOS's own.
+    const homeScreenApp = (navigator as Navigator & { standalone?: boolean }).standalone === true;
     let open = false;
     const restore = createFrameRestore({
-      isShort: () => standalone && !open && frameIsShort(screen.getBoundingClientRect().height, frame.getBoundingClientRect().height),
+      isShort: () => homeScreenApp && !open && frameIsShort(screen.getBoundingClientRect().height, frame.getBoundingClientRect().height),
       lift: () => {
         // 3000px is taller than any screen.
         const tall = hiddenBox("position:absolute;top:0;left:0;width:1px;height:3000px;opacity:0;pointer-events:none");

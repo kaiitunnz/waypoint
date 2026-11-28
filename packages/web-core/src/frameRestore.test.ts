@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createFrameRestore } from "./frameRestore";
+import { createFrameRestore, frameIsShort } from "./frameRestore";
 
 function setup() {
   const state = { short: true, lifted: 0, released: 0 };
@@ -37,6 +37,17 @@ function setup() {
   };
   return { state, advance, restore: createFrameRestore(env), pending: () => timers.size };
 }
+
+describe("frameIsShort", () => {
+  it("is false for a frame that fills the screen, to the rounding", () => {
+    expect(frameIsShort(852, 852)).toBe(false);
+    expect(frameIsShort(852, 846)).toBe(false);
+  });
+
+  it("is true for the status bar's height left over, as an iOS home-screen app can leave it", () => {
+    expect(frameIsShort(852, 793)).toBe(true);
+  });
+});
 
 describe("createFrameRestore", () => {
   it("does nothing while the frame is not short", () => {
@@ -87,6 +98,29 @@ describe("createFrameRestore", () => {
     state.short = true;
     restore.check();
     advance(5000);
+    expect(state.lifted).toBe(2);
+  });
+
+  it("does not lift again, nor lose its poll, when checked while lifted and still short", () => {
+    const { state, advance, restore, pending } = setup();
+    restore.check();
+    advance(250);
+    restore.check();
+    advance(5000);
+    expect(state.lifted).toBe(1);
+    expect(state.released).toBe(1);
+    expect(pending()).toBe(0);
+  });
+
+  it("tries again for a later shortfall that no check saw clear", () => {
+    const { state, advance, restore } = setup();
+    restore.check();
+    advance(250);
+    state.short = false;
+    advance(60);
+    state.short = true;
+    restore.check();
+    advance(250);
     expect(state.lifted).toBe(2);
   });
 

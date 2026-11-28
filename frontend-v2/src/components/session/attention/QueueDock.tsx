@@ -37,7 +37,7 @@ export function QueueDock({ items, focus, ...handlers }: QueueDockProps) {
         open={open}
         onToggle={() => setOpen(!open)}
       />
-      <Flyout open={open} onClose={() => setOpen(false)} triggerRef={trigger} title={title} count={count} width={420} side="top" resizeKey="queue">
+      <Flyout open={open} onClose={() => setOpen(false)} triggerRef={trigger} title={title} count={count} width={420} align="right" side="top" resizeKey="queue">
         <QueueList items={items} focus={focus} {...handlers} />
       </Flyout>
     </>

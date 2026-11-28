@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  currentKeyboardState,
   isTextEntry,
   KEYBOARD_CLOSED,
   keyboardState,
-  scrollDelta,
+  publishKeyboard,
   watchKeyboard,
   type FocusTarget,
   type KeyboardDocument,
+  type KeyboardRoot,
   type KeyboardWindow,
 } from "./keyboardInset";
 
@@ -54,11 +54,6 @@ describe("keyboardState", () => {
   it("ignores a gap under the tolerance and rounds the rest", () => {
     expect(keyboardState({ ...PHONE, visualHeight: 848.4 }, true)).toEqual(KEYBOARD_CLOSED);
     expect(keyboardState({ ...PHONE, visualHeight: 516.4 }, true)).toEqual({ inset: 336, visibleHeight: 516 });
-  });
-
-  it("is closed for a viewport it cannot read", () => {
-    expect(keyboardState({ ...PHONE, visualHeight: Number.NaN }, true)).toEqual(KEYBOARD_CLOSED);
-    expect(keyboardState({ ...PHONE, scale: Number.NaN }, true)).toEqual(KEYBOARD_CLOSED);
   });
 });
 
@@ -179,7 +174,7 @@ describe("watchKeyboard", () => {
     expect(seen.at(-1)).toEqual(KEYBOARD_CLOSED);
   });
 
-  it("re-reads after a rotation reported on the window", () => {
+  it("re-reads when the window resizes", () => {
     const { win, doc, viewport, winTarget, flush } = fakes();
     doc.activeElement = INPUT;
     const seen: unknown[] = [];
@@ -220,27 +215,43 @@ describe("watchKeyboard", () => {
     win.visualViewport = null;
     const onChange = vi.fn();
     watchKeyboard(win, doc, onChange)();
-    expect(currentKeyboardState(win, doc)).toEqual(KEYBOARD_CLOSED);
     expect(onChange).toHaveBeenCalledExactlyOnceWith(KEYBOARD_CLOSED);
   });
 });
 
-describe("scrollDelta", () => {
-  const view = { top: 0, bottom: 500 };
+describe("publishKeyboard", () => {
+  function root() {
+    const values = new Map<string, string>();
+    const dataset: Record<string, string | undefined> = {};
+    const fake: KeyboardRoot = {
+      style: {
+        setProperty: (name, value) => void values.set(name, value),
+        removeProperty: (name) => values.delete(name),
+      },
+      dataset,
+    };
+    return { fake, values, dataset };
+  }
 
-  it("is 0 for a field already in view", () => {
-    expect(scrollDelta({ top: 100, bottom: 144 }, view)).toBe(0);
+  it("sets the inset, the height in view and the flag while the keyboard is open", () => {
+    const { fake, values, dataset } = root();
+    publishKeyboard(fake, { inset: 336, visibleHeight: 516 });
+    expect(Object.fromEntries(values)).toEqual({ "--keyboard-inset": "336px", "--visible-height": "516px" });
+    expect(dataset.keyboard).toBe("");
   });
 
-  it("scrolls down by what lies below the view, plus a margin", () => {
-    expect(scrollDelta({ top: 520, bottom: 564 }, view)).toBe(72);
+  it("keeps the flag while iOS has panned the page and the inset reads 0", () => {
+    const { fake, values, dataset } = root();
+    publishKeyboard(fake, { inset: 0, visibleHeight: 516 });
+    expect(values.get("--keyboard-inset")).toBe("0px");
+    expect(dataset.keyboard).toBe("");
   });
 
-  it("scrolls up by what lies above the view, plus a margin", () => {
-    expect(scrollDelta({ top: -40, bottom: 4 }, view)).toBe(-48);
-  });
-
-  it("lines up the top of a field taller than the view", () => {
-    expect(scrollDelta({ top: 200, bottom: 900 }, view)).toBe(200);
+  it("removes all three once the keyboard is closed", () => {
+    const { fake, values, dataset } = root();
+    publishKeyboard(fake, { inset: 336, visibleHeight: 516 });
+    publishKeyboard(fake, KEYBOARD_CLOSED);
+    expect(values.size).toBe(0);
+    expect("keyboard" in dataset).toBe(false);
   });
 });

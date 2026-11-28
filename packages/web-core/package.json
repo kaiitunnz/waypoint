@@ -33,6 +33,7 @@
     "./popoverSize": "./src/popoverSize.ts",
     "./recentHosts": "./src/recentHosts.ts",
     "./recurrence": "./src/recurrence.ts",
+    "./revealField": "./src/revealField.ts",
     "./scheduleTime": "./src/scheduleTime.ts",
     "./scheduledSheet": "./src/scheduledSheet.ts",
     "./search": "./src/search.ts",

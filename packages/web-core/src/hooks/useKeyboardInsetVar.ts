@@ -2,14 +2,13 @@
 
 import { useEffect } from "react";
 
-import { revealFocusedField, watchKeyboard } from "../keyboardInset";
+import { KEYBOARD_CLOSED, publishKeyboard, watchKeyboard } from "../keyboardInset";
 import { POINTER_QUERY } from "../layoutRules";
+import { revealFocusedField } from "../revealField";
 import { useMediaQuery } from "./use-media-query";
 
-// While the on-screen keyboard is up on touch, publishes on <html> how far it covers the bottom of the
-// layout viewport (`--keyboard-inset`), how much of it is in view (`--visible-height`) and
-// `data-keyboard`, and keeps the focused field in view. A pointer client has no on-screen keyboard
-// and keeps the stylesheet's defaults. Mount once, near the root.
+// Publishes the on-screen keyboard on <html> and keeps the focused field in view. Mount once, near
+// the root; a pointer client has no on-screen keyboard.
 export function useKeyboardInsetVar() {
   const pointer = useMediaQuery(POINTER_QUERY);
   useEffect(() => {
@@ -18,16 +17,8 @@ export function useKeyboardInsetVar() {
     let open = false;
     const stop = watchKeyboard(window, document, (state) => {
       open = state.visibleHeight !== null;
-      if (state.visibleHeight === null) {
-        root.style.removeProperty("--keyboard-inset");
-        root.style.removeProperty("--visible-height");
-        delete root.dataset.keyboard;
-        return;
-      }
-      root.style.setProperty("--keyboard-inset", `${state.inset}px`);
-      root.style.setProperty("--visible-height", `${state.visibleHeight}px`);
-      root.dataset.keyboard = "";
-      requestAnimationFrame(() => revealFocusedField(document, window));
+      publishKeyboard(root, state);
+      if (open) requestAnimationFrame(() => revealFocusedField(document, window));
     });
     // Moving between fields while the keyboard stays up.
     const onFocusIn = () => {
@@ -37,9 +28,7 @@ export function useKeyboardInsetVar() {
     return () => {
       stop();
       document.removeEventListener("focusin", onFocusIn);
-      root.style.removeProperty("--keyboard-inset");
-      root.style.removeProperty("--visible-height");
-      delete root.dataset.keyboard;
+      publishKeyboard(root, KEYBOARD_CLOSED);
     };
   }, [pointer]);
 }

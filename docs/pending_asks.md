@@ -97,9 +97,9 @@ For `claude_tty`
 
 Each string in an `approval`'s `tool_input` longer than 2,000 characters is cut
 to 2,000 characters plus `…`, and `tool_input_truncated` is true. Its
-`summary` and the strings in its `request`, and an item's `title` and `body`,
-are cut the same way. The full input stays in the session
-transcript. Plan text and question prompts are never cut.
+`summary`, the strings in its `request`, and an item's `title` and `body` are
+cut to the same length without setting that flag. The full input stays in the
+session transcript. Plan text and question prompts are never cut.
 
 ## What stays listed
 

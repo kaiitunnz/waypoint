@@ -9,6 +9,12 @@ const TOLERANCE = 8;
 // Above this the visual viewport is pinch-zoomed, and its height is not a keyboard.
 const ZOOMED = 1.01;
 
+// The visual viewport is shorter than the frame: a keyboard is up, or the page is pinch-zoomed.
+// Focus and zoom are no part of it.
+export function viewportShrunk(layoutHeight: number, visualHeight: number): boolean {
+  return layoutHeight - visualHeight >= TOLERANCE;
+}
+
 export interface ViewportMetrics {
   // The height of the frame the full-screen layouts fill: a fixed box with `inset: 0`.
   layoutHeight: number;
@@ -35,10 +41,8 @@ export const KEYBOARD_CLOSED: KeyboardState = { inset: 0, visibleHeight: null };
 // the page so the band's bottom meets the frame's bottom: that reads an inset of 0 with the
 // keyboard still open, and `visibleHeight` bounds anything taller than the band.
 export function keyboardState({ layoutHeight, visualHeight, visualOffsetTop, scale }: ViewportMetrics, typing: boolean): KeyboardState {
-  if (!typing || scale > ZOOMED) return KEYBOARD_CLOSED;
-  const lost = layoutHeight - visualHeight;
-  if (lost < TOLERANCE) return KEYBOARD_CLOSED;
-  return { inset: Math.max(0, Math.round(lost - visualOffsetTop)), visibleHeight: Math.round(visualHeight) };
+  if (!typing || scale > ZOOMED || !viewportShrunk(layoutHeight, visualHeight)) return KEYBOARD_CLOSED;
+  return { inset: Math.max(0, Math.round(layoutHeight - visualHeight - visualOffsetTop)), visibleHeight: Math.round(visualHeight) };
 }
 
 const NO_KEYBOARD = new Set(["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"]);
@@ -73,36 +77,40 @@ export interface KeyboardDocument extends Listenable {
   activeElement: FocusTarget | null;
 }
 
+export interface KeyboardReading {
+  state: KeyboardState;
+  focus: FocusTarget | null;
+}
+
+// Reports a reading now and after every viewport or focus event, a frame later and once however
+// many events arrive; the caller keeps what it needs of the previous one.
 export function watchKeyboard(
   win: KeyboardWindow,
   doc: KeyboardDocument,
   layoutHeight: () => number,
-  onChange: (state: KeyboardState) => void,
+  onRead: (reading: KeyboardReading) => void,
 ): () => void {
   const viewport = win.visualViewport;
   if (!viewport) {
-    onChange(KEYBOARD_CLOSED);
+    onRead({ state: KEYBOARD_CLOSED, focus: doc.activeElement });
     return () => {};
   }
-  const measure = () =>
-    keyboardState(
+  const read = (): KeyboardReading => ({
+    state: keyboardState(
       { layoutHeight: layoutHeight(), visualHeight: viewport.height, visualOffsetTop: viewport.offsetTop, scale: viewport.scale },
       isTextEntry(doc.activeElement),
-    );
+    ),
+    focus: doc.activeElement,
+  });
 
-  let last = measure();
-  onChange(last);
+  onRead(read());
   let frame: number | null = null;
-  const read = () => {
-    frame = null;
-    const next = measure();
-    if (next.inset === last.inset && next.visibleHeight === last.visibleHeight) return;
-    last = next;
-    onChange(next);
-  };
   // Moving from one field to the next blurs before it focuses, so the focus is read a frame later.
   const schedule = () => {
-    frame ??= win.requestAnimationFrame(read);
+    frame ??= win.requestAnimationFrame(() => {
+      frame = null;
+      onRead(read());
+    });
   };
   viewport.addEventListener("resize", schedule);
   viewport.addEventListener("scroll", schedule);

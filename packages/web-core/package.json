@@ -49,6 +49,7 @@
     "./storedFlag": "./src/storedFlag.ts",
     "./switcher": "./src/switcher.ts",
     "./tailAnchor": "./src/tailAnchor.ts",
+    "./touchViewport": "./src/touchViewport.ts",
     "./tailnet": "./src/tailnet.ts",
     "./tailnet-server": "./src/tailnet-server.ts",
     "./telemetry": "./src/telemetry.ts",

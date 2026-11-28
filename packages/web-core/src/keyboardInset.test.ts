@@ -5,9 +5,11 @@ import {
   KEYBOARD_CLOSED,
   keyboardState,
   publishKeyboard,
+  viewportShrunk,
   watchKeyboard,
   type FocusTarget,
   type KeyboardDocument,
+  type KeyboardReading,
   type KeyboardRoot,
   type KeyboardWindow,
 } from "./keyboardInset";
@@ -61,6 +63,18 @@ describe("keyboardState", () => {
   });
 });
 
+describe("viewportShrunk", () => {
+  it("is true when the visual viewport is shorter than the frame, whatever has focus", () => {
+    expect(viewportShrunk(793, 483)).toBe(true);
+    expect(viewportShrunk(852, 400)).toBe(true);
+  });
+
+  it("is false for a visual viewport that fills the frame, to the rounding", () => {
+    expect(viewportShrunk(793, 793)).toBe(false);
+    expect(viewportShrunk(793, 788)).toBe(false);
+  });
+});
+
 describe("isTextEntry", () => {
   const field = (tagName: string, extra: Partial<FocusTarget> = {}): FocusTarget => ({ tagName, ...extra });
 
@@ -107,10 +121,17 @@ function fakes() {
     removeEventListener: (type: string, listener: () => void) => docTarget.removeEventListener(type, listener),
   };
   const flush = () => frames.splice(0).forEach((frameCallback) => frameCallback());
+  const readings: KeyboardReading[] = [];
+  // The states in order, each reported once however many reads repeat it.
   const seen: unknown[] = [];
-  const watch = (onChange: (state: Parameters<Parameters<typeof watchKeyboard>[3]>[0]) => void = (state) => void seen.push(state)) =>
-    watchKeyboard(win as unknown as KeyboardWindow, doc as unknown as KeyboardDocument, () => frame.height, onChange);
-  return { win, doc, viewport, frame, winTarget, docTarget, flush, requested, seen, watch };
+  const record = (reading: KeyboardReading) => {
+    readings.push(reading);
+    const last = seen.at(-1) as { inset: number; visibleHeight: number | null } | undefined;
+    if (!last || last.inset !== reading.state.inset || last.visibleHeight !== reading.state.visibleHeight) seen.push(reading.state);
+  };
+  const watch = (onRead: (reading: KeyboardReading) => void = record) =>
+    watchKeyboard(win as unknown as KeyboardWindow, doc as unknown as KeyboardDocument, () => frame.height, onRead);
+  return { win, doc, viewport, frame, winTarget, docTarget, flush, requested, seen, readings, watch };
 }
 
 const INPUT: FocusTarget = { tagName: "INPUT", type: "text" };
@@ -140,6 +161,21 @@ describe("watchKeyboard", () => {
     viewport.dispatchEvent(new Event("resize"));
     flush();
     expect(seen.at(-1)).toEqual(KEYBOARD_CLOSED);
+  });
+
+  it("reports every read, with the focused element, even when the state has not changed", () => {
+    const { doc, winTarget, flush, readings, watch } = fakes();
+    watch();
+    doc.activeElement = INPUT;
+    winTarget.dispatchEvent(new Event("resize"));
+    flush();
+    winTarget.dispatchEvent(new Event("resize"));
+    flush();
+    expect(readings).toEqual([
+      { state: KEYBOARD_CLOSED, focus: null },
+      { state: KEYBOARD_CLOSED, focus: INPUT },
+      { state: KEYBOARD_CLOSED, focus: INPUT },
+    ]);
   });
 
   it("reads once a frame however many events arrive", () => {
@@ -229,33 +265,33 @@ describe("watchKeyboard", () => {
   it("stops reporting once unsubscribed", () => {
     const { doc, viewport, flush, watch } = fakes();
     doc.activeElement = INPUT;
-    const onChange = vi.fn();
-    const stop = watch(onChange);
+    const onRead = vi.fn();
+    const stop = watch(onRead);
     stop();
     viewport.height = 516;
     viewport.dispatchEvent(new Event("resize"));
     flush();
-    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onRead).toHaveBeenCalledTimes(1);
   });
 
   it("drops a read that was pending when it was unsubscribed", () => {
     const { doc, viewport, flush, watch } = fakes();
     doc.activeElement = INPUT;
-    const onChange = vi.fn();
-    const stop = watch(onChange);
+    const onRead = vi.fn();
+    const stop = watch(onRead);
     viewport.height = 516;
     viewport.dispatchEvent(new Event("resize"));
     stop();
     flush();
-    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onRead).toHaveBeenCalledTimes(1);
   });
 
   it("reports closed once for a browser without a visual viewport", () => {
     const { win, watch } = fakes();
     win.visualViewport = null as never;
-    const onChange = vi.fn();
-    watch(onChange)();
-    expect(onChange).toHaveBeenCalledExactlyOnceWith(KEYBOARD_CLOSED);
+    const onRead = vi.fn();
+    watch(onRead)();
+    expect(onRead).toHaveBeenCalledExactlyOnceWith({ state: KEYBOARD_CLOSED, focus: null });
   });
 });
 

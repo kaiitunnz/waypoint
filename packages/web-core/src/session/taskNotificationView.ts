@@ -81,6 +81,11 @@ export function taskNoteHeadline(view: TaskNotificationView): string {
   return view.summary || view.event || "Task notification";
 }
 
+// A card's line where its output stays folded: what happened, or the kind of task.
+export function taskNoteTitle(view: TaskNotificationView): string {
+  return view.summary || TASK_NOTIFICATION_BADGES[view.kind].label;
+}
+
 export interface NotificationRunSummary {
   // "Reports from 2 subagents, 1 background command".
   phrase: string;

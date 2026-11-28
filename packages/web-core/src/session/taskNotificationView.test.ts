@@ -5,6 +5,7 @@ import {
   reportUnavailableText,
   summarizeNotificationRun,
   taskNoteHeadline,
+  taskNoteTitle,
   taskStatusLamp,
   taskUsageParts,
 } from "./taskNotificationView";
@@ -91,5 +92,20 @@ describe("summarizeNotificationRun", () => {
     });
     expect(summarizeNotificationRun(["unknown"]).phrase).toBe("Reports from 1 task");
     expect(summarizeNotificationRun([]).phrase).toBe("Reports");
+  });
+});
+
+describe("taskNoteTitle", () => {
+  it("is the summary", () => {
+    const monitor = view({ kind: "monitor", summary: 'Monitor event: "builds"', event: "build failed" });
+    expect(taskNoteTitle(monitor)).toBe('Monitor event: "builds"');
+  });
+
+  it("names the kind of task, never its output, without a summary", () => {
+    const output = { event: "build failed", resultPreview: "done", note: "see the log" };
+    const titles = (["agent", "monitor", "background_command", "message", "unknown"] as const).map((kind) =>
+      taskNoteTitle(view({ kind, ...output })),
+    );
+    expect(titles).toEqual(["Agent", "Monitor", "Command", "Message", "Task"]);
   });
 });

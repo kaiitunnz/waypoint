@@ -4,7 +4,12 @@ import { useState } from "react";
 
 import type { TaskNotificationView } from "@waypoint/web-core/events";
 import { useReportPreview } from "@waypoint/web-core/hooks/useReportPreview";
-import { TASK_NOTIFICATION_BADGES, TASK_NOTIFICATION_FAMILIES, taskStatusLamp } from "@waypoint/web-core/session/taskNotificationView";
+import {
+  TASK_NOTIFICATION_BADGES,
+  TASK_NOTIFICATION_FAMILIES,
+  taskNoteTitle,
+  taskStatusLamp,
+} from "@waypoint/web-core/session/taskNotificationView";
 import { taskNoteBody, taskNoteReport, type ReportPreviewState } from "@waypoint/web-core/session/taskNoteBody";
 import type { EventRecord } from "@waypoint/web-core/types";
 
@@ -44,7 +49,7 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
   const report = taskNoteReport(view, event);
   const { specs, reportSpec, inlineReports } = report;
   const previewState = useReportPreview(credentials, reportSpec, open);
-  const { headline, teaser, usageParts, unavailable, hasBody, showLinks, supersedes, cutCaption } = taskNoteBody(view, report, previewState);
+  const { usageParts, unavailable, hasBody, showLinks, supersedes, cutCaption } = taskNoteBody(view, report, previewState);
 
   const caption = (body: string | null, truncated: boolean) => {
     const kind = cutCaption(body, truncated);
@@ -60,7 +65,7 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
         role="img"
         aria-label={badge.label}
       />
-      <span className={styles.headline}>{headline}</span>
+      <span className={styles.headline}>{taskNoteTitle(view)}</span>
       {lamp ? <span className={cx(styles.status, styles[lamp.tone])}>{lamp.label}</span> : null}
       <EventTime ts={event.ts} className={styles.time} />
     </>
@@ -76,7 +81,6 @@ export function TaskNote({ view, event }: { view: TaskNotificationView; event: E
       ) : (
         <div className={styles.head}>{header}</div>
       )}
-      {teaser && !open ? <p className={styles.teaser}>{teaser}</p> : null}
       {open ? (
         <div className={styles.body}>
           {view.resultPreview && !supersedes(view.resultPreview) ? <FoldedText text={view.resultPreview} className={styles.result} /> : null}

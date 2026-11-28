@@ -78,13 +78,60 @@ describe("createFrameRestore", () => {
     expect(state.lifted).toBe(1);
   });
 
-  it("tries a second time when the first lift never brings the frame back, then gives up", () => {
+  it("tries a second time 250ms after a first lift that never brings the frame back, then gives up", () => {
     const { state, advance, restore, pending } = setup();
     restore.check();
-    advance(5000);
+    advance(1100);
+    expect(state.lifted).toBe(1);
+    expect(state.released).toBe(1);
+    expect(pending()).toBe(1);
+    advance(150);
+    expect(state.lifted).toBe(1);
+    advance(100);
     expect(state.lifted).toBe(2);
+    advance(5000);
     expect(state.released).toBe(2);
     expect(pending()).toBe(0);
+  });
+
+  it("cancels the retry when a check finds the frame back while it waits", () => {
+    const { state, advance, restore, pending } = setup();
+    restore.check();
+    advance(1100);
+    state.short = false;
+    restore.check();
+    expect(pending()).toBe(0);
+    advance(5000);
+    expect(state.lifted).toBe(1);
+  });
+
+  it("drops the retry when the frame is back by the time it runs", () => {
+    const { state, advance, restore } = setup();
+    restore.check();
+    advance(1100);
+    state.short = false;
+    advance(5000);
+    expect(state.lifted).toBe(1);
+  });
+
+  it("leaves the retry alone when a check finds the frame still short while it waits", () => {
+    const { state, advance, restore, pending } = setup();
+    restore.check();
+    advance(1100);
+    restore.check();
+    expect(pending()).toBe(1);
+    advance(5000);
+    expect(state.lifted).toBe(2);
+  });
+
+  it("stops the retry on dispose while it waits", () => {
+    const { state, advance, restore, pending } = setup();
+    restore.check();
+    advance(1100);
+    restore.dispose();
+    expect(pending()).toBe(0);
+    advance(5000);
+    expect(state.lifted).toBe(1);
   });
 
   it("does not try a third time", () => {
